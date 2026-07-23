@@ -1,0 +1,95 @@
+---
+interface Props {
+  title: string;
+  description?: string;
+}
+const { title, description = "tman — supervised process runner that caps, culls, and reaps runaway test processes." } = Astro.props;
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content={description} />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <title>{title} — tman</title>
+    <style>
+      :root {
+        --bg: #0d1117;
+        --bg-alt: #161b22;
+        --border: #30363d;
+        --fg: #e6edf3;
+        --fg-dim: #8b949e;
+        --accent: #58d68d;
+        --accent-2: #f0b429;
+        --mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        line-height: 1.6;
+      }
+      nav {
+        display: flex;
+        align-items: center;
+        gap: 1.5rem;
+        padding: 1rem 2rem;
+        border-bottom: 1px solid var(--border);
+        position: sticky;
+        top: 0;
+        background: var(--bg);
+      }
+      nav .brand { font-family: var(--mono); font-weight: 700; font-size: 1.25rem; color: var(--accent); text-decoration: none; }
+      nav a { color: var(--fg-dim); text-decoration: none; }
+      nav a:hover { color: var(--fg); }
+      nav .spacer { flex: 1; }
+      main { max-width: 960px; margin: 0 auto; padding: 2rem; }
+      code, pre { font-family: var(--mono); }
+      pre {
+        background: var(--bg-alt);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 1rem 1.25rem;
+        overflow-x: auto;
+        font-size: 0.9rem;
+      }
+      pre .c { color: var(--fg-dim); }
+      pre .p { color: var(--accent); }
+      :not(pre) > code {
+        background: var(--bg-alt);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        padding: 0.1em 0.35em;
+        font-size: 0.88em;
+      }
+      h1, h2, h3 { line-height: 1.25; }
+      h2 { margin-top: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.3rem; }
+      a { color: var(--accent); }
+      table { border-collapse: collapse; width: 100%; font-size: 0.92rem; }
+      th, td { text-align: left; padding: 0.45rem 0.75rem; border-bottom: 1px solid var(--border); }
+      th { color: var(--fg-dim); font-weight: 600; }
+      footer {
+        border-top: 1px solid var(--border);
+        color: var(--fg-dim);
+        text-align: center;
+        padding: 2rem;
+        font-size: 0.85rem;
+      }
+    </style>
+  </head>
+  <body>
+    <nav>
+      <a class="brand" href="/">tman</a>
+      <a href="/docs">docs</a>
+      <span class="spacer"></span>
+      <a href="https://github.com/standardbeagle/tman">github</a>
+    </nav>
+    <main>
+      <slot />
+    </main>
+    <footer>tman — MIT licensed · built with .NET NativeAOT</footer>
+  </body>
+</html>

@@ -1,0 +1,87 @@
+---
+import Base from "../layouts/Base.astro";
+---
+<Base title="docs">
+  <h1>docs</h1>
+
+  <h2>commands</h2>
+  <table>
+    <tr><th>command</th><th>what it does</th></tr>
+    <tr><td><code>tman run [flags] -- &lt;cmd&gt; [args]</code></td><td>run a process under supervision</td></tr>
+    <tr><td><code>tman run --alias &lt;name&gt; [args]</code></td><td>run an alias from <code>.tman.kdl</code></td></tr>
+    <tr><td><code>tman &lt;alias&gt; [args]</code></td><td>shorthand for an alias</td></tr>
+    <tr><td><code>tman list [--all]</code></td><td>list live runs (or all records)</td></tr>
+    <tr><td><code>tman kill &lt;id|name|all&gt; [--stale-only]</code></td><td>kill run(s) by id, name, or everything</td></tr>
+    <tr><td><code>tman clean</code></td><td>reap orphans, prune records older than 24h</td></tr>
+    <tr><td><code>tman status [id|name]</code></td><td>summary counts or a single run's JSON record</td></tr>
+    <tr><td><code>tman init [--shims] [--gitignore]</code></td><td>scaffold <code>.tman.kdl</code> (+ repo-root shims)</td></tr>
+  </table>
+
+  <h2>run flags</h2>
+  <table>
+    <tr><th>flag</th><th>default</th><th>what it does</th></tr>
+    <tr><td><code>--name N</code></td><td>—</td><td>dedup lock; refuses to start if a live run has the same name</td></tr>
+    <tr><td><code>--replace</code></td><td>off</td><td>with <code>--name</code>: kill the existing run first</td></tr>
+    <tr><td><code>--max-time T</code></td><td>10m</td><td>wall-clock limit → kill, exit 124</td></tr>
+    <tr><td><code>--stall T</code></td><td>60s</td><td>no stdout/stderr for T → kill, exit 125</td></tr>
+    <tr><td><code>--max-mem M</code></td><td>2048</td><td>working set above M (MB, or <code>2g</code>) → cull, exit 126</td></tr>
+    <tr><td><code>--max-cpu P</code></td><td>95</td><td>CPU above P% for 3 consecutive seconds → cull, exit 126</td></tr>
+    <tr><td><code>--max-parallel N</code></td><td>2</td><td>queue while N live runs are active</td></tr>
+    <tr><td><code>--queue-timeout T</code></td><td>5m</td><td>give up waiting for a parallel slot</td></tr>
+  </table>
+  <p>Durations accept <code>ms</code>, <code>s</code>, <code>m</code>, <code>h</code> (e.g. <code>90s</code>, <code>10m</code>). Cap precedence: CLI flags &gt; alias block &gt; <code>defaults</code> block &gt; built-ins.</p>
+
+  <h2>orphan reaping</h2>
+  <p>
+    Every <code>tman</code> invocation first scans the run store (<code>~/.tman/runs</code>, override with
+    <code>TMAN_HOME</code>). If a recorded run's runner process is dead but its child is still alive — the
+    classic agent-got-distracted or machine-suspended case — the child's entire process tree is killed and
+    the record marked <code>reaped</code>. PID reuse is guarded by comparing process start times.
+  </p>
+
+  <h2>.tman.kdl</h2>
+  <p>Resolved from the current directory upward (like <code>.git</code>). <code>tman init</code> auto-detects npm, pytest, go, and make projects.</p>
+  <pre>defaults &#123;
+    max-time "10m"
+    stall "60s"
+    max-mem 2048      <span class="c">// MB</span>
+    max-cpu 95        <span class="c">// percent, sustained</span>
+    max-parallel 2
+&#125;
+
+alias "test" &#123;
+    command "npm"
+    args "run" "test"
+    max-time "10m"
+&#125;
+
+alias "e2e" &#123;
+    command "pytest"
+    args "tests/e2e" "--tb=short"
+    max-time "30m"
+    max-mem 4096
+&#125;</pre>
+
+  <h2>shims</h2>
+  <p>
+    <code>tman init --shims</code> writes an executable per alias at the repo root (<code>./test</code>,
+    <code>./e2e</code>, plus <code>.cmd</code> on Windows) that simply <code>exec tman run --alias …</code>.
+    Existing muscle memory and agent habits keep working; supervision is transparent.
+    <code>--gitignore</code> appends the shims to <code>.gitignore</code>.
+  </p>
+
+  <h2>exit codes</h2>
+  <table>
+    <tr><th>code</th><th>meaning</th></tr>
+    <tr><td>0–n</td><td>child's own exit code on normal completion</td></tr>
+    <tr><td>124</td><td>timed out (<code>--max-time</code>)</td></tr>
+    <tr><td>125</td><td>stalled (<code>--stall</code>)</td></tr>
+    <tr><td>126</td><td>culled (<code>--max-mem</code> / <code>--max-cpu</code>)</td></tr>
+    <tr><td>127</td><td>command / config not found</td></tr>
+    <tr><td>130</td><td>killed (dedup refusal, queue timeout, <code>tman kill</code>)</td></tr>
+  </table>
+
+  <h2>building</h2>
+  <pre><span class="c"># NativeAOT, zero external dependencies, .NET 10 SDK</span>
+dotnet publish -c Release -r linux-x64   <span class="c"># win-x64, osx-arm64, linux-arm64</span></pre>
+</Base>

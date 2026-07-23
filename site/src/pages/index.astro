@@ -1,0 +1,72 @@
+---
+import Base from "../layouts/Base.astro";
+---
+<Base title="runaway tests, meet the reaper">
+  <style>
+    .hero { text-align: center; padding: 3.5rem 0 2.5rem; }
+    .hero h1 { font-size: 2.6rem; margin: 0 0 1rem; }
+    .hero h1 em { color: var(--accent); font-style: normal; }
+    .hero p { color: var(--fg-dim); font-size: 1.15rem; max-width: 640px; margin: 0 auto 2rem; }
+    .cta { display: inline-block; background: var(--accent); color: #0d1117; font-weight: 700; padding: 0.7rem 1.6rem; border-radius: 8px; text-decoration: none; }
+    .cta:hover { filter: brightness(1.1); }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1.25rem; margin: 2rem 0; }
+    .card { background: var(--bg-alt); border: 1px solid var(--border); border-radius: 10px; padding: 1.25rem 1.4rem; }
+    .card h3 { margin: 0 0 0.5rem; color: var(--accent); font-family: var(--mono); font-size: 1rem; }
+    .card p { margin: 0; color: var(--fg-dim); font-size: 0.92rem; }
+    .badge { font-family: var(--mono); font-size: 0.8rem; color: var(--accent-2); }
+  </style>
+
+  <section class="hero">
+    <h1>your test agents <em>will</em> run away.<br />tman won't let them.</h1>
+    <p>
+      A single NativeAOT binary that supervises every process it launches — capping time,
+      memory, and CPU, killing stalled runs, and automatically reaping the orphans your
+      LLM agents leave behind when they hang, get distracted, or your machine suspends.
+    </p>
+    <a class="cta" href="/docs">get started</a>
+  </section>
+
+  <pre><span class="p">$</span> tman run --max-time 10m --max-mem 2g -- npm test
+<span class="c"># hangs? killed. leaks? culled. runner dies? orphan reaped next invocation.</span></pre>
+
+  <div class="grid">
+    <div class="card">
+      <h3>--max-time / --stall</h3>
+      <p>Wall-clock limits and no-output stall detection. A silent, hung test is killed and reported — exit 124 or 125.</p>
+    </div>
+    <div class="card">
+      <h3>--max-mem / --max-cpu</h3>
+      <p>Resource culling. Breach the memory ceiling or sustain high CPU and the whole process tree is killed — exit 126.</p>
+    </div>
+    <div class="card">
+      <h3>orphan reaper</h3>
+      <p>Machine suspended? Agent crashed? Every tman command reaps children whose runner died. Nothing drains your system overnight.</p>
+    </div>
+    <div class="card">
+      <h3>--max-parallel</h3>
+      <p>Resource-gated multi-process runs. Excess runs queue with a timeout instead of stampeding your cores.</p>
+    </div>
+    <div class="card">
+      <h3>--name dedup</h3>
+      <p>Duplicate processes never start. Same-name runs refuse by default, or <code>--replace</code> kills the old one first.</p>
+    </div>
+    <div class="card">
+      <h3>.tman.kdl aliases</h3>
+      <p>Folder-level aliases with per-alias caps. Repo-root shims make <code>./test</code> route through supervision transparently.</p>
+    </div>
+  </div>
+
+  <h2>install</h2>
+  <pre><span class="c"># requires .NET 10 SDK — one native binary, zero runtime deps</span>
+<span class="p">$</span> git clone https://github.com/standardbeagle/tman
+<span class="p">$</span> cd tman
+<span class="p">$</span> dotnet publish -c Release -r linux-x64    <span class="c"># or win-x64, osx-arm64, linux-arm64</span>
+<span class="p">$</span> cp bin/Release/net10.0/*/publish/tman ~/.local/bin/</pre>
+
+  <h2>adopt in a project</h2>
+  <pre><span class="p">$</span> cd your-project
+<span class="p">$</span> tman init --shims --gitignore   <span class="c"># auto-detects npm / pytest / go / make</span>
+<span class="p">$</span> ./test                          <span class="c"># now supervised: 10m wall, 60s stall, 2GB, 95% cpu</span></pre>
+
+  <p><span class="badge">~3.8 MB native binary · no dependencies · cross-platform</span></p>
+</Base>
