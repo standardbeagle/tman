@@ -1,6 +1,6 @@
 @{
     RootModule        = 'tman.psm1'
-    ModuleVersion     = '0.1.0'
+    ModuleVersion     = '0.1.1'
     GUID              = '7f3a2c1e-9b4d-4e5f-a6c8-1d2e3f4a5b6c'
     Author            = 'standardbeagle'
     CompanyName       = 'standardbeagle'

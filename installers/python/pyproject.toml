@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tman"
-version = "0.1.0"
+version = "0.1.1"
 description = "Supervised process/test runner — caps, culls, and reaps runaway processes (native binary)"
 readme = "README.md"
 license = { text = "MIT" }
