@@ -12,4 +12,9 @@
     <Version>0.1.1</Version>
   </PropertyGroup>
 
+  <ItemGroup>
+    <Compile Remove="tests/**/*.cs" />
+    <InternalsVisibleTo Include="Tman.Tests" />
+  </ItemGroup>
+
 </Project>
