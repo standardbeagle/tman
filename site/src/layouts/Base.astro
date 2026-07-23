@@ -4,6 +4,7 @@ interface Props {
   description?: string;
 }
 const { title, description = "tman — supervised process runner that caps, culls, and reaps runaway test processes." } = Astro.props;
+const base = import.meta.env.BASE_URL;
 ---
 <!doctype html>
 <html lang="en">
@@ -11,7 +12,7 @@ const { title, description = "tman — supervised process runner that caps, cull
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="description" content={description} />
-    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href={`${base}/favicon.svg`} type="image/svg+xml" />
     <title>{title} — tman</title>
     <style>
       :root {
@@ -82,8 +83,8 @@ const { title, description = "tman — supervised process runner that caps, cull
   </head>
   <body>
     <nav>
-      <a class="brand" href="/">tman</a>
-      <a href="/docs">docs</a>
+      <a class="brand" href={`${base}/`}>tman</a>
+      <a href={`${base}/docs`}>docs</a>
       <span class="spacer"></span>
       <a href="https://github.com/standardbeagle/tman">github</a>
     </nav>

@@ -1,5 +1,6 @@
 ---
 import Base from "../layouts/Base.astro";
+const base = import.meta.env.BASE_URL;
 ---
 <Base title="runaway tests, meet the reaper">
   <style>
@@ -23,8 +24,10 @@ import Base from "../layouts/Base.astro";
       memory, and CPU, killing stalled runs, and automatically reaping the orphans your
       LLM agents leave behind when they hang, get distracted, or your machine suspends.
     </p>
-    <a class="cta" href="/docs">get started</a>
+    <a class="cta" href={`${base}/docs`}>get started</a>
   </section>
+
+  <img src="https://raw.githubusercontent.com/standardbeagle/tman/main/assets/demo.gif" alt="tman demo: init, supervised test run, hang kill, dedup refusal" style="width:100%;border-radius:10px;border:1px solid var(--border);" />
 
   <pre><span class="p">$</span> tman run --max-time 10m --max-mem 2g -- npm test
 <span class="c"># hangs? killed. leaks? culled. runner dies? orphan reaped next invocation.</span></pre>
