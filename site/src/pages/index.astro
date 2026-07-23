@@ -60,11 +60,13 @@ const base = import.meta.env.BASE_URL;
   </div>
 
   <h2>install</h2>
-  <pre><span class="c"># requires .NET 10 SDK — one native binary, zero runtime deps</span>
-<span class="p">$</span> git clone https://github.com/standardbeagle/tman
-<span class="p">$</span> cd tman
-<span class="p">$</span> dotnet publish -c Release -r linux-x64    <span class="c"># or win-x64, osx-arm64, linux-arm64</span>
-<span class="p">$</span> cp bin/Release/net10.0/*/publish/tman ~/.local/bin/</pre>
+  <pre><span class="c"># npm</span>
+<span class="p">$</span> npm install -g @standardbeagle/tman
+
+<span class="c"># or the shell one-liner</span>
+<span class="p">$</span> curl -fsSL https://raw.githubusercontent.com/standardbeagle/tman/main/install.sh | sh
+
+<span class="c"># prebuilt binaries for linux-x64/arm64, win-x64, osx-arm64/x64 on every release</span></pre>
 
   <h2>adopt in a project</h2>
   <pre><span class="p">$</span> cd your-project

@@ -23,25 +23,9 @@ LLM agents start test suites and then hang, get distracted, or survive a machine
 npm install -g @standardbeagle/tman
 ```
 
-**uv / pip**
-```sh
-uv tool install tman
-```
-
-**PowerShell Gallery**
-```powershell
-Install-Module tman -Scope CurrentUser
-Install-Tman   # downloads the native binary
-```
-
 **shell one-liner**
 ```sh
 curl -fsSL https://raw.githubusercontent.com/standardbeagle/tman/main/install.sh | sh
-```
-
-**Windows one-liner**
-```powershell
-irm https://raw.githubusercontent.com/standardbeagle/tman/main/install.ps1 | iex
 ```
 
 **from source** — requires the [.NET 10 SDK](https://dot.net):
