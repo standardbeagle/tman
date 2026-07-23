@@ -1,0 +1,23 @@
+{
+  "name": "@standardbeagle/tman",
+  "version": "0.1.0",
+  "description": "Supervised process/test runner — caps, culls, and reaps runaway processes (native binary)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/standardbeagle/tman.git"
+  },
+  "bin": {
+    "tman": "bin/tman.js"
+  },
+  "scripts": {
+    "postinstall": "node install.js"
+  },
+  "files": [
+    "bin",
+    "install.js"
+  ],
+  "engines": {
+    "node": ">=18"
+  }
+}

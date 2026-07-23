@@ -1,0 +1,17 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "tman"
+version = "0.1.0"
+description = "Supervised process/test runner — caps, culls, and reaps runaway processes (native binary)"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.9"
+
+[project.scripts]
+tman = "tman._run:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tman"]

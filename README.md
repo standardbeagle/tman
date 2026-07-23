@@ -18,14 +18,41 @@ LLM agents start test suites and then hang, get distracted, or survive a machine
 
 ## Install
 
-Requires the [.NET 10 SDK](https://dot.net) to build:
+**npm**
+```sh
+npm install -g @standardbeagle/tman
+```
 
+**uv / pip**
+```sh
+uv tool install tman
+```
+
+**PowerShell Gallery**
+```powershell
+Install-Module tman -Scope CurrentUser
+Install-Tman   # downloads the native binary
+```
+
+**shell one-liner**
+```sh
+curl -fsSL https://raw.githubusercontent.com/standardbeagle/tman/main/install.sh | sh
+```
+
+**Windows one-liner**
+```powershell
+irm https://raw.githubusercontent.com/standardbeagle/tman/main/install.ps1 | iex
+```
+
+**from source** — requires the [.NET 10 SDK](https://dot.net):
 ```sh
 git clone https://github.com/standardbeagle/tman
 cd tman
 dotnet publish -c Release -r linux-x64   # or win-x64, osx-arm64, linux-arm64
 cp bin/Release/net10.0/*/publish/tman ~/.local/bin/
 ```
+
+Prebuilt binaries are attached to every [GitHub release](https://github.com/standardbeagle/tman/releases) for linux-x64, linux-arm64, win-x64, osx-arm64, and osx-x64.
 
 ## Quick start
 

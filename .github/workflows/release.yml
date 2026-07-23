@@ -1,0 +1,115 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { rid: linux-x64,  os: ubuntu-latest,   ext: tar.gz }
+          - { rid: linux-arm64, os: ubuntu-24.04-arm, ext: tar.gz }
+          - { rid: win-x64,    os: windows-latest,  ext: zip }
+          - { rid: osx-arm64,  os: macos-14,        ext: tar.gz }
+          - { rid: osx-x64,    os: macos-13,        ext: tar.gz }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: install linux AOT prerequisites
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y clang zlib1g-dev
+      - name: publish native binary
+        run: dotnet publish -c Release -r ${{ matrix.rid }} --self-contained
+      - name: package
+        shell: bash
+        run: |
+          set -euo pipefail
+          PUB="bin/Release/net10.0/${{ matrix.rid }}/publish"
+          mkdir -p artifacts
+          if [ "${{ matrix.ext }}" = "zip" ]; then
+            (cd "$PUB" && 7z a "$OLDPWD/artifacts/tman-${{ matrix.rid }}.zip" tman.exe)
+          else
+            (cd "$PUB" && tar -czf "$OLDPWD/artifacts/tman-${{ matrix.rid }}.tar.gz" tman)
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tman-${{ matrix.rid }}
+          path: artifacts/
+          retention-days: 1
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: tman-*
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: tman-*
+          generate_release_notes: true
+
+  publish-npm:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - name: publish
+        working-directory: installers/npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -e
+          if [ -z "$NODE_AUTH_TOKEN" ]; then echo "NPM_TOKEN not set; skipping"; exit 0; fi
+          npm version "${GITHUB_REF_NAME#v}" --no-git-tag-version --allow-same-version
+          npm publish --access public
+
+  publish-pypi:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: publish
+        working-directory: installers/python
+        env:
+          PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
+        run: |
+          set -e
+          if [ -z "$PYPI_TOKEN" ]; then echo "PYPI_TOKEN not set; skipping"; exit 0; fi
+          sed -i "s/^version = \".*\"/version = \"${GITHUB_REF_NAME#v}\"/" pyproject.toml
+          pip install build twine
+          python -m build
+          twine upload -u __token__ -p "$PYPI_TOKEN" dist/*
+
+  publish-psgallery:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: publish
+        working-directory: installers/psgallery
+        env:
+          PSGALLERY_API_KEY: ${{ secrets.PSGALLERY_API_KEY }}
+        shell: pwsh
+        run: |
+          if ([string]::IsNullOrEmpty($env:PSGALLERY_API_KEY)) { Write-Host "PSGALLERY_API_KEY not set; skipping"; exit 0 }
+          $v = $env:GITHUB_REF_NAME -replace '^v', ''
+          (Get-Content tman.psd1) -replace "ModuleVersion = '.*'", "ModuleVersion = '$v'" | Set-Content tman.psd1
+          Publish-Module -Path . -NuGetApiKey $env:PSGALLERY_API_KEY
