@@ -2,13 +2,25 @@ namespace Tman;
 
 public static class Shim
 {
-    public static List<string> Generate(string dir, IEnumerable<string> aliasNames)
+    public static (List<string> Written, List<string> Skipped) Generate(string dir, IEnumerable<string> aliasNames)
     {
         var written = new List<string>();
+        var skipped = new List<string>();
         foreach (var name in aliasNames)
         {
             var shPath = Path.Combine(dir, name);
-            File.WriteAllText(shPath, $"#!/usr/bin/env sh\nexec tman run --alias {name} -- \"$@\"\n");
+            if (Directory.Exists(shPath))
+            {
+                skipped.Add(shPath);
+                continue;
+            }
+            var content = $"#!/usr/bin/env sh\nexec tman run --alias {name} -- \"$@\"\n";
+            if (File.Exists(shPath) && File.ReadAllText(shPath) != content)
+            {
+                skipped.Add(shPath);
+                continue;
+            }
+            File.WriteAllText(shPath, content);
             if (!OperatingSystem.IsWindows())
             {
                 var mode = File.GetUnixFileMode(shPath);
@@ -23,7 +35,7 @@ public static class Shim
                 written.Add(cmdPath);
             }
         }
-        return written;
+        return (written, skipped);
     }
 
     public static bool AppendGitignore(string dir, IEnumerable<string> aliasNames)

@@ -257,7 +257,7 @@ public static class Program
         return 0;
     }
 
-    static int CmdInit(string[] argv)
+    internal static int CmdInit(string[] argv)
     {
         var dir = Directory.GetCurrentDirectory();
         var path = Path.Combine(dir, Config.FileName);
@@ -280,17 +280,20 @@ public static class Program
             : new List<string> { "test" };
         if (withShims)
         {
-            foreach (var p in Shim.Generate(dir, names))
+            var (written, skipped) = Shim.Generate(dir, names);
+            foreach (var p in written)
                 Console.WriteLine($"tman: wrote shim {p}");
+            foreach (var p in skipped)
+                Console.WriteLine($"tman: skipped shim {p} (path already exists; use 'tman run' instead)");
         }
         if (withGitignore && Shim.AppendGitignore(dir, names))
             Console.WriteLine("tman: updated .gitignore");
         return 0;
     }
 
-    sealed record DetectedAlias(string Name, string Command, string[] Args);
+    internal sealed record DetectedAlias(string Name, string Command, string[] Args);
 
-    static List<DetectedAlias> DetectAliases(string dir)
+    internal static List<DetectedAlias> DetectAliases(string dir)
     {
         var found = new List<DetectedAlias>();
 
@@ -328,7 +331,7 @@ public static class Program
             .ToList();
     }
 
-    static string RenderConfig(List<DetectedAlias> detected)
+    internal static string RenderConfig(List<DetectedAlias> detected)
     {
         var sb = new System.Text.StringBuilder();
         sb.AppendLine("defaults {");
