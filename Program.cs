@@ -4,6 +4,18 @@ namespace Tman;
 
 public static class Program
 {
+    static string Version
+    {
+        get
+        {
+            var v = System.Reflection.Assembly.GetExecutingAssembly()
+                .GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>()
+                ?.InformationalVersion ?? "dev";
+            var plus = v.IndexOf('+');
+            return plus > 0 ? v[..plus] : v;
+        }
+    }
+
     public static async Task<int> Main(string[] argv)
     {
         Store.EnsureDirs();
@@ -23,7 +35,7 @@ public static class Program
                 case "status": return CmdStatus(rest);
                 case "init": return CmdInit(rest);
                 case "--help" or "-h" or "help": PrintUsage(); return 0;
-                case "--version" or "-v": Console.WriteLine("tman 0.1.0"); return 0;
+                case "--version" or "-v": Console.WriteLine($"tman {Version}"); return 0;
                 default:
                     {
                         var config = Config.Load();
