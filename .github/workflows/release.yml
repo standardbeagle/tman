@@ -27,6 +27,8 @@ jobs:
       - name: install linux AOT prerequisites
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y clang zlib1g-dev
+      - name: test
+        run: dotnet test tests/Tman.Tests/Tman.Tests.csproj
       - name: publish native binary
         run: dotnet publish -c Release -r ${{ matrix.rid }} --self-contained
       - name: package
