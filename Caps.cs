@@ -13,7 +13,6 @@ public sealed record Caps
 
     public static readonly Caps SaneDefaults = new()
     {
-        MaxTime = TimeSpan.FromMinutes(10),
         Stall = TimeSpan.FromSeconds(60),
         MaxMemMb = 2048,
         MaxCpuPct = 95,

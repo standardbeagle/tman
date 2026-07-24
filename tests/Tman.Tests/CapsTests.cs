@@ -73,7 +73,7 @@ public class CapsParseTests
     public void EffectiveCaps_FallsBackToSaneDefaults()
     {
         var caps = Config.EffectiveCaps(null, new Caps(), null);
-        Assert.Equal(Caps.SaneDefaults.MaxTime, caps.MaxTime);
+        Assert.Null(caps.MaxTime);
         Assert.Equal(Caps.SaneDefaults.MaxParallel, caps.MaxParallel);
     }
 }

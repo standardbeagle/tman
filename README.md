@@ -47,7 +47,7 @@ tman run --max-time 10m --max-mem 2g -- npm test
 # adopt in a project (auto-detects npm / pytest / go / make)
 cd your-project
 tman init --shims --gitignore
-./test        # now supervised: 10m wall, 60s stall, 2GB, 95% cpu
+./test        # now supervised: 60s stall, 2GB, 95% cpu, dedup + parallel gating
 ```
 
 ## Commands
@@ -68,7 +68,7 @@ tman init --shims --gitignore
 | --- | --- | --- |
 | `--name N` | — | dedup lock; refuses if a live run has the same name |
 | `--replace` | off | with `--name`: kill the existing run first |
-| `--max-time T` | 10m | wall-clock limit → kill, exit 124 |
+| `--max-time T` | — | wall-clock limit → kill, exit 124 |
 | `--stall T` | 60s | no output for T → kill, exit 125 |
 | `--max-mem M` | 2048 | memory ceiling (MB or `2g`) → cull, exit 126 |
 | `--max-cpu P` | 95 | sustained CPU% → cull, exit 126 |
@@ -83,7 +83,6 @@ Resolved from the current directory upward, like `.git`:
 
 ```kdl
 defaults {
-    max-time "10m"
     stall "60s"
     max-mem 2048      // MB
     max-cpu 95        // percent, sustained

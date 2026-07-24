@@ -71,7 +71,7 @@ const base = import.meta.env.BASE_URL;
   <h2>adopt in a project</h2>
   <pre><span class="p">$</span> cd your-project
 <span class="p">$</span> tman init --shims --gitignore   <span class="c"># auto-detects npm / pytest / go / make</span>
-<span class="p">$</span> ./test                          <span class="c"># now supervised: 10m wall, 60s stall, 2GB, 95% cpu</span></pre>
+<span class="p">$</span> ./test                          <span class="c"># now supervised: 60s stall, 2GB, 95% cpu, dedup + parallel gating</span></pre>
 
   <p><span class="badge">~3.8 MB native binary · no dependencies · cross-platform</span></p>
 </Base>

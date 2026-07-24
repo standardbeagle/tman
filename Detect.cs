@@ -46,7 +46,6 @@ public static partial class Program
     {
         var sb = new System.Text.StringBuilder();
         sb.AppendLine("defaults {");
-        sb.AppendLine("    max-time \"10m\"");
         sb.AppendLine("    stall \"60s\"");
         sb.AppendLine("    max-mem 2048");
         sb.AppendLine("    max-cpu 95");
