@@ -30,6 +30,9 @@ public static class Shim
 
             if (OperatingSystem.IsWindows())
             {
+                var ps1Path = Path.Combine(dir, name + ".ps1");
+                File.WriteAllText(ps1Path, $"tman run --alias {name} -- @args\r\nexit $LASTEXITCODE\r\n");
+                written.Add(ps1Path);
                 var cmdPath = Path.Combine(dir, name + ".cmd");
                 File.WriteAllText(cmdPath, $"@tman run --alias {name} -- %*\r\n");
                 written.Add(cmdPath);
@@ -47,6 +50,8 @@ public static class Shim
         {
             var entry = "/" + name;
             if (!existing.Contains(entry)) toAdd.Add(entry);
+            var ps1Entry = "/" + name + ".ps1";
+            if (!existing.Contains(ps1Entry)) toAdd.Add(ps1Entry);
             var cmdEntry = "/" + name + ".cmd";
             if (!existing.Contains(cmdEntry)) toAdd.Add(cmdEntry);
         }

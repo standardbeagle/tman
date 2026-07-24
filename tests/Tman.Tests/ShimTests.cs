@@ -12,7 +12,7 @@ public class ShimGenerateTests
         var (written, skipped) = Shim.Generate(dir.Path, new[] { "test", "lint" });
 
         Assert.Empty(skipped);
-        Assert.Equal(2, written.Count(p => !p.EndsWith(".cmd")));
+        Assert.Equal(2, written.Count(p => !p.EndsWith(".ps1") && !p.EndsWith(".cmd")));
 
         var sh = File.ReadAllText(System.IO.Path.Combine(dir.Path, "test"));
         Assert.Contains("exec tman run --alias test", sh);
@@ -24,6 +24,9 @@ public class ShimGenerateTests
         }
         else
         {
+            var ps1 = System.IO.Path.Combine(dir.Path, "test.ps1");
+            Assert.True(File.Exists(ps1));
+            Assert.Contains("@args", File.ReadAllText(ps1));
             Assert.True(File.Exists(System.IO.Path.Combine(dir.Path, "test.cmd")));
         }
     }

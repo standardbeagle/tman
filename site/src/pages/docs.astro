@@ -72,9 +72,11 @@ alias "e2e" &#123;
   <h2>shims</h2>
   <p>
     <code>tman init --shims</code> writes an executable per alias at the repo root (<code>./test</code>,
-    <code>./e2e</code>, plus <code>.cmd</code> on Windows) that simply <code>exec tman run --alias …</code>.
+    <code>./e2e</code>, plus <code>.ps1</code> and <code>.cmd</code> on Windows — the extensionless script covers bash/zsh/fish/sh everywhere including Git Bash) that simply <code>exec tman run --alias …</code>.
     Existing muscle memory and agent habits keep working; supervision is transparent.
     <code>--gitignore</code> appends the shims to <code>.gitignore</code>.
+    If PowerShell refuses to run the <code>.ps1</code> shims, allow local scripts once:
+    <code>Set-ExecutionPolicy RemoteSigned -Scope CurrentUser</code>.
   </p>
 
   <h2>exit codes</h2>
