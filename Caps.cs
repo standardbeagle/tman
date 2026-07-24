@@ -67,9 +67,9 @@ public sealed record Caps
         var unit = span[numEnd..].ToString().ToLowerInvariant();
         return unit switch
         {
-            "" or "m" or "mb" => (long)n,
-            "k" or "kb" => (long)(n / 1024),
-            "g" or "gb" => (long)(n * 1024),
+            "" or "m" or "mb" => (long)Math.Ceiling(n),
+            "k" or "kb" => (long)Math.Ceiling(n / 1024),
+            "g" or "gb" => (long)Math.Ceiling(n * 1024),
             _ => null,
         };
     }
