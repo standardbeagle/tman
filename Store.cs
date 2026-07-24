@@ -44,6 +44,13 @@ public static class Store
 
     static string PathFor(string id) => Path.Combine(RunsDir, id + ".json");
 
+    public static string LockPathFor(string name)
+    {
+        var safe = new string(name.Select(c =>
+            char.IsLetterOrDigit(c) || c is '-' or '_' or '.' ? c : '_').ToArray());
+        return Path.Combine(RunsDir, safe + ".lock");
+    }
+
     public static void Save(RunRecord r)
     {
         EnsureDirs();

@@ -133,46 +133,88 @@ public static class Program
 
     static async Task<int> GatedRun(string command, string[] args, Caps caps, string? name, string? alias, bool replace)
     {
+        FileStream? lockFile = null;
+        string? lockPath = null;
         if (name is not null)
         {
+            Store.EnsureDirs();
+            lockPath = Store.LockPathFor(name);
+            while (lockFile is null)
+            {
+                try
+                {
+                    lockFile = new FileStream(lockPath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+                }
+                catch (IOException)
+                {
+                    var holder = Reaper.FindLiveByNameOrId(name);
+                    if (holder is null)
+                    {
+                        File.Delete(lockPath);
+                        continue;
+                    }
+                    if (!replace)
+                    {
+                        Console.Error.WriteLine($"tman: run '{name}' already active (pid {holder.Pid}, id {holder.Id}); use --replace to kill it");
+                        return Runner.ExitKilled;
+                    }
+                    Console.Error.WriteLine($"tman: replacing run '{name}' (pid {holder.Pid})");
+                    ProcUtil.KillTree(holder.Pid);
+                    holder.State = RunState.Killed;
+                    holder.KillReason = "replaced by newer run";
+                    Store.Save(holder);
+                    File.Delete(lockPath);
+                }
+            }
+
             var existing = Reaper.FindLiveByNameOrId(name);
             if (existing is not null)
             {
-                if (replace)
-                {
-                    Console.Error.WriteLine($"tman: replacing run '{name}' (pid {existing.Pid})");
-                    ProcUtil.KillTree(existing.Pid);
-                    existing.State = RunState.Killed;
-                    existing.KillReason = "replaced by newer run";
-                    Store.Save(existing);
-                }
-                else
+                if (!replace)
                 {
                     Console.Error.WriteLine($"tman: run '{name}' already active (pid {existing.Pid}, id {existing.Id}); use --replace to kill it");
+                    lockFile.Dispose();
+                    File.Delete(lockPath);
                     return Runner.ExitKilled;
                 }
+                Console.Error.WriteLine($"tman: replacing run '{name}' (pid {existing.Pid})");
+                ProcUtil.KillTree(existing.Pid);
+                existing.State = RunState.Killed;
+                existing.KillReason = "replaced by newer run";
+                Store.Save(existing);
             }
         }
 
-        if (caps.MaxParallel is { } maxPar && maxPar > 0)
+        try
         {
-            var deadline = DateTime.UtcNow + (caps.QueueTimeout ?? TimeSpan.FromMinutes(5));
-            while (true)
+            if (caps.MaxParallel is { } maxPar && maxPar > 0)
             {
-                Reaper.ReapOrphans(quiet: true);
-                var live = Reaper.LiveRuns();
-                if (live.Count < maxPar) break;
-                if (DateTime.UtcNow >= deadline)
+                var deadline = DateTime.UtcNow + (caps.QueueTimeout ?? TimeSpan.FromMinutes(5));
+                while (true)
                 {
-                    Console.Error.WriteLine($"tman: queue timeout waiting for slot ({live.Count}/{maxPar} running)");
-                    return Runner.ExitKilled;
+                    Reaper.ReapOrphans(quiet: true);
+                    var live = Reaper.LiveRuns();
+                    if (live.Count < maxPar) break;
+                    if (DateTime.UtcNow >= deadline)
+                    {
+                        Console.Error.WriteLine($"tman: queue timeout waiting for slot ({live.Count}/{maxPar} running)");
+                        return Runner.ExitKilled;
+                    }
+                    Console.Error.WriteLine($"tman: {live.Count}/{maxPar} slots busy, waiting...");
+                    await Task.Delay(2000);
                 }
-                Console.Error.WriteLine($"tman: {live.Count}/{maxPar} slots busy, waiting...");
-                await Task.Delay(2000);
+            }
+
+            return await Runner.RunAsync(command, args, caps, name, alias);
+        }
+        finally
+        {
+            lockFile?.Dispose();
+            if (lockPath is not null)
+            {
+                try { File.Delete(lockPath); } catch (IOException) { }
             }
         }
-
-        return await Runner.RunAsync(command, args, caps, name, alias);
     }
 
     static int CmdList(string[] argv)
