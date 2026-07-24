@@ -11,6 +11,7 @@ public sealed class RunRecord
     public string? Name { get; set; }
     public int Pid { get; set; }
     public int RunnerPid { get; set; }
+    public DateTime RunnerStartUtc { get; set; }
     public required string Command { get; set; }
     public required string[] Args { get; set; }
     public DateTime StartedUtc { get; set; }

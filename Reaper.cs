@@ -10,7 +10,8 @@ public static class Reaper
             if (r.State != RunState.Running) continue;
 
             var childAlive = ProcUtil.IsAlive(r.Pid) && ProcUtil.IsSameProcess(r.Pid, r.ChildStartUtc);
-            var runnerAlive = r.RunnerPid == Environment.ProcessId || ProcUtil.IsAlive(r.RunnerPid);
+            var runnerAlive = r.RunnerPid == Environment.ProcessId
+                || (ProcUtil.IsAlive(r.RunnerPid) && ProcUtil.IsSameProcess(r.RunnerPid, r.RunnerStartUtc));
 
             if (!childAlive)
             {

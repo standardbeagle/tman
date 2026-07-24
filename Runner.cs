@@ -10,6 +10,9 @@ public static class Runner
     public const int ExitNotFound = 127;
     public const int ExitKilled = 130;
 
+    const int MonitorTickMs = 1000;
+    const int CpuBreachLimit = 3;
+
     public static async Task<int> RunAsync(
         string command,
         string[] args,
@@ -44,6 +47,7 @@ public static class Runner
             Name = name ?? alias,
             Pid = proc.Id,
             RunnerPid = Environment.ProcessId,
+            RunnerStartUtc = ProcUtil.StartTimeUtc(Environment.ProcessId) ?? DateTime.UtcNow,
             Command = command,
             Args = args,
             StartedUtc = DateTime.UtcNow,
@@ -78,11 +82,12 @@ public static class Runner
         {
             while (!proc.HasExited)
             {
-                try { await Task.Delay(1000, ct); }
+                try { await Task.Delay(MonitorTickMs, ct); }
                 catch (OperationCanceledException) { killReason = "cancelled"; killState = RunState.Killed; break; }
 
                 var now = DateTime.UtcNow;
                 record.HeartbeatUtc = now;
+                record.LastOutputUtc = lastOutput;
 
                 long memMb = 0;
                 if (ProcUtil.TryRefresh(proc.Id, out var live) && live is not null)
@@ -112,7 +117,7 @@ public static class Runner
                 else if (caps.MaxCpuPct is { } mc)
                 {
                     cpuBreaches = cpuPct > mc ? cpuBreaches + 1 : 0;
-                    if (cpuBreaches >= 3)
+                    if (cpuBreaches >= CpuBreachLimit)
                     { killReason = $"cpu {cpuPct:F0}% > max-cpu {mc:F0}% sustained"; killState = RunState.Culled; }
                 }
 
