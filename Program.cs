@@ -2,7 +2,7 @@ using System.Text.Json;
 
 namespace Tman;
 
-public static class Program
+public static partial class Program
 {
     static string Version
     {
@@ -69,7 +69,15 @@ public static class Program
 
         string? name = null, aliasName = null;
         var replace = false;
-        var cliCaps = new CapsBuilder();
+        TimeSpan? capMaxTime = null, capStall = null, capQueueTimeout = null;
+        long? capMaxMemMb = null;
+        double? capMaxCpuPct = null;
+        int? capMaxParallel = null;
+        Caps CliCaps() => new()
+        {
+            MaxTime = capMaxTime, Stall = capStall, QueueTimeout = capQueueTimeout,
+            MaxMemMb = capMaxMemMb, MaxCpuPct = capMaxCpuPct, MaxParallel = capMaxParallel,
+        };
         var cmdArgs = new List<string>();
         var i = 0;
         var sawDashDash = false;
@@ -86,12 +94,12 @@ public static class Program
                     case "--name": name = Next(); break;
                     case "--alias": aliasName = Next(); break;
                     case "--replace": replace = true; break;
-                    case "--max-time": cliCaps.MaxTime = Caps.ParseDuration(Next()) ?? throw new FormatException("bad --max-time"); break;
-                    case "--stall": cliCaps.Stall = Caps.ParseDuration(Next()) ?? throw new FormatException("bad --stall"); break;
-                    case "--max-mem": cliCaps.MaxMemMb = Caps.ParseMemMb(Next()) ?? throw new FormatException("bad --max-mem"); break;
-                    case "--max-cpu": cliCaps.MaxCpuPct = double.Parse(Next(), System.Globalization.CultureInfo.InvariantCulture); break;
-                    case "--max-parallel": cliCaps.MaxParallel = int.Parse(Next()); break;
-                    case "--queue-timeout": cliCaps.QueueTimeout = Caps.ParseDuration(Next()) ?? throw new FormatException("bad --queue-timeout"); break;
+                    case "--max-time": capMaxTime = Caps.ParseDuration(Next()) ?? throw new FormatException("bad --max-time"); break;
+                    case "--stall": capStall = Caps.ParseDuration(Next()) ?? throw new FormatException("bad --stall"); break;
+                    case "--max-mem": capMaxMemMb = Caps.ParseMemMb(Next()) ?? throw new FormatException("bad --max-mem"); break;
+                    case "--max-cpu": capMaxCpuPct = double.Parse(Next(), System.Globalization.CultureInfo.InvariantCulture); break;
+                    case "--max-parallel": capMaxParallel = int.Parse(Next()); break;
+                    case "--queue-timeout": capQueueTimeout = Caps.ParseDuration(Next()) ?? throw new FormatException("bad --queue-timeout"); break;
                     default: throw new FormatException($"unknown flag {a}");
                 }
                 continue;
@@ -106,29 +114,16 @@ public static class Program
             if (!config.Aliases.TryGetValue(aliasName, out var alias))
                 throw new FormatException($"alias '{aliasName}' not defined in {config.FilePath}");
             var args = alias.Args.Concat(cmdArgs).ToArray();
-            var caps = Config.EffectiveCaps(alias, cliCaps.Build(), config);
+            var caps = Config.EffectiveCaps(alias, CliCaps(), config);
             return await GatedRun(alias.Command, args, caps, name ?? alias.Name, alias.Name, replace);
         }
 
         if (cmdArgs.Count == 0) throw new FormatException("run requires a command");
         {
             var config = Config.Load();
-            var caps = Config.EffectiveCaps(null, cliCaps.Build(), config);
+            var caps = Config.EffectiveCaps(null, CliCaps(), config);
             return await GatedRun(cmdArgs[0], cmdArgs[1..].ToArray(), caps, name, null, replace);
         }
-    }
-
-    sealed class CapsBuilder
-    {
-        public TimeSpan? MaxTime, Stall, QueueTimeout;
-        public long? MaxMemMb;
-        public double? MaxCpuPct;
-        public int? MaxParallel;
-        public Caps Build() => new()
-        {
-            MaxTime = MaxTime, Stall = Stall, QueueTimeout = QueueTimeout,
-            MaxMemMb = MaxMemMb, MaxCpuPct = MaxCpuPct, MaxParallel = MaxParallel,
-        };
     }
 
     static async Task<int> GatedRun(string command, string[] args, Caps caps, string? name, string? alias, bool replace)
@@ -249,9 +244,7 @@ public static class Program
         {
             IEnumerable<RunRecord> matches = target == "all"
                 ? Reaper.LiveRuns()
-                : Reaper.LiveRuns().Where(r =>
-                    string.Equals(r.Name, target, StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(r.Id, target, StringComparison.OrdinalIgnoreCase));
+                : Reaper.LiveRuns().Where(r => r.Matches(target));
 
             foreach (var r in matches)
             {
@@ -334,75 +327,6 @@ public static class Program
     }
 
     internal sealed record DetectedAlias(string Name, string Command, string[] Args);
-
-    internal static List<DetectedAlias> DetectAliases(string dir)
-    {
-        var found = new List<DetectedAlias>();
-
-        var pkgPath = Path.Combine(dir, "package.json");
-        if (File.Exists(pkgPath))
-        {
-            try
-            {
-                using var doc = JsonDocument.Parse(File.ReadAllText(pkgPath));
-                if (doc.RootElement.TryGetProperty("scripts", out var scripts))
-                {
-                    foreach (var s in scripts.EnumerateObject())
-                    {
-                        if (s.Name is "test" or "e2e" or "lint" or "integration")
-                            found.Add(new DetectedAlias(s.Name, "npm", new[] { "run", s.Name }));
-                    }
-                }
-            }
-            catch (JsonException) { }
-        }
-
-        if (File.Exists(Path.Combine(dir, "pyproject.toml")) || File.Exists(Path.Combine(dir, "pytest.ini")))
-            found.Add(new DetectedAlias("test", "pytest", Array.Empty<string>()));
-
-        if (File.Exists(Path.Combine(dir, "go.mod")))
-            found.Add(new DetectedAlias("test", "go", new[] { "test", "./..." }));
-
-        var makefile = Path.Combine(dir, "Makefile");
-        if (File.Exists(makefile) && File.ReadAllText(makefile).Contains("test:"))
-            found.Add(new DetectedAlias("test", "make", new[] { "test" }));
-
-        return found
-            .GroupBy(a => a.Name)
-            .Select(g => g.First())
-            .ToList();
-    }
-
-    internal static string RenderConfig(List<DetectedAlias> detected)
-    {
-        var sb = new System.Text.StringBuilder();
-        sb.AppendLine("defaults {");
-        sb.AppendLine("    max-time \"10m\"");
-        sb.AppendLine("    stall \"60s\"");
-        sb.AppendLine("    max-mem 2048");
-        sb.AppendLine("    max-cpu 95");
-        sb.AppendLine("    max-parallel 2");
-        sb.AppendLine("}");
-        sb.AppendLine();
-
-        if (detected.Count == 0)
-        {
-            sb.AppendLine("alias \"test\" {");
-            sb.AppendLine("    command \"echo\"");
-            sb.AppendLine("    args \"replace me\"");
-            sb.AppendLine("}");
-        }
-        foreach (var a in detected)
-        {
-            sb.AppendLine($"alias \"{a.Name}\" {{");
-            sb.AppendLine($"    command \"{a.Command}\"");
-            if (a.Args.Length > 0)
-                sb.AppendLine($"    args {string.Join(' ', a.Args.Select(x => $"\"{x}\""))}");
-            sb.AppendLine("}");
-            sb.AppendLine();
-        }
-        return sb.ToString();
-    }
 
     static void PrintUsage() => Console.WriteLine("""
         tman - AOT process/test runner manager

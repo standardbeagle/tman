@@ -26,6 +26,10 @@ public sealed class RunRecord
     public double? MaxCpuPct { get; set; }
     public long PeakMemMb { get; set; }
     public string? KillReason { get; set; }
+
+    public bool Matches(string nameOrId) =>
+        string.Equals(Name, nameOrId, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(Id, nameOrId, StringComparison.OrdinalIgnoreCase);
 }
 
 [JsonSourceGenerationOptions(WriteIndented = false)]

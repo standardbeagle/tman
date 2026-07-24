@@ -49,7 +49,5 @@ public static class Reaper
     }
 
     public static RunRecord? FindLiveByNameOrId(string nameOrId) =>
-        LiveRuns().FirstOrDefault(r =>
-            string.Equals(r.Name, nameOrId, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(r.Id, nameOrId, StringComparison.OrdinalIgnoreCase));
+        LiveRuns().FirstOrDefault(r => r.Matches(nameOrId));
 }
