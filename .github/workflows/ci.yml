@@ -1,0 +1,49 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { rid: linux-x64,   os: ubuntu-latest }
+          - { rid: linux-arm64, os: ubuntu-24.04-arm }
+          - { rid: win-x64,     os: windows-latest }
+          - { rid: osx-arm64,   os: macos-14 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: install linux AOT prerequisites
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y clang zlib1g-dev
+      - name: test
+        run: dotnet test tests/Tman.Tests/Tman.Tests.csproj --nologo
+      # AOT is where trim/reflection problems surface; a passing test run does not imply a
+      # publishable binary, and finding that out at tag time is too late
+      - name: publish native binary
+        run: dotnet publish -c Release -r ${{ matrix.rid }} --self-contained --nologo
+      - name: smoke test the built binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN="bin/Release/net10.0/${{ matrix.rid }}/publish/tman"
+          [ "${{ runner.os }}" = "Windows" ] && BIN="$BIN.exe"
+          export TMAN_HOME="$(mktemp -d)/tman"
+          "$BIN" --version
+          "$BIN" run --name smoke -- "$BIN" --version
+          "$BIN" list --all
+          "$BIN" status smoke
+          "$BIN" clean

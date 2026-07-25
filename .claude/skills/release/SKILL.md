@@ -125,6 +125,25 @@ shipped binary. Confirm zero:
 Then smoke-test the built binary against a real project, not a mock, with a scratch
 `TMAN_HOME` so the check cannot pass by reusing existing state.
 
+**A green local suite only proves Linux.** The `ci` workflow runs the tests, an AOT publish, and a
+binary smoke test on linux-x64, linux-arm64, win-x64, and osx-arm64 for every push to main — so
+confirm it is green on the release commit *before* tagging:
+
+```sh
+gh run watch "$(gh run list --workflow=ci.yml --branch main --limit 1 --json databaseId --jq '.[0].databaseId')" --exit-status
+```
+
+Tagging on an unverified commit is how a platform bug reaches a release. Before pushing, re-read
+anything you added or changed for two specific traps:
+
+- **Baked-in POSIX paths.** `/tmp` becomes `D:\tmp` on Windows. Assert on relationships
+  (`Dir(x + sep) == Dir(x)`) or build paths with `Path.Combine` and `Path.GetTempPath()`, never
+  on a literal absolute path.
+- **Linux-only capabilities.** Process-tree walking needs `/proc`, so `TreeStats.CoversTree` is
+  false on macOS and Windows and any test that depends on seeing a *descendant's* work must be
+  gated on it. Gate on the capability flag, not on `IsLinux()` at the call site — the flag is what
+  the product actually branches on.
+
 ## Phase 7 — release commit and tag
 
 ```sh
@@ -141,6 +160,23 @@ fails leaves the ecosystem half-released (a GitHub release with no npm package):
 gh run watch "$(gh run list --workflow=release.yml --limit 1 --json databaseId --jq '.[0].databaseId')"
 ```
 
-If a publish job fails, fix forward with a new patch version. Never move or delete a pushed tag;
-npm and PyPI reject republished versions, so a moved tag produces a release that can never be
-completed.
+### When the release run fails
+
+The `release` job is gated on `needs: build`, so a build or test failure on **any** platform stops
+everything downstream — no GitHub release, no npm, no PyPI, no PSGallery. Check what actually
+published before deciding how to recover:
+
+```sh
+gh run view <run-id> --json jobs --jq '.jobs[] | "\(.name): \(.conclusion // .status)"'
+# per-step detail, and logs readable while the run is still going:
+gh api repos/standardbeagle/tman/actions/jobs/<job-id>/logs | grep -A 10 '\[FAIL\]'
+```
+
+- **Nothing published** (build failed, so the publish jobs never ran) — the tag points at a commit
+  no artifact exists for. Delete it, fix, and re-tag the same version. Skipping to a new number
+  leaves a permanent hole that readers of the changelog cannot explain.
+- **Anything published** — never move the tag. npm and PyPI reject republished versions, so a moved
+  tag produces a release that can never be completed. Fix forward with a new patch version.
+
+Deleting a tag is only safe under the first case, and only for a tag you pushed minutes ago.
+Confirm with the user before doing it.
