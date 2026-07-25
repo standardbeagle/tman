@@ -8,7 +8,7 @@
 
 LLM agents start test suites and then hang, get distracted, or survive a machine suspend — leaving processes that drain your system for hours. `tman` wraps every run with hard limits and a reaper, so nothing outlives its welcome.
 
-- **wall-time + stall kills** — `--max-time 10m`, `--stall 60s` (no output = hung)
+- **wall-time + stall kills** — `--max-time 10m`, `--stall 60s` (silent *and* idle = hung; quiet-but-busy work like `go test` keeps running)
 - **resource culling** — `--max-mem 2g`, `--max-cpu 95` (sustained) kill the whole process tree
 - **orphan reaping** — every `tman` command kills children whose runner died
 - **dedup locks** — `--name test` refuses duplicates; `--replace` kills the old run
@@ -69,7 +69,7 @@ tman init --shims --gitignore
 | `--name N` | — | dedup lock; refuses if a live run has the same name |
 | `--replace` | off | with `--name`: kill the existing run first |
 | `--max-time T` | — | wall-clock limit → kill, exit 124 |
-| `--stall T` | 60s | no output for T → kill, exit 125 |
+| `--stall T` | 60s | no output **and** no cpu/io activity in the process tree for T → kill, exit 125 |
 | `--max-mem M` | 2048 | memory ceiling (MB or `2g`) → cull, exit 126 |
 | `--max-cpu P` | 95 | sustained CPU% → cull, exit 126 |
 | `--max-parallel N` | 2 | queue while N live runs are active |

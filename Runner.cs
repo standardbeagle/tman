@@ -12,6 +12,7 @@ public static class Runner
 
     const int MonitorTickMs = 1000;
     const int CpuBreachLimit = 3;
+    const int SampleFailLimit = 5;
 
     public static async Task<int> RunAsync(
         string command,
@@ -67,9 +68,9 @@ public static class Runner
             ProcUtil.KillTree(record.Pid);
         };
 
-        var lastOutput = record.LastOutputUtc;
-        var outPump = PumpAsync(proc.StandardOutput, Console.Out, () => lastOutput = DateTime.UtcNow, ct);
-        var errPump = PumpAsync(proc.StandardError, Console.Error, () => lastOutput = DateTime.UtcNow, ct);
+        long outputBytes = 0;
+        var outPump = PumpAsync(proc.StandardOutput, Console.Out, n => Interlocked.Add(ref outputBytes, n), ct);
+        var errPump = PumpAsync(proc.StandardError, Console.Error, n => Interlocked.Add(ref outputBytes, n), ct);
 
         string? killReason = null;
         RunState killState = RunState.Killed;
@@ -77,6 +78,13 @@ public static class Runner
         var prevTick = DateTime.UtcNow;
         var cpuBreaches = 0;
         try { prevCpu = proc.TotalProcessorTime; } catch { }
+
+        var lastOutput = record.LastOutputUtc;
+        var lastProgress = record.StartedUtc;
+        var prevOutputBytes = 0L;
+        var haveSample = TreeStats.TrySample(record.Pid, out var prevSample);
+        var sampleFailures = 0;
+        var treeDiag = "unknown";
 
         try
         {
@@ -87,7 +95,29 @@ public static class Runner
 
                 var now = DateTime.UtcNow;
                 record.HeartbeatUtc = now;
+
+                var outNow = Interlocked.Read(ref outputBytes);
+                var progressed = outNow != prevOutputBytes;
+                prevOutputBytes = outNow;
+                if (progressed) lastOutput = now;
                 record.LastOutputUtc = lastOutput;
+
+                var sampleOk = TreeStats.TrySample(record.Pid, out var sample);
+                if (sampleOk)
+                {
+                    if (haveSample && (sample.CpuJiffies > prevSample.CpuJiffies ||
+                                       sample.IoBytes > prevSample.IoBytes))
+                        progressed = true;
+                    treeDiag = $"{sample.Procs} proc [{sample.States}]";
+                    prevSample = sample;
+                    haveSample = true;
+                    sampleFailures = 0;
+                }
+                else
+                {
+                    sampleFailures++;
+                }
+                if (progressed) lastProgress = now;
 
                 long memMb = 0;
                 if (ProcUtil.TryRefresh(proc.Id, out var live) && live is not null)
@@ -110,8 +140,9 @@ public static class Runner
 
                 if (caps.MaxTime is { } mt && now - record.StartedUtc > mt)
                 { killReason = $"exceeded max-time {mt}"; killState = RunState.TimedOut; }
-                else if (caps.Stall is { } st && now - lastOutput > st)
-                { killReason = $"no output for {st}"; killState = RunState.Stalled; }
+                else if (caps.Stall is { } st && now - lastProgress > st &&
+                         (sampleOk || sampleFailures >= SampleFailLimit))
+                { killReason = $"no output or activity for {st} (tree: {treeDiag})"; killState = RunState.Stalled; }
                 else if (caps.MaxMemMb is { } mm && memMb > mm)
                 { killReason = $"memory {memMb}MB > max-mem {mm}MB"; killState = RunState.Culled; }
                 else if (caps.MaxCpuPct is { } mc)
@@ -167,14 +198,16 @@ public static class Runner
         return record.ExitCode ?? 0;
     }
 
-    static async Task PumpAsync(StreamReader reader, TextWriter sink, Action onData, CancellationToken ct)
+    static async Task PumpAsync(StreamReader reader, TextWriter sink, Action<int> onData, CancellationToken ct)
     {
+        var buf = new char[4096];
         try
         {
-            while (await reader.ReadLineAsync(ct) is { } line)
+            int n;
+            while ((n = await reader.ReadAsync(buf.AsMemory(), ct)) > 0)
             {
-                onData();
-                sink.WriteLine(line);
+                onData(n);
+                sink.Write(buf.AsSpan(0, n));
             }
         }
         catch (OperationCanceledException) { }

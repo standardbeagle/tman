@@ -345,7 +345,7 @@ public static partial class Program
           --name N            dedup lock name (fail if already running)
           --replace           kill existing run with same name first
           --max-time T        wall-clock limit (30s, 10m, 2h)
-          --stall T           kill if no output for T
+          --stall T           kill if no output or cpu/io activity for T
           --max-mem M         kill above memory (2048, 2g)
           --max-cpu P         kill above P% sustained CPU
           --max-parallel N    queue when N runs already active
