@@ -82,6 +82,26 @@ public class InitTests
 public class ConfigLoadTests
 {
     [Fact]
+    public void GeneratedConfig_ParsesAndImposesNoResourceCeilings()
+    {
+        using var dir = new TempDir();
+        dir.WriteFile(".tman.kdl", Program.RenderConfig(new List<Program.DetectedAlias>
+        {
+            new("test", "npm", new[] { "run", "test" }),
+        }));
+
+        var config = Config.Load(dir.Path);
+
+        Assert.NotNull(config);
+        Assert.Equal(2, config.Defaults.MaxParallel);
+        Assert.Equal(TimeSpan.FromSeconds(60), config.Defaults.Stall);
+        Assert.Null(config.Defaults.MaxMemMb);
+        Assert.Null(config.Defaults.MaxCpuPct);
+        Assert.Null(config.Defaults.MaxTime);
+        Assert.Contains("test", config.Aliases);
+    }
+
+    [Fact]
     public void Monorepo_NestedPackage_ResolvesRootConfig()
     {
         using var dir = new TempDir();

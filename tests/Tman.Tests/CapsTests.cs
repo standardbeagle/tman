@@ -73,7 +73,18 @@ public class CapsParseTests
     public void EffectiveCaps_FallsBackToSaneDefaults()
     {
         var caps = Config.EffectiveCaps(null, new Caps(), null);
-        Assert.Null(caps.MaxTime);
         Assert.Equal(Caps.SaneDefaults.MaxParallel, caps.MaxParallel);
+        Assert.Equal(Caps.SaneDefaults.Stall, caps.Stall);
+    }
+
+    [Fact]
+    public void BuiltInDefaults_ImposeNoResourceCeilings()
+    {
+        // A build is supposed to saturate cores and can want several GB; culling it by
+        // default would break `tman run -- vite build` with no config at all.
+        var caps = Config.EffectiveCaps(null, new Caps(), null);
+        Assert.Null(caps.MaxTime);
+        Assert.Null(caps.MaxMemMb);
+        Assert.Null(caps.MaxCpuPct);
     }
 }

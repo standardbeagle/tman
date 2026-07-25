@@ -11,11 +11,15 @@ public sealed record Caps
     public int? MaxParallel { get; init; }
     public TimeSpan? QueueTimeout { get; init; }
 
+    /// <summary>
+    /// Built-in floor. Deliberately only catches pathologies: a run that is both silent and idle,
+    /// and a stampede within one bucket. Resource ceilings (max-time/max-mem/max-cpu) are opt-in —
+    /// a real build is *supposed* to saturate cores and can legitimately want several GB, so
+    /// culling it by default would break `tman run -- vite build` out of the box.
+    /// </summary>
     public static readonly Caps SaneDefaults = new()
     {
         Stall = TimeSpan.FromSeconds(60),
-        MaxMemMb = 2048,
-        MaxCpuPct = 95,
         MaxParallel = 2,
         QueueTimeout = TimeSpan.FromMinutes(5),
     };

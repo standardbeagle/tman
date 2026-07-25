@@ -47,9 +47,11 @@ public static partial class Program
         var sb = new System.Text.StringBuilder();
         sb.AppendLine("defaults {");
         sb.AppendLine("    stall \"60s\"");
-        sb.AppendLine("    max-mem 2048");
-        sb.AppendLine("    max-cpu 95");
         sb.AppendLine("    max-parallel 2");
+        sb.AppendLine("    // opt-in ceilings; builds legitimately saturate cores and eat RAM");
+        sb.AppendLine("    // max-mem 8192");
+        sb.AppendLine("    // max-cpu 95");
+        sb.AppendLine("    // max-time \"30m\"");
         sb.AppendLine("}");
         sb.AppendLine();
 

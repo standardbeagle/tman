@@ -1,7 +1,5 @@
 defaults {
     stall "60s"
-    max-mem 2048
-    max-cpu 95
     max-parallel 2
 }
 
