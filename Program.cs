@@ -60,7 +60,7 @@ public static partial class Program
         Reaper.ReapOrphans();
         var args = alias.Args.Concat(extraArgs).ToArray();
         var caps = Config.EffectiveCaps(alias, new Caps(), config);
-        return await GatedRun(alias.Command, args, caps, alias.Name, alias.Name, replace: false);
+        return await GatedRun(alias.Command, args, caps, alias.Name, alias.Name, replace: false, RunKey.ScopeDir(config));
     }
 
     static async Task<int> CmdRun(string[] argv, string? _)
@@ -115,25 +115,30 @@ public static partial class Program
                 throw new FormatException($"alias '{aliasName}' not defined in {config.FilePath}");
             var args = alias.Args.Concat(cmdArgs).ToArray();
             var caps = Config.EffectiveCaps(alias, CliCaps(), config);
-            return await GatedRun(alias.Command, args, caps, name ?? alias.Name, alias.Name, replace);
+            return await GatedRun(
+                alias.Command, args, caps, name ?? alias.Name, alias.Name, replace, RunKey.ScopeDir(config));
         }
 
         if (cmdArgs.Count == 0) throw new FormatException("run requires a command");
         {
             var config = Config.Load();
             var caps = Config.EffectiveCaps(null, CliCaps(), config);
-            return await GatedRun(cmdArgs[0], cmdArgs[1..].ToArray(), caps, name, null, replace);
+            return await GatedRun(
+                cmdArgs[0], cmdArgs[1..].ToArray(), caps, name, null, replace, RunKey.ScopeDir(config));
         }
     }
 
-    static async Task<int> GatedRun(string command, string[] args, Caps caps, string? name, string? alias, bool replace)
+    static async Task<int> GatedRun(
+        string command, string[] args, Caps caps, string? name, string? alias, bool replace, string scopeDir)
     {
+        var group = RunKey.For(name, command, scopeDir);
+
         FileStream? lockFile = null;
         string? lockPath = null;
         if (name is not null)
         {
             Store.EnsureDirs();
-            lockPath = Store.LockPathFor(name);
+            lockPath = Store.LockPathFor(group);
             while (lockFile is null)
             {
                 try
@@ -142,7 +147,7 @@ public static partial class Program
                 }
                 catch (IOException)
                 {
-                    var holder = Reaper.FindLiveByNameOrId(name);
+                    var holder = Reaper.FindLiveInGroup(group);
                     if (holder is null)
                     {
                         File.Delete(lockPath);
@@ -162,7 +167,7 @@ public static partial class Program
                 }
             }
 
-            var existing = Reaper.FindLiveByNameOrId(name);
+            var existing = Reaper.FindLiveInGroup(group);
             if (existing is not null)
             {
                 if (!replace)
@@ -188,19 +193,19 @@ public static partial class Program
                 while (true)
                 {
                     Reaper.ReapOrphans(quiet: true);
-                    var live = Reaper.LiveRuns();
-                    if (live.Count < maxPar) break;
+                    var live = Reaper.LiveInGroup(group).Count;
+                    if (live < maxPar) break;
                     if (DateTime.UtcNow >= deadline)
                     {
-                        Console.Error.WriteLine($"tman: queue timeout waiting for slot ({live.Count}/{maxPar} running)");
+                        Console.Error.WriteLine($"tman: queue timeout waiting for a '{group}' slot ({live}/{maxPar} running)");
                         return Runner.ExitKilled;
                     }
-                    Console.Error.WriteLine($"tman: {live.Count}/{maxPar} slots busy, waiting...");
+                    Console.Error.WriteLine($"tman: {live}/{maxPar} '{group}' slots busy, waiting...");
                     await Task.Delay(2000);
                 }
             }
 
-            return await Runner.RunAsync(command, args, caps, name, alias);
+            return await Runner.RunAsync(command, args, caps, name, alias, group);
         }
         finally
         {
@@ -342,13 +347,13 @@ public static partial class Program
           tman init [--shims] [--gitignore]       scaffold .tman.kdl (+ shim scripts)
 
         run flags:
-          --name N            dedup lock name (fail if already running)
+          --name N            dedup lock name (per directory; fail if already running)
           --replace           kill existing run with same name first
           --max-time T        wall-clock limit (30s, 10m, 2h)
           --stall T           kill if no output or cpu/io activity for T
           --max-mem M         kill above memory (2048, 2g)
           --max-cpu P         kill above P% sustained CPU
-          --max-parallel N    queue when N runs already active
+          --max-parallel N    queue when N runs share this bucket (name-or-command @ dir)
           --queue-timeout T   give up queueing after T
 
         orphans (dead runner, live child) are reaped automatically on every command.

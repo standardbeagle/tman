@@ -14,6 +14,9 @@ public sealed class RunRecord
     public DateTime RunnerStartUtc { get; set; }
     public required string Command { get; set; }
     public required string[] Args { get; set; }
+    public string? Cwd { get; set; }
+    /// <summary>Dedup/slot bucket, see <see cref="RunKey"/>. Null on records written before scoping existed.</summary>
+    public string? Group { get; set; }
     public DateTime StartedUtc { get; set; }
     public DateTime ChildStartUtc { get; set; }
     public DateTime HeartbeatUtc { get; set; }
@@ -48,12 +51,8 @@ public static class Store
 
     static string PathFor(string id) => Path.Combine(RunsDir, id + ".json");
 
-    public static string LockPathFor(string name)
-    {
-        var safe = new string(name.Select(c =>
-            char.IsLetterOrDigit(c) || c is '-' or '_' or '.' ? c : '_').ToArray());
-        return Path.Combine(RunsDir, safe + ".lock");
-    }
+    public static string LockPathFor(string runKey) =>
+        Path.Combine(RunsDir, RunKey.LockStem(runKey) + ".lock");
 
     public static void Save(RunRecord r)
     {

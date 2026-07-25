@@ -13,6 +13,7 @@ LLM agents start test suites and then hang, get distracted, or survive a machine
 - **orphan reaping** — every `tman` command kills children whose runner died
 - **dedup locks** — `--name test` refuses duplicates; `--replace` kills the old run
 - **resource gating** — `--max-parallel 2` queues excess runs instead of stampeding cores
+- **per-project scoping** — locks and slots bucket by name (or command) *and* directory, so one repo's runs never block another's
 - **folder aliases** — `.tman.kdl` per project, with repo-root shims so `./test` is supervised transparently
 - **~3.8 MB native binary**, zero runtime deps, cross-platform (linux/mac/windows, x64/arm64)
 
@@ -66,16 +67,31 @@ tman init --shims --gitignore
 
 | flag | default | what it does |
 | --- | --- | --- |
-| `--name N` | — | dedup lock; refuses if a live run has the same name |
+| `--name N` | — | dedup lock; refuses if a live run has the same name **in this directory** |
 | `--replace` | off | with `--name`: kill the existing run first |
 | `--max-time T` | — | wall-clock limit → kill, exit 124 |
 | `--stall T` | 60s | no output **and** no cpu/io activity in the process tree for T → kill, exit 125 |
 | `--max-mem M` | 2048 | memory ceiling (MB or `2g`) → cull, exit 126 |
 | `--max-cpu P` | 95 | sustained CPU% → cull, exit 126 |
-| `--max-parallel N` | 2 | queue while N live runs are active |
+| `--max-parallel N` | 2 | queue while N live runs share this run's bucket |
 | `--queue-timeout T` | 5m | give up waiting for a slot |
 
 Cap precedence: CLI flags > alias block > `defaults` block > built-ins.
+
+### Buckets
+
+Dedup locks and parallel slots are counted per **bucket**, not machine-wide. A bucket is
+`<name>@<dir>` for a named run and `<command>@<dir>` for an unnamed one, where `<dir>` is the
+`.tman.kdl` directory governing the run (or the cwd when there is none):
+
+```
+/repo-a  tman test          -> bucket  test@/repo-a
+/repo-b  tman test          -> bucket  test@/repo-b   # independent: does not queue behind repo-a
+/repo-a  tman run -- vite   -> bucket  vite@/repo-a   # independent of test@/repo-a
+```
+
+So `max-parallel 2` means *two of this thing here*, and a long test run in one checkout never
+starves a build in another.
 
 ## .tman.kdl
 

@@ -20,6 +20,7 @@ public static class Runner
         Caps caps,
         string? name,
         string? alias,
+        string? group = null,
         CancellationToken ct = default)
     {
         var psi = new ProcessStartInfo
@@ -51,6 +52,8 @@ public static class Runner
             RunnerStartUtc = ProcUtil.StartTimeUtc(Environment.ProcessId) ?? DateTime.UtcNow,
             Command = command,
             Args = args,
+            Cwd = Directory.GetCurrentDirectory(),
+            Group = group,
             StartedUtc = DateTime.UtcNow,
             ChildStartUtc = ProcUtil.StartTimeUtc(proc.Id) ?? DateTime.UtcNow,
             HeartbeatUtc = DateTime.UtcNow,

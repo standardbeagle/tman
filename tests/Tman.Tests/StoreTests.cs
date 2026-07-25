@@ -97,10 +97,17 @@ public class StoreTests : IDisposable
     }
 
     [Fact]
-    public void LockPathFor_SanitizesName()
+    public void LockPathFor_SanitizesKeyAndStaysReadable()
     {
-        var p = Store.LockPathFor("my/test:name");
-        Assert.EndsWith("my_test_name.lock", p);
+        var p = Store.LockPathFor("my/test:name@/repo");
+        Assert.EndsWith(".lock", p);
+        Assert.StartsWith("my_test_name-", Path.GetFileName(p));
+    }
+
+    [Fact]
+    public void LockPathFor_DiffersPerScopeDir()
+    {
+        Assert.NotEqual(Store.LockPathFor("test@/repo-a"), Store.LockPathFor("test@/repo-b"));
     }
 
     [Fact]

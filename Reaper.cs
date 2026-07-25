@@ -50,4 +50,11 @@ public static class Reaper
 
     public static RunRecord? FindLiveByNameOrId(string nameOrId) =>
         LiveRuns().FirstOrDefault(r => r.Matches(nameOrId));
+
+    /// <summary>Live runs sharing a dedup/slot bucket. See <see cref="RunKey"/>.</summary>
+    public static List<RunRecord> LiveInGroup(string group) =>
+        LiveRuns().Where(r => r.Group == group).ToList();
+
+    public static RunRecord? FindLiveInGroup(string group) =>
+        LiveRuns().FirstOrDefault(r => r.Group == group);
 }
