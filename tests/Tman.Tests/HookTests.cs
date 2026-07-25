@@ -130,6 +130,7 @@ public class HookTests
     [Theory]
     [InlineData("tman")]
     [InlineData("tman.exe")]    // the same binary as Windows publishes it
+    [InlineData("TMAN.EXE")]    // ...on a filesystem that does not care how it is spelled
     public void TheNamesTmanShipsUnder_AreAccepted(string fileName)
     {
         using var dir = SupervisedProject();
