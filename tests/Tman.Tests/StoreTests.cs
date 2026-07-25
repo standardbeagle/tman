@@ -78,7 +78,7 @@ public class StoreTests : IDisposable
     }
 
     [Fact]
-    public void PruneCompleted_RemovesOldCompleted_KeepsRunningAndRecent()
+    public void Prune_RemovesOldCompleted_KeepsRunningAndRecent()
     {
         var old = NewRecord("old", RunState.Exited);
         old.HeartbeatUtc = DateTime.UtcNow - TimeSpan.FromHours(48);
@@ -89,25 +89,76 @@ public class StoreTests : IDisposable
         Store.Save(recent);
         Store.Save(running);
 
-        Store.PruneCompleted(TimeSpan.FromHours(24));
+        var pruned = Store.Prune(TimeSpan.FromHours(24));
 
+        Assert.Equal(1, pruned);
         Assert.Null(Store.Load("old"));
         Assert.NotNull(Store.Load("recent"));
         Assert.NotNull(Store.Load("running"));
     }
 
     [Fact]
-    public void Load_SkipsRecordsFromAnotherSchema()
+    public void Prune_RemovesUnreadableRecordsOnceTheyAreOld()
+    {
+        Store.EnsureDirs();
+        var runsDir = System.IO.Path.Combine(_home.Path, "runs");
+        var corrupt = System.IO.Path.Combine(runsDir, "corrupt.json");
+        var fresh = System.IO.Path.Combine(runsDir, "fresh.json");
+        File.WriteAllText(corrupt, "{ this is not json");
+        File.WriteAllText(fresh, "{ also not json");
+        File.SetLastWriteTimeUtc(corrupt, DateTime.UtcNow - TimeSpan.FromHours(48));
+
+        var pruned = Store.Prune(TimeSpan.FromHours(24));
+
+        Assert.Equal(1, pruned);
+        Assert.False(File.Exists(corrupt));
+        // a file being written right now must survive; it is not evidence of rot
+        Assert.True(File.Exists(fresh));
+    }
+
+    [Fact]
+    public void Prune_RemovesRecordsFromAnotherSchema()
     {
         var r = NewRecord("future", RunState.Exited);
+        r.HeartbeatUtc = DateTime.UtcNow - TimeSpan.FromHours(48);
         Store.Save(r);
         var path = System.IO.Path.Combine(_home.Path, "runs", "future.json");
         File.WriteAllText(path, File.ReadAllText(path).Replace(
             $"\"Schema\":{RunRecord.CurrentSchema}", $"\"Schema\":{RunRecord.CurrentSchema + 1}"));
+        File.SetLastWriteTimeUtc(path, DateTime.UtcNow - TimeSpan.FromHours(48));
 
-        // a half-read record would have Pid 0, which the reaper would act on
         Assert.Null(Store.Load("future"));
-        Assert.Empty(Store.LoadAll());
+        Assert.Equal(1, Store.Prune(TimeSpan.FromHours(24)));
+    }
+
+    [Fact]
+    public void StampedLock_IsHeldByALiveOwner_AndStaleWhenOwnerIsGone()
+    {
+        Store.EnsureDirs();
+        var path = Store.LockPathFor("test@/repo");
+        using (var fs = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            Store.StampLockOwner(fs);
+
+        Assert.False(Store.IsLockStale(path));
+        Assert.Equal(0, Store.PruneStaleLocks());
+
+        // rewrite the stamp as a pid that cannot be this process
+        File.WriteAllText(path, $"2147483646 {DateTime.UtcNow:O}\n");
+        Assert.True(Store.IsLockStale(path));
+        Assert.Equal(1, Store.PruneStaleLocks());
+        Assert.False(File.Exists(path));
+    }
+
+    [Fact]
+    public void UnstampedLock_IsNotTreatedAsStale()
+    {
+        Store.EnsureDirs();
+        var path = Store.LockPathFor("legacy@/repo");
+        File.WriteAllText(path, "");
+
+        // breaking a lock we cannot prove is dead would let two runs share a bucket
+        Assert.False(Store.IsLockStale(path));
+        Assert.Equal(0, Store.PruneStaleLocks());
     }
 
     [Fact]

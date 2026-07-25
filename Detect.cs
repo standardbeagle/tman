@@ -48,6 +48,7 @@ public static partial class Program
         sb.AppendLine("defaults {");
         sb.AppendLine("    stall \"60s\"");
         sb.AppendLine("    max-parallel 2");
+        sb.AppendLine("    retain \"24h\"");
         sb.AppendLine("    // opt-in ceilings; builds legitimately saturate cores and eat RAM");
         sb.AppendLine("    // max-mem 8192");
         sb.AppendLine("    // max-cpu 95");

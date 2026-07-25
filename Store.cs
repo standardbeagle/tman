@@ -126,6 +126,7 @@ public static class Store
 
     public static void Remove(string id) => Delete(PathFor(id));
 
+    public static void BreakLock(string lockPath) => Delete(lockPath);
 
     static void Delete(string path)
     {
@@ -134,11 +135,72 @@ public static class Store
         catch (UnauthorizedAccessException) { }
     }
 
-    public static void PruneCompleted(TimeSpan olderThan)
+    /// <summary>
+    /// Deletes finished records past their retention, plus any file the current tman cannot read —
+    /// unparsable JSON and off-schema records would otherwise accumulate forever, since nothing
+    /// else ever revisits them.
+    /// </summary>
+    public static int Prune(TimeSpan retain)
     {
-        var cutoff = DateTime.UtcNow - olderThan;
-        foreach (var r in LoadAll())
-            if (r.IsFinished && r.HeartbeatUtc < cutoff)
-                Remove(r.Id);
+        EnsureDirs();
+        var cutoff = DateTime.UtcNow - retain;
+        var removed = 0;
+        foreach (var f in Directory.EnumerateFiles(RunsDir, "*.json"))
+        {
+            var r = ReadFile(f);
+            if (r is null)
+            {
+                // unreadable: only reap once it is old enough to not be a record being written now
+                if (File.GetLastWriteTimeUtc(f) < cutoff) { Delete(f); removed++; }
+                continue;
+            }
+            if (r.IsFinished && r.HeartbeatUtc < cutoff) { Delete(f); removed++; }
+        }
+        foreach (var f in Directory.EnumerateFiles(RunsDir, "*.tmp"))
+            if (File.GetLastWriteTimeUtc(f) < cutoff) { Delete(f); removed++; }
+        return removed;
+    }
+
+    /// <summary>
+    /// Stamps the owning runner into a freshly created lock. A lock is taken before the run record
+    /// exists, so "no matching record" cannot be used to judge staleness without a race — the owner
+    /// pid can, and it is correct from the instant the lock is created.
+    /// </summary>
+    public static void StampLockOwner(FileStream lockFile)
+    {
+        var startUtc = ProcUtil.StartTimeUtc(Environment.ProcessId) ?? DateTime.UtcNow;
+        var bytes = System.Text.Encoding.UTF8.GetBytes(
+            $"{Environment.ProcessId} {startUtc:O}\n");
+        lockFile.Write(bytes);
+        lockFile.Flush(flushToDisk: false);
+    }
+
+    /// <summary>True when a lock file's owning runner is gone, so the lock can be broken.</summary>
+    public static bool IsLockStale(string lockPath)
+    {
+        string text;
+        try { text = File.ReadAllText(lockPath); }
+        catch (IOException) { return false; }
+        catch (UnauthorizedAccessException) { return false; }
+
+        var parts = text.Split(' ', 2, StringSplitOptions.TrimEntries);
+        // an unstamped lock predates owner tracking, or was caught mid-write; leave it to the holder check
+        if (parts.Length < 2 || !int.TryParse(parts[0], out var pid)) return false;
+        if (!DateTime.TryParse(parts[1], null,
+                System.Globalization.DateTimeStyles.RoundtripKind, out var startUtc)) return false;
+        return !ProcUtil.IsAlive(pid) || !ProcUtil.IsSameProcess(pid, startUtc);
+    }
+
+    /// <summary>
+    /// Releases locks whose owning runner died. A runner killed between taking its lock and
+    /// finishing would otherwise refuse its bucket forever.
+    /// </summary>
+    public static int PruneStaleLocks()
+    {
+        EnsureDirs();
+        var removed = 0;
+        foreach (var f in Directory.EnumerateFiles(RunsDir, "*.lock"))
+            if (IsLockStale(f)) { Delete(f); removed++; }
+        return removed;
     }
 }

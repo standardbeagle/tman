@@ -95,6 +95,7 @@ public class ConfigLoadTests
         Assert.NotNull(config);
         Assert.Equal(2, config.Defaults.MaxParallel);
         Assert.Equal(TimeSpan.FromSeconds(60), config.Defaults.Stall);
+        Assert.Equal(TimeSpan.FromHours(24), config.Defaults.Retain);
         Assert.Null(config.Defaults.MaxMemMb);
         Assert.Null(config.Defaults.MaxCpuPct);
         Assert.Null(config.Defaults.MaxTime);

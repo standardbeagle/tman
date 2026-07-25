@@ -55,9 +55,19 @@ public static partial class Program
         }
     }
 
+    /// <summary>
+    /// Retention for automatic pruning. A broken config must not stop housekeeping, so a config
+    /// that fails to parse falls back to the built-in window rather than propagating.
+    /// </summary>
+    static TimeSpan Retention()
+    {
+        try { return Config.EffectiveCaps(null, new Caps(), Config.Load()).Retain ?? Reaper.DefaultRetain; }
+        catch (FormatException) { return Reaper.DefaultRetain; }
+    }
+
     static async Task<int> RunAlias(AliasDef alias, TmanConfig config, string[] extraArgs)
     {
-        Reaper.ReapOrphans();
+        Reaper.Sweep(Retention());
         var args = alias.Args.Concat(extraArgs).ToArray();
         var caps = Config.EffectiveCaps(alias, new Caps(), config);
         return await GatedRun(alias.Command, args, caps, alias.Name, alias.Name, replace: false, RunKey.ScopeDir(config));
@@ -65,7 +75,7 @@ public static partial class Program
 
     static async Task<int> CmdRun(string[] argv, string? _)
     {
-        Reaper.ReapOrphans();
+        Reaper.Sweep(Retention());
 
         string? name = null, aliasName = null;
         var replace = false;
@@ -147,26 +157,33 @@ public static partial class Program
                 try
                 {
                     lockFile = new FileStream(lockPath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+                    Store.StampLockOwner(lockFile);
                 }
                 catch (IOException)
                 {
                     var holder = Reaper.FindLiveInGroup(group);
-                    if (holder is null)
+                    // A lock is created before its run record exists, so "no matching record" is not
+                    // evidence the lock is free — only a dead owner is.
+                    if (holder is null && Store.IsLockStale(lockPath))
                     {
-                        File.Delete(lockPath);
+                        Store.BreakLock(lockPath);
                         continue;
                     }
+                    var who = holder is not null ? $" (pid {holder.Pid}, id {holder.Id})" : "";
                     if (!replace)
                     {
-                        Console.Error.WriteLine($"tman: run '{name}' already active (pid {holder.Pid}, id {holder.Id}); use --replace to kill it");
+                        Console.Error.WriteLine($"tman: run '{name}' already active{who}; use --replace to kill it");
                         return Runner.ExitKilled;
                     }
-                    Console.Error.WriteLine($"tman: replacing run '{name}' (pid {holder.Pid})");
-                    ProcUtil.KillTree(holder.Pid);
-                    holder.State = RunState.Killed;
-                    holder.KillReason = "replaced by newer run";
-                    Store.Save(holder);
-                    File.Delete(lockPath);
+                    Console.Error.WriteLine($"tman: replacing run '{name}'{who}");
+                    if (holder is not null)
+                    {
+                        ProcUtil.KillTree(holder.Pid);
+                        holder.State = RunState.Killed;
+                        holder.KillReason = "replaced by newer run";
+                        Store.Save(holder);
+                    }
+                    Store.BreakLock(lockPath);
                 }
             }
 
@@ -177,7 +194,7 @@ public static partial class Program
                 {
                     Console.Error.WriteLine($"tman: run '{name}' already active (pid {existing.Pid}, id {existing.Id}); use --replace to kill it");
                     lockFile.Dispose();
-                    File.Delete(lockPath);
+                    Store.BreakLock(lockPath);
                     return Runner.ExitKilled;
                 }
                 Console.Error.WriteLine($"tman: replacing run '{name}' (pid {existing.Pid})");
@@ -213,16 +230,13 @@ public static partial class Program
         finally
         {
             lockFile?.Dispose();
-            if (lockPath is not null)
-            {
-                try { File.Delete(lockPath); } catch (IOException) { }
-            }
+            if (lockPath is not null) Store.BreakLock(lockPath);
         }
     }
 
     static int CmdList(string[] argv)
     {
-        Reaper.ReapOrphans(quiet: true);
+        Reaper.Sweep(Retention(), quiet: true);
         var all = argv.Contains("--all");
         var runs = Store.LoadAll()
             .Where(r => all || r.State == RunState.Running)
@@ -246,7 +260,7 @@ public static partial class Program
 
     static int CmdKill(string[] argv)
     {
-        Reaper.ReapOrphans(quiet: true);
+        Reaper.Sweep(Retention(), quiet: true);
         var staleOnly = argv.Contains("--stale-only");
         var targets = argv.Where(a => !a.StartsWith("--")).ToList();
         if (targets.Count == 0) throw new FormatException("kill requires <id|name|all>");
@@ -277,15 +291,17 @@ public static partial class Program
 
     static int CmdClean()
     {
-        var reaped = Reaper.ReapOrphans();
-        Store.PruneCompleted(TimeSpan.FromHours(24));
-        Console.WriteLine($"tman: reaped {reaped.Count} orphan(s), pruned records older than 24h");
+        var retain = Retention();
+        var (reaped, pruned, locksFreed) = Reaper.Sweep(retain);
+        Console.WriteLine(
+            $"tman: reaped {reaped.Count} orphan(s), pruned {pruned} record(s) older than " +
+            $"{Canon.Duration(retain)}, freed {locksFreed} stale lock(s)");
         return 0;
     }
 
     static int CmdStatus(string[] argv)
     {
-        Reaper.ReapOrphans(quiet: true);
+        Reaper.Sweep(Retention(), quiet: true);
         var target = argv.FirstOrDefault(a => !a.StartsWith("--"));
         var live = Reaper.LiveRuns();
 
@@ -404,6 +420,8 @@ public static partial class Program
           --max-parallel N    queue when N runs share this bucket (name-or-command @ dir)
           --queue-timeout T   give up queueing after T
 
-        orphans (dead runner, live child) are reaped automatically on every command.
+        every command sweeps: orphans (dead runner, live child) are killed, finished records past
+        the retention window are pruned, and locks whose owner died are released. Set the window
+        with `retain` in .tman.kdl defaults (24h by default).
         """);
 }

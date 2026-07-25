@@ -2,6 +2,21 @@ namespace Tman;
 
 public static class Reaper
 {
+    public static readonly TimeSpan DefaultRetain = TimeSpan.FromHours(24);
+
+    /// <summary>
+    /// The full housekeeping pass every tman command performs: kill orphans, drop expired and
+    /// unreadable records, release locks whose owner died. Old data is never left for a `tman clean`
+    /// that may never be run.
+    /// </summary>
+    public static (List<RunRecord> Reaped, int Pruned, int LocksFreed) Sweep(TimeSpan retain, bool quiet = false)
+    {
+        var reaped = ReapOrphans(quiet);
+        var pruned = Store.Prune(retain);
+        var locksFreed = Store.PruneStaleLocks();
+        return (reaped, pruned, locksFreed);
+    }
+
     public static List<RunRecord> ReapOrphans(bool quiet = false)
     {
         var reaped = new List<RunRecord>();

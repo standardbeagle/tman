@@ -75,6 +75,14 @@ public class CapsParseTests
         var caps = Config.EffectiveCaps(null, new Caps(), null);
         Assert.Equal(Caps.SaneDefaults.MaxParallel, caps.MaxParallel);
         Assert.Equal(Caps.SaneDefaults.Stall, caps.Stall);
+        Assert.Equal(Caps.SaneDefaults.Retain, caps.Retain);
+    }
+
+    [Fact]
+    public void Retain_IsConfigurable()
+    {
+        var node = Kdl.Parse("defaults {\n    retain \"2h\"\n}\n").Single();
+        Assert.Equal(TimeSpan.FromHours(2), Caps.FromNode(node).Retain);
     }
 
     [Fact]

@@ -10,7 +10,7 @@ LLM agents start test suites and then hang, get distracted, or survive a machine
 
 - **wall-time + stall kills** — `--max-time 10m`, `--stall 60s` (silent *and* idle = hung; quiet-but-busy work like `go test` keeps running)
 - **resource culling** — opt-in `--max-mem 2g`, `--max-cpu 95` (sustained) kill the whole process tree
-- **orphan reaping** — every `tman` command kills children whose runner died
+- **orphan reaping** — every `tman` command kills children whose runner died, prunes expired records, and frees dead locks
 - **dedup locks** — `--name test` refuses duplicates; `--replace` kills the old run
 - **resource gating** — `--max-parallel 2` queues excess runs instead of stampeding cores
 - **per-project scoping** — locks and slots bucket by name (or command) *and* directory, so one repo's runs never block another's
@@ -59,7 +59,7 @@ tman init --shims --gitignore
 | `tman run --alias <name> [args]` / `tman <alias>` | run a `.tman.kdl` alias |
 | `tman list [--all]` | list live runs (or all records) |
 | `tman kill <id\|name\|all> [--stale-only]` | kill run(s) |
-| `tman clean` | reap orphans, prune records older than 24h |
+| `tman clean` | run the housekeeping sweep now and report what it did |
 | `tman status [id\|name\|id-prefix] [--json]` | summary counts, or one run's detail |
 | `tman init [--shims] [--gitignore]` | scaffold `.tman.kdl` + shims |
 
@@ -77,12 +77,6 @@ tman init --shims --gitignore
 | `--queue-timeout T` | 5m | give up waiting for a slot |
 
 Cap precedence: CLI flags > alias block > `defaults` block > built-ins.
-
-Run records are canonical on disk: the command resolved to an absolute path, an absolute cwd, one
-nested `Caps` object holding the caps the run actually ran under, and a schema version — so a record
-written by a different tman version is discarded rather than half-read. A supervised process that
-re-enters tman (a PATH shim calling `tman` again) records its parent's id and is marked `└` in
-`tman list` instead of looking like a second, unrelated run.
 
 ### Buckets
 
@@ -107,6 +101,7 @@ Resolved from the current directory upward, like `.git`:
 defaults {
     stall "60s"
     max-parallel 2
+    retain "24h"      // how long finished run records are kept
     // opt-in ceilings — a build is supposed to saturate cores and can want several GB
     // max-mem 8192      // MB, summed across the process tree
     // max-cpu 95        // percent, sustained
@@ -124,6 +119,20 @@ alias "e2e" {
     max-mem 4096
 }
 ```
+
+## Housekeeping
+
+There is no daemon and no cron entry. Every `tman` command — including `tman list` — performs the
+same sweep before it does anything else:
+
+- kills orphans (a live child whose runner died, e.g. after a machine suspend)
+- deletes finished records older than `retain` (default 24h), along with unreadable or
+  off-schema record files that nothing else would ever revisit
+- releases lock files whose owning runner is gone
+
+`tman clean` runs that sweep on demand and prints the counts. Records are canonical on disk:
+absolute resolved command paths, absolute cwd, one nested `Caps` object, and a schema version, so a
+record written by a different tman version is discarded rather than half-read.
 
 ## Exit codes
 

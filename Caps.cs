@@ -10,6 +10,8 @@ public sealed record Caps
     public double? MaxCpuPct { get; init; }
     public int? MaxParallel { get; init; }
     public TimeSpan? QueueTimeout { get; init; }
+    /// <summary>How long finished run records survive before automatic pruning.</summary>
+    public TimeSpan? Retain { get; init; }
 
     /// <summary>
     /// Built-in floor. Deliberately only catches pathologies: a run that is both silent and idle,
@@ -22,6 +24,7 @@ public sealed record Caps
         Stall = TimeSpan.FromSeconds(60),
         MaxParallel = 2,
         QueueTimeout = TimeSpan.FromMinutes(5),
+        Retain = TimeSpan.FromHours(24),
     };
 
     public Caps MergeOver(Caps? lower) => lower is null ? this : new Caps
@@ -32,6 +35,7 @@ public sealed record Caps
         MaxCpuPct = MaxCpuPct ?? lower.MaxCpuPct,
         MaxParallel = MaxParallel ?? lower.MaxParallel,
         QueueTimeout = QueueTimeout ?? lower.QueueTimeout,
+        Retain = Retain ?? lower.Retain,
     };
 
     public static TimeSpan? ParseDuration(string? s)
@@ -88,6 +92,7 @@ public sealed record Caps
             MaxCpuPct = ParseDouble(node.Child("max-cpu")?.Arg(0)),
             MaxParallel = ParseInt(node.Child("max-parallel")?.Arg(0)),
             QueueTimeout = ParseDuration(node.Child("queue-timeout")?.Arg(0)),
+            Retain = ParseDuration(node.Child("retain")?.Arg(0)),
         };
     }
 
