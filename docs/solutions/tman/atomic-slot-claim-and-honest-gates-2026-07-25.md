@@ -12,9 +12,16 @@ sources:
   - git:f47bdb9
   - git:e26b8f2
   - git:81c46fc
+  - task:01KYD8VQ8RZE581VG3VZQTMMM3#task_annotation_v1-attempt-1        # §3, §4, §5 recurred
+  - task:01KYD8VQ8RZE581VG3VZQTMMM3#review_annotation_v1-attempt-1     # §3, §4, §5 recurred
 tags: [check-then-act, atomic-claim, file-lock, race-test, barrier, false-green-gate, path-resolution, reviewer-verification, missed-reuse]
 status: steering
-recurrence: 1
+recurrence: 2
+recurrence_note: >
+  §3 (verify the gate can go red), §4 (relative argv[0] resolves through PATH) and §5 (reviewer
+  re-derives independently) all recurred on task:01KYD8VQ8RZE581VG3VZQTMMM3, 2026-07-25.
+  §3 and §4 were promoted to .claude/rules/honest-failure-and-verification.md on that recurrence
+  under the explicitly-project-wide branch of the promotion gate.
 ---
 
 # Atomic slot claim, and gates that can actually go red
@@ -88,11 +95,23 @@ Two independent false-greens in one task:
 **Prevention:** a gate that has never been observed failing is not a gate. Revert the production
 change and watch it fail before believing the pass.
 
+> **Recurred 2026-07-25** on `task:01KYD8VQ8RZE581VG3VZQTMMM3`. Both false-greens repeated: the
+> `scope-check` step again recorded `checkedFiles: []` and passed vacuously (the implementer commits
+> before the gate runs, so the gate diffs against an empty HEAD delta) — confirming this is a
+> structural defect of the `tman-slice-v2` template, not a one-off. And bare `dotnet test` at repo
+> root was re-confirmed to exit 0 in ~3s having run zero tests, now filed as
+> `01KYDMEXP3GH88T4RBNEJEKEV4`. **Promoted to
+> `.claude/rules/honest-failure-and-verification.md`.**
+
 ## 4. A relative argv[0] resolves through PATH, not cwd  · form: constraint · confidence: high
 
 A command step's `./test` resolved to `/home/beagle/.local/bin/test` (a uv-installed hass-mcp
 pytest symlink), not the repo shim. Use `["sh", "-c", "exec ./test"]`. Any bare relative argv[0]
 in a command step carries this exposure.
+
+> **Recurred 2026-07-25** on `task:01KYD8VQ8RZE581VG3VZQTMMM3` — the implementer recorded
+> `sh -c "exec ./test"` as a `patternsUsed` entry confirmed necessary for every suite run of that
+> task. **Promoted to `.claude/rules/honest-failure-and-verification.md`.**
 
 ## 5. Reviewers must independently re-derive, not accept reported numbers  · form: procedure · confidence: high
 
@@ -101,6 +120,13 @@ reverted (`Store.cs` → `f47bdb9`; `Program.cs`/`Reaper.cs` byte-identical, so 
 clean) and observed the red themselves: PeakOverlap 3 vs expected 2; 52 double-claims / 400.
 Numbers differed from the implementer's — the shape held. Round 2 also **corrected** an
 implementer claim (see §7). This is the workspace norm, not an extra.
+
+> **Recurred 2026-07-25** on `task:01KYD8VQ8RZE581VG3VZQTMMM3`, in a cheaper single-file form worth
+> naming as the standard recipe: the reviewer reverted **only** `Detect.cs` to `81c46fc` in a
+> **throwaway git worktree** with the new tests at HEAD, and observed `Failed: 6, Passed: 137` —
+> matching the implementer's claim exactly. Cost is one worktree and one suite run; it converts a
+> reported red into an observed one. Held at steering (recurrence 2, gate is 3) but this is the
+> shape to reuse.
 
 ## 6. Probe the platform primitive in a throwaway project before building on it  · form: procedure · confidence: high
 
