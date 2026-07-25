@@ -71,7 +71,7 @@ tman init --shims --gitignore
 | `--replace` | off | with `--name`: kill the existing run first |
 | `--max-time T` | — | wall-clock limit → kill, exit 124 |
 | `--stall T` | 60s | no output **and** no cpu/io activity in the process tree for T → kill, exit 125 |
-| `--max-mem M` | 2048 | memory ceiling (MB or `2g`) → cull, exit 126 |
+| `--max-mem M` | 2048 | ceiling on the process tree's RSS (MB or `2g`) → cull, exit 126 |
 | `--max-cpu P` | 95 | sustained CPU% → cull, exit 126 |
 | `--max-parallel N` | 2 | queue while N live runs share this run's bucket |
 | `--queue-timeout T` | 5m | give up waiting for a slot |

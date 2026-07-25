@@ -16,6 +16,16 @@ public class TreeStatsTests
         Assert.Equal(1, st.Ppid);
         Assert.Equal('S', st.State);
         Assert.Equal(160, st.CpuJiffies);
+        Assert.Equal(23, st.RssPages);
+    }
+
+    [Fact]
+    public void TryParseStat_TruncatedLine_TreatsRssAsZero()
+    {
+        // /proc/<pid>/stat can come back short under fork churn; cpu/ppid still usable
+        Assert.True(TreeStats.TryParseStat("1234 (sh) S 1 2 3 4 5 6 7 8 9 10 100 50 7 3", out var st));
+        Assert.Equal(0, st.RssPages);
+        Assert.Equal(160, st.CpuJiffies);
     }
 
     [Fact]
@@ -33,6 +43,7 @@ public class TreeStatsTests
 
         Assert.True(ok);
         Assert.True(s.Procs >= 1);
+        Assert.True(s.RssMb > 0, "expected a live process tree to report nonzero rss");
     }
 
     [Fact]
@@ -65,6 +76,7 @@ public class TreeStatsTests
             Assert.True(TreeStats.TrySample(Environment.ProcessId, out var s));
             Assert.True(s.Procs >= 2, $"expected tree to include sleep child, got {s.Procs} proc(s)");
             Assert.Contains('S', s.States);
+            Assert.True(s.RssMb > 0, "tree rss should be reported alongside the child");
         }
         finally
         {

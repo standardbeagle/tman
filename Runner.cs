@@ -105,9 +105,11 @@ public static class Runner
                 if (progressed) lastOutput = now;
                 record.LastOutputUtc = lastOutput;
 
+                long memMb = 0;
                 var sampleOk = TreeStats.TrySample(record.Pid, out var sample);
                 if (sampleOk)
                 {
+                    memMb = sample.RssMb;
                     if (haveSample && (sample.CpuJiffies > prevSample.CpuJiffies ||
                                        sample.IoBytes > prevSample.IoBytes))
                         progressed = true;
@@ -122,12 +124,9 @@ public static class Runner
                 }
                 if (progressed) lastProgress = now;
 
-                long memMb = 0;
-                if (ProcUtil.TryRefresh(proc.Id, out var live) && live is not null)
-                {
+                if (!sampleOk && ProcUtil.TryRefresh(proc.Id, out var live) && live is not null)
                     memMb = live.WorkingSet64 / (1024 * 1024);
-                    if (memMb > record.PeakMemMb) record.PeakMemMb = memMb;
-                }
+                if (memMb > record.PeakMemMb) record.PeakMemMb = memMb;
 
                 double cpuPct = 0;
                 try
@@ -147,7 +146,7 @@ public static class Runner
                          (sampleOk || sampleFailures >= SampleFailLimit))
                 { killReason = $"no output or activity for {st} (tree: {treeDiag})"; killState = RunState.Stalled; }
                 else if (caps.MaxMemMb is { } mm && memMb > mm)
-                { killReason = $"memory {memMb}MB > max-mem {mm}MB"; killState = RunState.Culled; }
+                { killReason = $"tree memory {memMb}MB > max-mem {mm}MB"; killState = RunState.Culled; }
                 else if (caps.MaxCpuPct is { } mc)
                 {
                     cpuBreaches = cpuPct > mc ? cpuBreaches + 1 : 0;

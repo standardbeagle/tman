@@ -2,9 +2,9 @@ using System.Diagnostics;
 
 namespace Tman;
 
-public readonly record struct TreeSample(long CpuJiffies, long IoBytes, int Procs, string States);
+public readonly record struct TreeSample(long CpuJiffies, long IoBytes, long RssMb, int Procs, string States);
 
-internal readonly record struct ProcStat(int Ppid, char State, long CpuJiffies);
+internal readonly record struct ProcStat(int Ppid, char State, long CpuJiffies, long RssPages);
 
 public static class TreeStats
 {
@@ -19,7 +19,9 @@ public static class TreeStats
         {
             long cpu = 0;
             try { cpu = (long)(p.TotalProcessorTime.TotalSeconds * 100); } catch { }
-            sample = new TreeSample(cpu, 0, 1, "");
+            long rssMb = 0;
+            try { rssMb = p.WorkingSet64 / (1024 * 1024); } catch { }
+            sample = new TreeSample(cpu, 0, rssMb, 1, "");
             return true;
         }
     }
@@ -56,7 +58,7 @@ public static class TreeStats
             list.Add(pid);
         }
 
-        long cpu = 0, io = 0;
+        long cpu = 0, io = 0, rssPages = 0;
         var count = 0;
         var states = new List<char>();
         var stack = new Stack<int>();
@@ -67,6 +69,7 @@ public static class TreeStats
             if (!procs.TryGetValue(pid, out var st)) continue;
             count++;
             cpu += st.CpuJiffies;
+            rssPages += st.RssPages;
             if (!states.Contains(st.State)) states.Add(st.State);
             io += ReadIoBytes(pid);
             if (byPpid.TryGetValue(pid, out var children))
@@ -74,7 +77,8 @@ public static class TreeStats
         }
 
         states.Sort();
-        sample = new TreeSample(cpu, io, count, new string(states.ToArray()));
+        var rssMb = rssPages * Environment.SystemPageSize / (1024 * 1024);
+        sample = new TreeSample(cpu, io, rssMb, count, new string(states.ToArray()));
         return true;
     }
 
@@ -104,8 +108,11 @@ public static class TreeStats
         if (!long.TryParse(rest[12], out var stime)) return false;
         long.TryParse(rest[13], out var cutime);
         long.TryParse(rest[14], out var cstime);
+        // field 24 (rss, in pages) — absent on truncated /proc reads, so treat as zero rather than fail
+        long rssPages = 0;
+        if (rest.Length > 21) long.TryParse(rest[21], out rssPages);
         var state = rest[0].Length > 0 ? rest[0][0] : '?';
-        stat = new ProcStat(ppid, state, utime + stime + cutime + cstime);
+        stat = new ProcStat(ppid, state, utime + stime + cutime + cstime, rssPages);
         return true;
     }
 }
