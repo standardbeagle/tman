@@ -83,7 +83,17 @@ public static class Hook
         }
     }
 
-    public static HookDecision Decide(string command, string? cwd, string? parentRunId)
+    public static HookDecision Decide(string command, string? cwd, string? parentRunId) =>
+        Decide(command, cwd, parentRunId, Environment.ProcessPath);
+
+    /// <param name="supervisorPath">
+    /// argv[0] for the rewritten command: this binary. tman ships with an apphost, so
+    /// <see cref="Environment.ProcessPath"/> is the tman executable itself. Passed in rather than
+    /// read here so the unresolvable case — the one that must not emit a rewrite — is reachable
+    /// from a test.
+    /// </param>
+    public static HookDecision Decide(
+        string command, string? cwd, string? parentRunId, string? supervisorPath)
     {
         // already inside a supervised tree: a second claim would queue against its own parent
         if (!string.IsNullOrEmpty(parentRunId)) return new(HookAction.PassThrough);
@@ -111,10 +121,28 @@ public static class Hook
                         "Run `tman init` to adopt supervision, or `tman run -- " + trimmed +
                         "` for this one command.");
 
-        var supervised = "tman run -- " + trimmed;
+        // The Bash tool resolves argv[0] against its own PATH, not this process's, and tman lives in
+        // ~/.local/bin or a node bin dir — both routinely absent from a non-interactive PATH. A bare
+        // program name would turn a working build into exit 127 with nothing run, so without a path
+        // that resolves, say so and leave the command alone rather than rewriting it into a failure.
+        if (!IsResolvableExecutable(supervisorPath))
+            return new(HookAction.Warn,
+                Reason: $"tman: '{trimmed}' is running unsupervised — tman could not locate its own " +
+                        "executable, so rewriting the command would risk replacing a working build " +
+                        "with `command not found`. Run `tman run -- " + trimmed + "` yourself, from " +
+                        "a shell where tman is on PATH, to supervise it.");
+
+        var supervised = Canon.Quote(supervisorPath!) + " run -- " + trimmed;
         return new(HookAction.Rewrite, supervised,
             Reason: $"tman: supervising `{trimmed}` as `{supervised}`");
     }
+
+    /// <summary>
+    /// True only for a fully qualified path to a file that is there now. A relative path is no
+    /// better than a bare name — an exec resolves it through PATH, not cwd.
+    /// </summary>
+    static bool IsResolvableExecutable(string? path) =>
+        !string.IsNullOrEmpty(path) && Path.IsPathFullyQualified(path) && File.Exists(path);
 
     /// <summary>
     /// Deliberately narrow: only the invocations the fleet audit actually found running bare.

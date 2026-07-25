@@ -87,7 +87,11 @@ public static class Canon
         return sb.ToString();
     }
 
-    static string Quote(string arg)
+    /// <summary>
+    /// Renders one argument so a POSIX shell reads it back as the same string. Only quotes when it
+    /// has to, so the common case stays readable.
+    /// </summary>
+    public static string Quote(string arg)
     {
         if (arg.Length == 0) return "''";
         var needsQuote = false;
