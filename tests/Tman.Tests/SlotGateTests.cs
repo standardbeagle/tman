@@ -142,6 +142,23 @@ public class SlotGateTests : IDisposable
         Assert.Equal(0, doubleClaims);
     }
 
+    /// <summary>
+    /// A slot that cannot be opened for a real reason — no space, no directory, bad IO — is not a
+    /// busy slot. Reporting it as one buries the fault behind a full queue timeout and a "all N
+    /// slots busy" message that names the wrong problem.
+    /// </summary>
+    [Fact]
+    public void SlotThatCannotBeOpenedAtAll_ReportsTheIoFaultRatherThanBusy()
+    {
+        if (!Unix) return;
+
+        const string group = "test@/repo";
+        Store.EnsureDirs();
+        File.CreateSymbolicLink(Store.SlotPathFor(group, 0), Path.Combine(_home.Path, "gone", "slot"));
+
+        Assert.Throws<FileNotFoundException>(() => Store.TryAcquireSlot(group, 1));
+    }
+
     [Fact]
     public void StaleSlotLocks_AreSweptLikeDedupLocks()
     {
