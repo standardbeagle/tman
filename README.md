@@ -153,7 +153,7 @@ and build commands through `tman`:
 
 | the agent runs | what happens |
 | --- | --- |
-| `go test ./...` in a project with `.tman.kdl` | rewritten to `tman run -- go test ./...`, and the rewrite is announced |
+| `go test ./...` in a project with `.tman.kdl` | rewritten to `/path/to/tman run -- go test ./...`, and the rewrite is announced |
 | `go test ./...` with no `.tman.kdl` | runs unchanged; the agent is told it was unsupervised |
 | `tman test`, or anything inside a supervised tree (`TMAN_RUN_ID` set) | untouched — no double supervision |
 | `cd app && npm test`, `CI=1 npm test` | runs unchanged, with a note; this hook does not parse shell and will not prefix a string it did not parse |
@@ -162,6 +162,11 @@ and build commands through `tman`:
 It supervises exactly what was asked for (`tman run -- <command>`), never the project's alias of
 the same name — an alias can point somewhere else, and silently running something other than the
 command in the transcript is worse than running it unsupervised.
+
+The rewrite names the **running binary by absolute path**, not `tman`, because the Bash tool
+resolves a program name against its own `PATH` — which frequently does not include `~/.local/bin`
+or the node bin directory tman installs into. If that path cannot be resolved, the hook warns and
+leaves the command alone rather than rewriting a working build into `command not found`.
 
 **It cannot block you.** A missing binary, a malformed request, an unreadable project: every
 failure path leaves the command exactly as written. Exit code 2 is the only one Claude Code treats
