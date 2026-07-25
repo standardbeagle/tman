@@ -53,17 +53,38 @@ public class InitTests
     }
 
     [Fact]
-    public void BareRepo_WritesPlaceholderConfig()
+    public void BareRepo_LeavesTestAliasUndefined()
     {
         using var dir = new TempDir();
 
         var code = RunInitIn(dir.Path, "--shims");
 
         Assert.Equal(0, code);
-        var kdl = File.ReadAllText(System.IO.Path.Combine(dir.Path, ".tman.kdl"));
-        Assert.Contains("alias \"test\"", kdl);
-        Assert.Contains("command \"echo\"", kdl);
+        var config = Config.Load(dir.Path);
+        Assert.NotNull(config);
+        Assert.Empty(config.Aliases);
         Assert.True(File.Exists(System.IO.Path.Combine(dir.Path, "test")));
+    }
+
+    [Fact]
+    public async Task BareRepo_TestAliasFailsLoudlyInsteadOfExitingZero()
+    {
+        using var dir = new TempDir();
+        Assert.Equal(0, RunInitIn(dir.Path, "--shims"));
+
+        var prev = Directory.GetCurrentDirectory();
+        int code;
+        try
+        {
+            Directory.SetCurrentDirectory(dir.Path);
+            code = await Program.Main(new[] { "run", "--alias", "test" });
+        }
+        finally
+        {
+            Directory.SetCurrentDirectory(prev);
+        }
+
+        Assert.NotEqual(0, code);
     }
 
     [Fact]
@@ -94,7 +115,7 @@ public class ConfigLoadTests
 
         Assert.NotNull(config);
         Assert.Equal(2, config.Defaults.MaxParallel);
-        Assert.Equal(TimeSpan.FromSeconds(60), config.Defaults.Stall);
+        Assert.Equal(TimeSpan.FromMinutes(30), config.Defaults.Stall);
         Assert.Equal(TimeSpan.FromHours(24), config.Defaults.Retain);
         Assert.Null(config.Defaults.MaxMemMb);
         Assert.Null(config.Defaults.MaxCpuPct);

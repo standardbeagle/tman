@@ -154,12 +154,40 @@ public class DetectAliasesTests
 public class RenderConfigTests
 {
     [Fact]
-    public void NoDetection_RendersPlaceholderAlias()
+    public void NoDetection_EmitsNoRunnableAlias()
+    {
+        // A stub alias that exits 0 makes a repo report green while running nothing,
+        // which is indistinguishable from a passing suite. Undefined is honest.
+        var kdl = Program.RenderConfig(new List<Program.DetectedAlias>());
+
+        Assert.Contains("defaults {", kdl);
+        Assert.DoesNotContain("command \"echo\"", kdl);
+        Assert.Empty(Kdl.Parse(kdl).Where(n => n.Name == "alias"));
+    }
+
+    [Fact]
+    public void NoDetection_LeavesACommentedTemplateToFillIn()
     {
         var kdl = Program.RenderConfig(new List<Program.DetectedAlias>());
-        Assert.Contains("defaults {", kdl);
-        Assert.Contains("alias \"test\" {", kdl);
-        Assert.Contains("command \"echo\"", kdl);
+        Assert.Contains("// alias \"test\" {", kdl);
+    }
+
+    [Fact]
+    public void ScaffoldedStall_IsAHangBackstopNotARuntimeBudget()
+    {
+        // Cold `go build ./...`, `npm run typecheck` and `dotnet test` routinely run for
+        // minutes without printing; a stall sized like a runtime budget kills them.
+        using var dir = new TempDir();
+        dir.WriteFile(".tman.kdl", Program.RenderConfig(new List<Program.DetectedAlias>
+        {
+            new("test", "go", new[] { "test", "./..." }),
+        }));
+
+        var config = Config.Load(dir.Path);
+
+        Assert.NotNull(config);
+        Assert.True(config.Defaults.Stall >= TimeSpan.FromMinutes(30),
+            $"scaffolded stall {config.Defaults.Stall} is a runtime budget, not a hang backstop");
     }
 
     [Fact]
