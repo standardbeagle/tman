@@ -103,6 +103,45 @@ public class SlotGateTests : IDisposable
         Store.ReleaseLock(reclaimed);
     }
 
+    /// <summary>
+    /// Two runners reclaiming the same dead runner's slot at once. Breaking a stale lock and then
+    /// creating a fresh one is two steps, and each racer can perform the break between the other's
+    /// break and create — leaving both holding a file they created and believing they own the slot.
+    /// The window is a handful of instructions wide, so the race is driven to it repeatedly rather
+    /// than assumed to be hit once.
+    /// </summary>
+    [Fact]
+    public void ConcurrentReclaimOfADeadRunnersSlot_AdmitsOnlyOne()
+    {
+        const string group = "test@/repo";
+        Store.EnsureDirs();
+        var path = Store.SlotPathFor(group, 0);
+        var doubleClaims = 0;
+
+        for (var i = 0; i < 400; i++)
+        {
+            // the slot of a runner that was killed while holding it
+            File.WriteAllText(path, $"2147483646 {DateTime.UtcNow:O}\n");
+
+            var atTheGate = new Barrier(2);
+            var claims = new FileStream?[2];
+            var racers = Enumerable.Range(0, 2)
+                .Select(t => new Thread(() =>
+                {
+                    atTheGate.SignalAndWait();
+                    claims[t] = Store.TryAcquireSlot(group, 1);
+                }))
+                .ToList();
+            foreach (var r in racers) r.Start();
+            foreach (var r in racers) r.Join();
+
+            if (claims.Count(c => c is not null) > 1) doubleClaims++;
+            foreach (var c in claims) c?.Dispose();
+        }
+
+        Assert.Equal(0, doubleClaims);
+    }
+
     [Fact]
     public void StaleSlotLocks_AreSweptLikeDedupLocks()
     {
