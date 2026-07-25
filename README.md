@@ -158,6 +158,7 @@ and build commands through `tman`:
 | `tman test`, or anything inside a supervised tree (`TMAN_RUN_ID` set) | untouched — no double supervision |
 | `cd app && npm test`, `CI=1 npm test` | runs unchanged, with a note; this hook does not parse shell and will not prefix a string it did not parse |
 | `git status`, `npm run dev`, anything else | untouched |
+| any of the above, when tman cannot prove which binary it is running as | runs unchanged, with a note naming the path it refused to use |
 
 It supervises exactly what was asked for (`tman run -- <command>`), never the project's alias of
 the same name — an alias can point somewhere else, and silently running something other than the
@@ -165,8 +166,16 @@ command in the transcript is worse than running it unsupervised.
 
 The rewrite names the **running binary by absolute path**, not `tman`, because the Bash tool
 resolves a program name against its own `PATH` — which frequently does not include `~/.local/bin`
-or the node bin directory tman installs into. If that path cannot be resolved, the hook warns and
-leaves the command alone rather than rewriting a working build into `command not found`.
+or the node bin directory tman installs into.
+
+That path has to be *proven* to be tman before it is emitted: fully qualified, named as tman ships
+(`tman` or `tman.exe`), and present on disk. Nothing else counts as proof. Launched as
+`dotnet tman.dll` rather than as the `tman` executable, the running process is the shared dotnet
+host, and rewriting to it would hand the agent `dotnet run -- go test ./...` — which, in a
+directory holding a `.csproj`, builds and launches an unrelated application. So whenever the hook
+cannot prove what it is about to name — no path, a bare or relative one, a path that is gone, or
+one belonging to some other host — it warns, names the path it rejected, and leaves the command
+exactly as written.
 
 **It cannot block you.** A missing binary, a malformed request, an unreadable project: every
 failure path leaves the command exactly as written. Exit code 2 is the only one Claude Code treats
