@@ -23,7 +23,7 @@ public class DetectAliasesTests
         var aliases = Program.DetectAliases(dir.Path);
 
         Assert.Equal(
-            new[] { "e2e", "integration", "lint", "test" },
+            new[] { "build", "e2e", "integration", "lint", "test" },
             aliases.Select(a => a.Name).OrderBy(n => n));
         Assert.All(aliases, a => Assert.Equal("npm", a.Command));
         var test = aliases.Single(a => a.Name == "test");
@@ -31,10 +31,37 @@ public class DetectAliasesTests
     }
 
     [Fact]
+    public void NpmProject_SkipsLongRunningScripts()
+    {
+        // `dev`/`start` sit idle waiting for requests, which the stall cap would read as hung
+        using var dir = new TempDir();
+        dir.WriteFile("package.json", """
+            { "scripts": { "dev": "vite", "start": "node .", "build": "vite build", "preview": "vite preview" } }
+            """);
+
+        var aliases = Program.DetectAliases(dir.Path);
+
+        Assert.Equal(new[] { "build" }, aliases.Select(a => a.Name));
+    }
+
+    [Fact]
+    public void ViteProject_DetectsBuildAsAnAlias()
+    {
+        using var dir = new TempDir();
+        dir.WriteFile("package.json", """
+            { "scripts": { "dev": "vite", "build": "tsc -b && vite build", "lint": "eslint ." } }
+            """);
+
+        var build = Assert.Single(Program.DetectAliases(dir.Path), a => a.Name == "build");
+        Assert.Equal("npm", build.Command);
+        Assert.Equal(new[] { "run", "build" }, build.Args);
+    }
+
+    [Fact]
     public void NpmProject_WithoutRecognizedScripts_DetectsNothing()
     {
         using var dir = new TempDir();
-        dir.WriteFile("package.json", """{ "scripts": { "build": "tsc", "start": "node ." } }""");
+        dir.WriteFile("package.json", """{ "scripts": { "prepare": "husky", "start": "node ." } }""");
         Assert.Empty(Program.DetectAliases(dir.Path));
     }
 
