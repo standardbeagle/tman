@@ -36,6 +36,14 @@ public class HookTests
         return updated.GetProperty("command").GetString();
     }
 
+    /// <summary>argv[0] of a rewritten command line, unwrapping the shell quoting if it is quoted.</summary>
+    static string SupervisorOf(string commandLine)
+    {
+        if (!commandLine.StartsWith('\'')) return commandLine.Split(' ')[0];
+        var end = commandLine.IndexOf('\'', 1);
+        return commandLine[1..end];
+    }
+
     static string? Warning(string response)
     {
         if (response.Length == 0) return null;
@@ -45,22 +53,70 @@ public class HookTests
     }
 
     [Theory]
-    [InlineData("go test ./...", "tman run -- go test ./...")]
-    [InlineData("go build ./...", "tman run -- go build ./...")]
-    [InlineData("dotnet test", "tman run -- dotnet test")]
-    [InlineData("dotnet build -c Release", "tman run -- dotnet build -c Release")]
-    [InlineData("npm test", "tman run -- npm test")]
-    [InlineData("npm run build", "tman run -- npm run build")]
-    [InlineData("pytest -k \"slow path\"", "tman run -- pytest -k \"slow path\"")]
-    [InlineData("cargo test", "tman run -- cargo test")]
-    [InlineData("make test", "tman run -- make test")]
-    public void BareTestOrBuild_InSupervisedProject_IsRewritten(string command, string expected)
+    [InlineData("go test ./...")]
+    [InlineData("go build ./...")]
+    [InlineData("dotnet test")]
+    [InlineData("dotnet build -c Release")]
+    [InlineData("npm test")]
+    [InlineData("npm run build")]
+    [InlineData("pytest -k \"slow path\"")]
+    [InlineData("cargo test")]
+    [InlineData("make test")]
+    // an absolute program path is the same invocation; the classifier normalizes it before matching
+    [InlineData("/usr/local/bin/npm test")]
+    [InlineData("/opt/homebrew/bin/pytest -q")]
+    public void BareTestOrBuild_InSupervisedProject_IsRewritten(string command)
     {
         using var dir = SupervisedProject();
 
         var response = Hook.Render(Request(command, dir.Path), parentRunId: null);
 
-        Assert.Equal(expected, RewrittenCommand(response));
+        Assert.EndsWith(" run -- " + command, RewrittenCommand(response));
+    }
+
+    /// <summary>
+    /// The Bash tool resolves argv[0] against its own PATH, not this process's. tman installs to
+    /// <c>~/.local/bin</c> or a node bin dir, both routinely absent from a non-interactive PATH, so
+    /// emitting the bare name <c>tman</c> turns a working build into exit 127 with nothing run.
+    /// </summary>
+    [Fact]
+    public void Rewrite_EmitsTheRunningBinarysAbsolutePath_NotABareProgramName()
+    {
+        using var dir = SupervisedProject();
+
+        var rewritten = RewrittenCommand(Hook.Render(Request("go test ./...", dir.Path), parentRunId: null));
+
+        var argv0 = SupervisorOf(rewritten!);
+        Assert.True(Path.IsPathFullyQualified(argv0), $"argv[0] '{argv0}' is not an absolute path");
+        Assert.True(File.Exists(argv0), $"argv[0] '{argv0}' does not exist");
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("tman")]                    // a bare name is exactly what the Bash tool cannot resolve
+    [InlineData("bin/tman")]                // relative: resolved against PATH, not cwd
+    [InlineData("/no/such/dir/tman")]       // absolute but absent
+    public void WithoutAResolvableBinary_WarnsRatherThanEmittingACommandThatCannotRun(string? supervisor)
+    {
+        using var dir = SupervisedProject();
+
+        var decision = Hook.Decide("go test ./...", dir.Path, parentRunId: null, supervisor);
+
+        Assert.Equal(HookAction.Warn, decision.Action);
+        Assert.Null(decision.Command);
+    }
+
+    [Fact]
+    public void SupervisorPathWithASpace_IsQuotedSoArgv0SurvivesTheShell()
+    {
+        using var dir = SupervisedProject();
+        var supervisor = dir.WriteFile("bin dir/tman", "#!/bin/sh\nexit 0\n");
+
+        var decision = Hook.Decide("go test ./...", dir.Path, parentRunId: null, supervisor);
+
+        Assert.Equal(HookAction.Rewrite, decision.Action);
+        Assert.Equal($"'{supervisor}' run -- go test ./...", decision.Command);
     }
 
     [Fact]
@@ -83,7 +139,7 @@ public class HookTests
         var response = Hook.Render(Request("go test ./...", dir.Path), parentRunId: null);
 
         var message = JsonDocument.Parse(response).RootElement.GetProperty("systemMessage").GetString();
-        Assert.Contains("tman run -- go test ./...", message);
+        Assert.Contains("run -- go test ./...", message);
     }
 
     [Fact]
@@ -216,7 +272,7 @@ public class HookCommandTests
         Assert.Equal(0, code);
         var updated = JsonDocument.Parse(stdout).RootElement
             .GetProperty("hookSpecificOutput").GetProperty("updatedInput");
-        Assert.Equal("tman run -- dotnet build", updated.GetProperty("command").GetString());
+        Assert.EndsWith(" run -- dotnet build", updated.GetProperty("command").GetString());
     }
 
     [Fact]
