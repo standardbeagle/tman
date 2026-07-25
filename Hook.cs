@@ -118,8 +118,8 @@ public static class Hook
 
     /// <summary>
     /// Deliberately narrow: only the invocations the fleet audit actually found running bare.
-    /// A command that is not on this list is left alone rather than guessed at. tman invoking
-    /// itself is never a match, so nothing is supervised twice.
+    /// A command that is not on this list is left alone rather than guessed at — which is also
+    /// what keeps tman from ever intercepting itself, with no special case for it.
     /// </summary>
     static bool IsTestOrBuild(string segment)
     {
@@ -132,7 +132,6 @@ public static class Hook
         var sub = words.Length > 1 ? words[1] : "";
         return Basename(words[0]) switch
         {
-            "tman" => false,
             "npm" => sub == "test"
                      || (sub == "run" && words.Length > 2 && SupervisedNpmScripts.Contains(words[2])),
             "go" or "dotnet" => sub is "test" or "build",
