@@ -40,7 +40,12 @@ public static class Hook
     /// Renders a PreToolUse response for Claude Code, or an empty string to say nothing at all.
     /// Throws on malformed input; the caller decides what a failure means (it means "allow").
     /// </summary>
-    public static string Render(string requestJson, string? parentRunId)
+    public static string Render(string requestJson, string? parentRunId) =>
+        Render(requestJson, parentRunId, Environment.ProcessPath);
+
+    /// <param name="supervisorPath">argv[0] for a rewrite; see the four-argument
+    /// <see cref="Decide(string, string?, string?, string?)"/>.</param>
+    public static string Render(string requestJson, string? parentRunId, string? supervisorPath)
     {
         if (JsonNode.Parse(requestJson) is not JsonObject root) return "";
         if ((string?)root["tool_name"] != "Bash") return "";
@@ -48,7 +53,7 @@ public static class Hook
         var command = (string?)toolInput["command"];
         if (string.IsNullOrWhiteSpace(command)) return "";
 
-        var decision = Decide(command, (string?)root["cwd"], parentRunId);
+        var decision = Decide(command, (string?)root["cwd"], parentRunId, supervisorPath);
         switch (decision.Action)
         {
             case HookAction.Rewrite:
