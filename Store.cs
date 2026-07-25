@@ -207,12 +207,31 @@ public static class Store
     static FileStream? TryClaimLock(string path)
     {
         FileStream file;
-        try { file = new FileStream(path, FileMode.OpenOrCreate, FileAccess.Write, FileShare.None); }
-        catch (IOException) { return null; }
+        // the holder can release and unlink the lock between the failed open and the check below,
+        // which then reads as a fault it is not; one retry settles that without hiding a real one
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                file = new FileStream(path, FileMode.OpenOrCreate, FileAccess.Write, FileShare.None);
+                break;
+            }
+            catch (IOException e) when (IsHeldByAnother(e, path)) { return null; }
+            catch (IOException) when (attempt == 0) { }
+        }
 
         StampLockOwner(file);
         return file;
     }
+
+    /// <summary>
+    /// True when the only thing that refused the open was another holder — the one reason
+    /// <see cref="FileShare.None"/> turns away a lock file that is there. A path that is not there,
+    /// a missing directory, or a create that fails outright is a fault, and a run that reads it as a
+    /// busy slot waits out its whole queue timeout before blaming contention for it.
+    /// </summary>
+    static bool IsHeldByAnother(IOException e, string path) =>
+        e is not (FileNotFoundException or DirectoryNotFoundException) && File.Exists(path);
 
     /// <summary>
     /// Gives up a held lock. The file stays: it is the handle, not the name, that admits a run, and
