@@ -62,6 +62,7 @@ tman init --shims --gitignore
 | `tman clean` | run the housekeeping sweep now and report what it did |
 | `tman status [id\|name\|id-prefix] [--json]` | summary counts, or one run's detail |
 | `tman init [--shims] [--gitignore]` | scaffold `.tman.kdl` + shims (aliases it cannot detect are left commented out, so `./test` fails loudly instead of faking a pass) |
+| `tman hook pretooluse` | [Claude Code hook](#claude-code-hook): routes bare test/build commands through tman, and never blocks |
 
 ## Run flags
 
@@ -132,6 +133,40 @@ alias "e2e" {
     max-mem 4096
 }
 ```
+
+## Claude Code hook
+
+Shims only catch commands that go through a shell lookup, on a machine where `tman init --shims`
+ran. An agent calling a Bash tool with `npm test` walks straight past them. `tman hook pretooluse`
+is the same policy applied one level up — it reads the tool call on stdin and re-issues bare test
+and build commands through `tman`:
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      { "matcher": "Bash", "hooks": [{ "type": "command", "command": "tman hook pretooluse" }] }
+    ]
+  }
+}
+```
+
+| the agent runs | what happens |
+| --- | --- |
+| `go test ./...` in a project with `.tman.kdl` | rewritten to `tman run -- go test ./...`, and the rewrite is announced |
+| `go test ./...` with no `.tman.kdl` | runs unchanged; the agent is told it was unsupervised |
+| `tman test`, or anything inside a supervised tree (`TMAN_RUN_ID` set) | untouched — no double supervision |
+| `cd app && npm test`, `CI=1 npm test` | runs unchanged, with a note; this hook does not parse shell and will not prefix a string it did not parse |
+| `git status`, `npm run dev`, anything else | untouched |
+
+It supervises exactly what was asked for (`tman run -- <command>`), never the project's alias of
+the same name — an alias can point somewhere else, and silently running something other than the
+command in the transcript is worse than running it unsupervised.
+
+**It cannot block you.** A missing binary, a malformed request, an unreadable project: every
+failure path leaves the command exactly as written. Exit code 2 is the only one Claude Code treats
+as a block, and this hook never returns it — so `tman` being uninstalled costs supervision, never
+the build.
 
 ## Housekeeping
 
