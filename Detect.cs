@@ -46,7 +46,10 @@ public static partial class Program
     {
         var sb = new System.Text.StringBuilder();
         sb.AppendLine("defaults {");
-        sb.AppendLine("    stall \"60s\"");
+        // A hang backstop, not a runtime budget: cold builds and test suites legitimately
+        // run for many quiet minutes, and killing those is far more costly than noticing a
+        // real hang late.
+        sb.AppendLine("    stall \"30m\"");
         sb.AppendLine("    max-parallel 2");
         sb.AppendLine("    retain \"24h\"");
         sb.AppendLine("    // opt-in ceilings; builds legitimately saturate cores and eat RAM");
@@ -58,10 +61,14 @@ public static partial class Program
 
         if (detected.Count == 0)
         {
-            sb.AppendLine("alias \"test\" {");
-            sb.AppendLine("    command \"echo\"");
-            sb.AppendLine("    args \"replace me\"");
-            sb.AppendLine("}");
+            // No runnable stub: an alias that exits 0 without running anything makes a repo
+            // report green, and a suite that cannot fail looks exactly like one that passes.
+            // Leaving 'test' undefined makes `tman test` fail loudly until it is filled in.
+            sb.AppendLine("// no test command detected; uncomment and fill in:");
+            sb.AppendLine("// alias \"test\" {");
+            sb.AppendLine("//     command \"your-test-runner\"");
+            sb.AppendLine("//     args \"--flag\"");
+            sb.AppendLine("// }");
         }
         foreach (var a in detected)
         {

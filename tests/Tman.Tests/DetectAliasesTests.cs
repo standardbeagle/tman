@@ -162,7 +162,7 @@ public class RenderConfigTests
 
         Assert.Contains("defaults {", kdl);
         Assert.DoesNotContain("command \"echo\"", kdl);
-        Assert.Empty(Kdl.Parse(kdl).Where(n => n.Name == "alias"));
+        Assert.DoesNotContain(Kdl.Parse(kdl), n => n.Name == "alias");
     }
 
     [Fact]
