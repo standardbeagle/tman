@@ -176,6 +176,27 @@ public class HookTests
         Assert.False(string.IsNullOrWhiteSpace(Warning(response)), "the degrade must announce itself");
     }
 
+    /// <summary>
+    /// The identity check asks the filesystem what a path's file name is, rather than splitting on
+    /// both separators the way a command line has to be split. On this platform a backslash is an
+    /// ordinary character in a file name, so <c>/tmp/host/sub\tman</c> names a file called
+    /// <c>sub\tman</c> — not tman — and must be refused. On Windows the same string really does name
+    /// tman in a subdirectory, so the case only exists where the separator rules make it exist.
+    /// </summary>
+    [Fact]
+    public void ABackslashInAFileName_IsNotASeparatorWhereThePlatformSaysItIsNot()
+    {
+        if (Path.DirectorySeparatorChar != '/') return;
+
+        using var dir = SupervisedProject();
+        var notTman = dir.WriteFile("host/sub\\tman", "#!/bin/sh\nexec true\n");
+
+        var decision = Hook.Decide("go test ./...", dir.Path, parentRunId: null, notTman);
+
+        Assert.Equal(HookAction.Warn, decision.Action);
+        Assert.Null(decision.Command);
+    }
+
     [Fact]
     public void SupervisorPathWithASpace_IsQuotedSoArgv0SurvivesTheShell()
     {
@@ -419,7 +440,9 @@ public class HookCommandTests
         Assert.Equal(0, code);
         var hook = JsonDocument.Parse(stdout).RootElement.GetProperty("hookSpecificOutput");
         Assert.False(hook.TryGetProperty("updatedInput", out _));
-        Assert.False(string.IsNullOrWhiteSpace(hook.GetProperty("additionalContext").GetString()));
+        // naming the path is what makes this more than "something was said": it proves the binary
+        // the hook judged was the one it is running as, all the way through Program.Main
+        Assert.Contains(Environment.ProcessPath!, hook.GetProperty("additionalContext").GetString());
     }
 
     [Fact]
