@@ -166,61 +166,60 @@ public static class Store
     }
 
     /// <summary>
-    /// Stamps the owning runner into a freshly created lock. A lock is taken before the run record
-    /// exists, so "no matching record" cannot be used to judge staleness without a race — the owner
-    /// pid can, and it is correct from the instant the lock is created.
+    /// Stamps the owning runner over whatever the lock held before. A lock is taken before the run
+    /// record exists, so "no matching record" cannot be used to judge staleness without a race —
+    /// the owner pid can, and it is correct from the instant the lock is claimed.
     /// </summary>
     public static void StampLockOwner(FileStream lockFile)
     {
         var startUtc = ProcUtil.StartTimeUtc(Environment.ProcessId) ?? DateTime.UtcNow;
         var bytes = System.Text.Encoding.UTF8.GetBytes(
             $"{Environment.ProcessId} {startUtc:O}\n");
+        lockFile.SetLength(0);
         lockFile.Write(bytes);
         lockFile.Flush(flushToDisk: false);
     }
 
     /// <summary>
     /// Claims one of a bucket's <paramref name="maxParallel"/> slots, or returns null when every
-    /// slot is taken. Creating the slot file is the claim, so two runners racing for the last slot
-    /// cannot both win — counting live records could not offer that, because the count is read
-    /// before any of the racers has a record to be counted.
+    /// slot is taken. Holding the slot file exclusively is the claim, so two runners racing for the
+    /// last slot cannot both win — counting live records could not offer that, because the count is
+    /// read before any of the racers has a record to be counted.
     /// </summary>
     public static FileStream? TryAcquireSlot(string runKey, int maxParallel)
     {
         EnsureDirs();
         for (var slot = 0; slot < maxParallel; slot++)
         {
-            var path = SlotPathFor(runKey, slot);
-            var claimed = TryClaimLock(path);
-            // a runner killed while holding a slot would otherwise take it out of circulation forever
-            if (claimed is null && IsLockStale(path))
-            {
-                BreakLock(path);
-                claimed = TryClaimLock(path);
-            }
+            var claimed = TryClaimLock(SlotPathFor(runKey, slot));
             if (claimed is not null) return claimed;
         }
         return null;
     }
 
+    /// <summary>
+    /// Takes a lock file exclusively, creating it when absent and taking it over when its previous
+    /// holder is gone: the OS drops an exclusive handle when the process holding it dies, so a slot
+    /// never has to be unlinked to come back into circulation. Deleting a stale lock and creating a
+    /// fresh one is two steps that cannot be made atomic — two runners reclaiming the same slot each
+    /// delete the file the other just created, and both come away believing they hold it.
+    /// </summary>
     static FileStream? TryClaimLock(string path)
     {
-        try
-        {
-            var file = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None);
-            StampLockOwner(file);
-            return file;
-        }
+        FileStream file;
+        try { file = new FileStream(path, FileMode.OpenOrCreate, FileAccess.Write, FileShare.None); }
         catch (IOException) { return null; }
+
+        StampLockOwner(file);
+        return file;
     }
 
-    /// <summary>Gives up a held lock: drop the handle first, then the file it stands for.</summary>
-    public static void ReleaseLock(FileStream lockFile)
-    {
-        var path = lockFile.Name;
-        lockFile.Dispose();
-        Delete(path);
-    }
+    /// <summary>
+    /// Gives up a held lock. The file stays: it is the handle, not the name, that admits a run, and
+    /// unlinking it here would open the same window the two-step reclaim had. A lock nobody holds is
+    /// swept once its owner is gone.
+    /// </summary>
+    public static void ReleaseLock(FileStream lockFile) => lockFile.Dispose();
 
     /// <summary>True when a lock file's owning runner is gone, so the lock can be broken.</summary>
     public static bool IsLockStale(string lockPath)
@@ -247,7 +246,22 @@ public static class Store
         EnsureDirs();
         var removed = 0;
         foreach (var f in Directory.EnumerateFiles(RunsDir, "*.lock"))
-            if (IsLockStale(f)) { Delete(f); removed++; }
+        {
+            if (!IsLockStale(f)) continue;
+            try
+            {
+                // The stamp is written just after the claim, so a lock can read as stale while a
+                // runner already holds it. Taking it exclusively is what proves nobody does, and
+                // deleting on close keeps the unlink inside that hold — a plain delete would strip
+                // the name from under a claimant and let the next one create it again.
+                using var _ = new FileStream(
+                    f, FileMode.Open, FileAccess.Write, FileShare.None, 1, FileOptions.DeleteOnClose);
+                removed++;
+            }
+            // a live holder took it back, or another sweep got there first: either way it is not ours
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
         return removed;
     }
 }
