@@ -218,6 +218,45 @@ public class HookTests
 }
 
 /// <summary>
+/// Shares the "cwd" collection because it moves the process's working directory, which is global
+/// state.
+/// </summary>
+[Collection("cwd")]
+public class HookSupervisorPathTests
+{
+    /// <summary>
+    /// A relative argv[0] is resolved through PATH, not cwd — the same trap that makes bare
+    /// <c>./test</c> land on an unrelated binary on this fleet. So a relative supervisor path must
+    /// be refused even when a file of that name really is sitting in the working directory: the
+    /// shell that runs the rewritten command would not find it there.
+    /// </summary>
+    [Fact]
+    public void ARelativeSupervisorPath_IsRefusedEvenWhenThatFileExistsInCwd()
+    {
+        using var dir = new TempDir();
+        dir.WriteFile(".tman.kdl", "defaults {\n    max-parallel 2\n}\n");
+        dir.WriteFile("bin/tman", "#!/bin/sh\nexit 0\n");
+        var relative = Path.Combine("bin", "tman");
+
+        var previous = Environment.CurrentDirectory;
+        HookDecision decision;
+        try
+        {
+            Environment.CurrentDirectory = dir.Path;
+            Assert.True(File.Exists(relative), "precondition: the relative path resolves from cwd");
+            decision = Hook.Decide("go test ./...", dir.Path, parentRunId: null, relative);
+        }
+        finally
+        {
+            Environment.CurrentDirectory = previous;
+        }
+
+        Assert.Equal(HookAction.Warn, decision.Action);
+        Assert.Null(decision.Command);
+    }
+}
+
+/// <summary>
 /// Drives the hook through <see cref="Program.Main"/>, the way Claude Code invokes it: JSON on
 /// stdin, JSON on stdout, exit code decides whether the user's command is blocked. Shares the
 /// "cwd" collection because redirecting <see cref="Console"/> is process-global state.
