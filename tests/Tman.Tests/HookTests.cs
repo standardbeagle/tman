@@ -27,6 +27,18 @@ public class HookTests
         return dir;
     }
 
+    /// <summary>
+    /// A stand-in for an installed tman: an absolute path, on disk, named the way tman ships.
+    /// Every rewrite test injects this rather than letting the suite's own
+    /// <see cref="Environment.ProcessPath"/> stand in for tman — under <c>dotnet test</c> that is
+    /// the xUnit test host, so a test that relied on it would be asserting the identity check is
+    /// satisfied by a binary that is not tman.
+    /// </summary>
+    static string InstalledTman(TempDir dir) => dir.WriteFile("bin/tman", "#!/bin/sh\nexec true\n");
+
+    static string Render(TempDir dir, string command, string? parentRunId = null) =>
+        Hook.Render(Request(command, dir.Path), parentRunId, InstalledTman(dir));
+
     static string? RewrittenCommand(string response)
     {
         if (response.Length == 0) return null;
@@ -69,9 +81,7 @@ public class HookTests
     {
         using var dir = SupervisedProject();
 
-        var response = Hook.Render(Request(command, dir.Path), parentRunId: null);
-
-        Assert.EndsWith(" run -- " + command, RewrittenCommand(response));
+        Assert.EndsWith(" run -- " + command, RewrittenCommand(Render(dir, command)));
     }
 
     /// <summary>
@@ -80,15 +90,55 @@ public class HookTests
     /// emitting the bare name <c>tman</c> turns a working build into exit 127 with nothing run.
     /// </summary>
     [Fact]
-    public void Rewrite_EmitsTheRunningBinarysAbsolutePath_NotABareProgramName()
+    public void Rewrite_NamesTheTmanBinaryByItsAbsolutePath_NotABareProgramName()
     {
         using var dir = SupervisedProject();
 
-        var rewritten = RewrittenCommand(Hook.Render(Request("go test ./...", dir.Path), parentRunId: null));
+        var rewritten = RewrittenCommand(Render(dir, "go test ./..."));
 
-        var argv0 = SupervisorOf(rewritten!);
-        Assert.True(Path.IsPathFullyQualified(argv0), $"argv[0] '{argv0}' is not an absolute path");
-        Assert.True(File.Exists(argv0), $"argv[0] '{argv0}' does not exist");
+        Assert.Equal(InstalledTman(dir), SupervisorOf(rewritten!));
+    }
+
+    /// <summary>
+    /// The identity half of the invariant. Each of these is an absolute path to a file that really
+    /// is on disk — the previous check passed all of them. <c>dotnet</c> is the one observed in the
+    /// field: <c>dotnet bin/Debug/net10.0/tman.dll hook pretooluse</c> makes
+    /// <see cref="Environment.ProcessPath"/> the shared host, and the rewrite became
+    /// <c>/usr/lib/dotnet/dotnet run -- go test ./...</c> — which in any directory holding a
+    /// <c>.csproj</c> builds and launches an unrelated application. Silently running a different
+    /// program is worse than the <c>exit 127</c> that motivated the absolute path in the first place.
+    /// </summary>
+    [Theory]
+    [InlineData("dotnet")]      // the managed host, not the apphost: the field failure
+    [InlineData("dotnet.exe")]
+    [InlineData("testhost")]    // what this very suite runs under
+    [InlineData("sh")]
+    [InlineData("tman.dll")]    // tman's own managed assembly is not something you can exec
+    [InlineData("tmanx")]
+    public void AnExistingAbsolutePathThatIsNotTman_IsRefused(string fileName)
+    {
+        using var dir = SupervisedProject();
+        var impostor = dir.WriteFile("host/" + fileName, "#!/bin/sh\nexec true\n");
+
+        var decision = Hook.Decide("go test ./...", dir.Path, parentRunId: null, impostor);
+
+        Assert.Equal(HookAction.Warn, decision.Action);
+        Assert.Null(decision.Command);
+        Assert.Contains(impostor, decision.Reason);
+    }
+
+    [Theory]
+    [InlineData("tman")]
+    [InlineData("tman.exe")]    // the same binary as Windows publishes it
+    public void TheNamesTmanShipsUnder_AreAccepted(string fileName)
+    {
+        using var dir = SupervisedProject();
+        var tman = dir.WriteFile("bin/" + fileName, "#!/bin/sh\nexec true\n");
+
+        var decision = Hook.Decide("go test ./...", dir.Path, parentRunId: null, tman);
+
+        Assert.Equal(HookAction.Rewrite, decision.Action);
+        Assert.Equal(tman + " run -- go test ./...", decision.Command);
     }
 
     [Theory]
@@ -96,8 +146,8 @@ public class HookTests
     [InlineData("")]
     [InlineData("tman")]                    // a bare name is exactly what the Bash tool cannot resolve
     [InlineData("bin/tman")]                // relative: resolved against PATH, not cwd
-    [InlineData("/no/such/dir/tman")]       // absolute but absent
-    public void WithoutAResolvableBinary_WarnsRatherThanEmittingACommandThatCannotRun(string? supervisor)
+    [InlineData("/no/such/dir/tman")]       // absolute and correctly named, but not there
+    public void WithoutProofOfATmanBinary_WarnsRatherThanEmittingACommandThatCannotRun(string? supervisor)
     {
         using var dir = SupervisedProject();
 
@@ -105,6 +155,24 @@ public class HookTests
 
         Assert.Equal(HookAction.Warn, decision.Action);
         Assert.Null(decision.Command);
+        Assert.False(string.IsNullOrWhiteSpace(decision.Reason), "the degrade must announce itself");
+    }
+
+    /// <summary>
+    /// A degrade nobody is told about is indistinguishable from supervision that worked. The Warn
+    /// branch's only channel is <c>additionalContext</c>, so an empty reason silently drops the
+    /// whole safety path — pin it at the wire format, not just on the decision record.
+    /// </summary>
+    [Fact]
+    public void TheDegrade_ReachesTheAgentAsNonEmptyAdditionalContext()
+    {
+        using var dir = SupervisedProject();
+        var impostor = dir.WriteFile("host/dotnet", "#!/bin/sh\nexec true\n");
+
+        var response = Hook.Render(Request("go test ./...", dir.Path), parentRunId: null, impostor);
+
+        Assert.Null(RewrittenCommand(response));
+        Assert.False(string.IsNullOrWhiteSpace(Warning(response)), "the degrade must announce itself");
     }
 
     [Fact]
@@ -124,7 +192,7 @@ public class HookTests
     {
         using var dir = SupervisedProject();
 
-        var response = Hook.Render(Request("go test ./...", dir.Path), parentRunId: null);
+        var response = Render(dir, "go test ./...");
 
         var updated = JsonDocument.Parse(response).RootElement
             .GetProperty("hookSpecificOutput").GetProperty("updatedInput");
@@ -136,7 +204,7 @@ public class HookTests
     {
         using var dir = SupervisedProject();
 
-        var response = Hook.Render(Request("go test ./...", dir.Path), parentRunId: null);
+        var response = Render(dir, "go test ./...");
 
         var message = JsonDocument.Parse(response).RootElement.GetProperty("systemMessage").GetString();
         Assert.Contains("run -- go test ./...", message);
@@ -147,7 +215,7 @@ public class HookTests
     {
         using var dir = new TempDir();
 
-        var response = Hook.Render(Request("go test ./...", dir.Path), parentRunId: null);
+        var response = Render(dir, "go test ./...");
 
         Assert.Null(RewrittenCommand(response));
         Assert.Contains(".tman.kdl", Warning(response));
@@ -158,7 +226,7 @@ public class HookTests
     {
         using var dir = SupervisedProject();
 
-        var response = Hook.Render(Request("cd packages/app && npm test", dir.Path), parentRunId: null);
+        var response = Render(dir, "cd packages/app && npm test");
 
         Assert.Null(RewrittenCommand(response));
         Assert.Contains("tman run --", Warning(response));
@@ -169,7 +237,7 @@ public class HookTests
     {
         using var dir = SupervisedProject();
 
-        var response = Hook.Render(Request("CI=1 npm test", dir.Path), parentRunId: null);
+        var response = Render(dir, "CI=1 npm test");
 
         Assert.Null(RewrittenCommand(response));
         Assert.NotNull(Warning(response));
@@ -180,9 +248,7 @@ public class HookTests
     {
         using var dir = SupervisedProject();
 
-        var response = Hook.Render(Request("go test ./...", dir.Path), parentRunId: "01abc");
-
-        Assert.Equal("", response);
+        Assert.Equal("", Render(dir, "go test ./...", parentRunId: "01abc"));
     }
 
     [Theory]
@@ -193,7 +259,7 @@ public class HookTests
     {
         using var dir = SupervisedProject();
 
-        Assert.Equal("", Hook.Render(Request(command, dir.Path), parentRunId: null));
+        Assert.Equal("", Render(dir, command));
     }
 
     [Theory]
@@ -205,7 +271,7 @@ public class HookTests
     {
         using var dir = SupervisedProject();
 
-        Assert.Equal("", Hook.Render(Request(command, dir.Path), parentRunId: null));
+        Assert.Equal("", Render(dir, command));
     }
 
     [Fact]
@@ -213,7 +279,43 @@ public class HookTests
     {
         using var dir = SupervisedProject();
 
-        Assert.Equal("", Hook.Render(Request("go test ./...", dir.Path, tool: "Read"), parentRunId: null));
+        Assert.Equal("", Hook.Render(Request("go test ./...", dir.Path, tool: "Read"), null, InstalledTman(dir)));
+    }
+
+    /// <summary>
+    /// Everything above injects argv[0], so nothing above would notice if the production entry point
+    /// supplied a different binary than the process it is running as. This pins that seam: what
+    /// Claude Code gets must be exactly what <see cref="Environment.ProcessPath"/> decides, and the
+    /// decision must name that path so the two forms are distinguishable at all.
+    /// </summary>
+    [Fact]
+    public void TheProductionEntryPoint_SuppliesThisProcessesOwnPath_NotSomeOtherBinary()
+    {
+        using var dir = SupervisedProject();
+
+        var viaEntryPoint = Hook.Decide("go test ./...", dir.Path, parentRunId: null);
+        var viaProcessPath = Hook.Decide(
+            "go test ./...", dir.Path, parentRunId: null, Environment.ProcessPath);
+
+        Assert.Equal(viaProcessPath, viaEntryPoint);
+        Assert.Contains(Environment.ProcessPath!, viaEntryPoint.Reason);
+    }
+
+    /// <summary>
+    /// The field failure, reproduced through the production entry point: this suite runs under the
+    /// xUnit test host, which is exactly the shape of <c>dotnet tman.dll</c> — a real absolute path
+    /// to a real executable that is not tman. It must degrade, not rewrite.
+    /// </summary>
+    [Fact]
+    public void RunningUnderAHostThatIsNotTman_TheEntryPointDegradesInsteadOfEmittingThatHost()
+    {
+        using var dir = SupervisedProject();
+        Assert.NotEqual("tman", Path.GetFileNameWithoutExtension(Environment.ProcessPath));
+
+        var decision = Hook.Decide("go test ./...", dir.Path, parentRunId: null);
+
+        Assert.Equal(HookAction.Warn, decision.Action);
+        Assert.Null(decision.Command);
     }
 }
 
@@ -299,8 +401,13 @@ public class HookCommandTests
             ["tool_input"] = new Dictionary<string, object?> { ["command"] = command },
         });
 
+    /// <summary>
+    /// Under the test host the identity check cannot pass, so this pins the shape the agent sees
+    /// end to end — a note, no rewrite, exit 0 — rather than the rewrite it used to assert, which
+    /// only ever passed because the test host was mistaken for tman.
+    /// </summary>
     [Fact]
-    public async Task PreToolUse_RewritesABareBuildAndExitsZero()
+    public async Task PreToolUse_LeavesABareBuildAloneWithANoteWhenItCannotProveItsOwnIdentity()
     {
         using var dir = new TempDir();
         dir.WriteFile(".tman.kdl", "defaults {\n    max-parallel 2\n}\n");
@@ -309,9 +416,9 @@ public class HookCommandTests
             BashRequest("dotnet build", dir.Path), parentRunId: null, "pretooluse");
 
         Assert.Equal(0, code);
-        var updated = JsonDocument.Parse(stdout).RootElement
-            .GetProperty("hookSpecificOutput").GetProperty("updatedInput");
-        Assert.EndsWith(" run -- dotnet build", updated.GetProperty("command").GetString());
+        var hook = JsonDocument.Parse(stdout).RootElement.GetProperty("hookSpecificOutput");
+        Assert.False(hook.TryGetProperty("updatedInput", out _));
+        Assert.False(string.IsNullOrWhiteSpace(hook.GetProperty("additionalContext").GetString()));
     }
 
     [Fact]
