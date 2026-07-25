@@ -169,13 +169,20 @@ public class HookTests
 [Collection("cwd")]
 public class HookCommandTests
 {
-    static async Task<(int Code, string Stdout)> RunHook(string stdin, params string[] argv)
+    /// <param name="parentRunId">
+    /// The suite itself runs under <c>tman</c>, so TMAN_RUN_ID is set in this process and every
+    /// command would look nested. Each case states the tree it means to be in.
+    /// </param>
+    static async Task<(int Code, string Stdout)> RunHook(
+        string stdin, string? parentRunId = null, params string[] argv)
     {
         var prevIn = Console.In;
         var prevOut = Console.Out;
+        var prevRunId = Environment.GetEnvironmentVariable(Runner.ParentIdEnvVar);
         var captured = new StringWriter();
         try
         {
+            Environment.SetEnvironmentVariable(Runner.ParentIdEnvVar, parentRunId);
             Console.SetIn(new StringReader(stdin));
             Console.SetOut(captured);
             var code = await Program.Main(new[] { "hook" }.Concat(argv).ToArray());
@@ -183,24 +190,28 @@ public class HookCommandTests
         }
         finally
         {
+            Environment.SetEnvironmentVariable(Runner.ParentIdEnvVar, prevRunId);
             Console.SetIn(prevIn);
             Console.SetOut(prevOut);
         }
     }
+
+    static string BashRequest(string command, string cwd) =>
+        JsonSerializer.Serialize(new Dictionary<string, object?>
+        {
+            ["tool_name"] = "Bash",
+            ["cwd"] = cwd,
+            ["tool_input"] = new Dictionary<string, object?> { ["command"] = command },
+        });
 
     [Fact]
     public async Task PreToolUse_RewritesABareBuildAndExitsZero()
     {
         using var dir = new TempDir();
         dir.WriteFile(".tman.kdl", "defaults {\n    max-parallel 2\n}\n");
-        var request = JsonSerializer.Serialize(new Dictionary<string, object?>
-        {
-            ["tool_name"] = "Bash",
-            ["cwd"] = dir.Path,
-            ["tool_input"] = new Dictionary<string, object?> { ["command"] = "dotnet build" },
-        });
 
-        var (code, stdout) = await RunHook(request, "pretooluse");
+        var (code, stdout) = await RunHook(
+            BashRequest("dotnet build", dir.Path), parentRunId: null, "pretooluse");
 
         Assert.Equal(0, code);
         var updated = JsonDocument.Parse(stdout).RootElement
@@ -209,9 +220,22 @@ public class HookCommandTests
     }
 
     [Fact]
+    public async Task InsideASupervisedTree_TheSameBuildIsLeftAlone()
+    {
+        using var dir = new TempDir();
+        dir.WriteFile(".tman.kdl", "defaults {\n    max-parallel 2\n}\n");
+
+        var (code, stdout) = await RunHook(
+            BashRequest("dotnet build", dir.Path), parentRunId: "01abc", "pretooluse");
+
+        Assert.Equal(0, code);
+        Assert.Equal("", stdout.Trim());
+    }
+
+    [Fact]
     public async Task MalformedStdin_SaysNothingAndExitsZeroRatherThanBlocking()
     {
-        var (code, stdout) = await RunHook("{ this is not json", "pretooluse");
+        var (code, stdout) = await RunHook("{ this is not json", parentRunId: null, "pretooluse");
 
         Assert.Equal(0, code);
         Assert.Equal("", stdout.Trim());
@@ -220,9 +244,19 @@ public class HookCommandTests
     [Fact]
     public async Task EmptyStdin_SaysNothingAndExitsZeroRatherThanBlocking()
     {
-        var (code, stdout) = await RunHook("", "pretooluse");
+        var (code, stdout) = await RunHook("", parentRunId: null, "pretooluse");
 
         Assert.Equal(0, code);
+        Assert.Equal("", stdout.Trim());
+    }
+
+    [Fact]
+    public async Task UnknownHookEvent_FailsLoudlyWithoutBlocking()
+    {
+        var (code, stdout) = await RunHook("{}", parentRunId: null, "posttooluse");
+
+        Assert.NotEqual(0, code);
+        Assert.NotEqual(2, code); // 2 is the only exit code that blocks the tool call
         Assert.Equal("", stdout.Trim());
     }
 }

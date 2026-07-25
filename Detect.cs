@@ -18,7 +18,7 @@ public static partial class Program
                 {
                     foreach (var s in scripts.EnumerateObject())
                     {
-                        if (s.Name is "test" or "e2e" or "lint" or "integration" or "build" or "typecheck")
+                        if (Hook.SupervisedNpmScripts.Contains(s.Name))
                             found.Add(new DetectedAlias(s.Name, "npm", new[] { "run", s.Name }));
                     }
                 }

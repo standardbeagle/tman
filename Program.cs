@@ -35,6 +35,7 @@ public static partial class Program
                 case "clean": return CmdClean();
                 case "status": return CmdStatus(rest);
                 case "init": return CmdInit(rest);
+                case "hook": return CmdHook(rest);
                 case "--help" or "-h" or "help": PrintUsage(); return 0;
                 case "--version" or "-v": Console.WriteLine($"tman {Version}"); return 0;
                 default:
@@ -398,6 +399,32 @@ public static partial class Program
         return 0;
     }
 
+    /// <summary>
+    /// Claude Code PreToolUse hook: request JSON on stdin, response JSON on stdout. It never
+    /// returns 2 (the only blocking exit code) and never propagates an exception, because a hook
+    /// that cannot decide must let the user's command through unchanged.
+    /// </summary>
+    static int CmdHook(string[] argv)
+    {
+        var evt = argv.FirstOrDefault();
+        if (evt != "pretooluse")
+        {
+            Console.Error.WriteLine($"tman: unknown hook event '{evt ?? ""}' (expected 'pretooluse')");
+            return Runner.ExitNotFound;
+        }
+        try
+        {
+            var response = Hook.Render(
+                Console.In.ReadToEnd(), Environment.GetEnvironmentVariable(Runner.ParentIdEnvVar));
+            if (response.Length > 0) Console.Out.Write(response);
+        }
+        catch (Exception e)
+        {
+            Console.Error.WriteLine($"tman: hook error, command left unsupervised: {e.Message}");
+        }
+        return 0;
+    }
+
     internal sealed record DetectedAlias(string Name, string Command, string[] Args);
 
     static void PrintUsage() => Console.WriteLine("""
@@ -412,6 +439,9 @@ public static partial class Program
           tman clean                              reap orphans, prune old records
           tman status [id|name] [--json]          summary or run detail
           tman init [--shims] [--gitignore]       scaffold .tman.kdl (+ shim scripts)
+          tman hook pretooluse                    Claude Code PreToolUse hook: reads the tool call
+                                                  on stdin, re-issues bare test/build commands
+                                                  through tman, never blocks
 
         run flags:
           --name N            dedup lock name (per directory; fail if already running)
