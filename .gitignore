@@ -4,3 +4,6 @@ obj/
 # tman shims
 /test
 /test.cmd
+
+# worktrack loop state — per-machine lease + session notes, not shared history
+.worktrack/
