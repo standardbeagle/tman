@@ -25,12 +25,13 @@ project with no configuration at all.
   `max-mem 2048` default did the same to any bundler large enough to matter. Both still work as
   flags and config keys, and `tman init` now scaffolds them commented out. The built-in floor is
   now only stall detection plus bucket gating.
-- **`--stall` requires silence *and* idleness.** The stall check samples the whole process tree's
-  CPU and I/O, so quiet-but-working runs like `go test` and `dotnet build` are no longer killed for
-  not printing anything. The kill message reports the tree's process count and states.
-- **`--max-mem` measures the whole process tree.** It read the direct child's working set, which is
-  the wrong process for any wrapper command — `npm run build` reported the npm shell's ~15 MB while
-  node grew underneath, so the cap never fired on the run it existed to catch.
+- **`--stall` requires silence *and* idleness.** The stall check samples the process tree's CPU and
+  I/O, so quiet-but-working runs like `go test` and `dotnet build` are no longer killed for not
+  printing anything. The kill message reports the tree's process count and states. **Linux only** —
+  see the platform note below.
+- **`--max-mem` measures the whole process tree** on Linux. It read the direct child's working set,
+  which is the wrong process for any wrapper command — `npm run build` reported the npm shell's
+  ~15 MB while node grew underneath, so the cap never fired on the run it existed to catch.
 - **Run ages and sizes are formatted at human scale.** Ages used `mm:ss`, which wraps: a 90-minute
   run displayed as `30:00`, i.e. shorter than a 31-minute one.
 - **`tman status` prints readable detail** instead of a single line of JSON. Use `--json` for the
@@ -63,6 +64,13 @@ project with no configuration at all.
   lock and registering.
 - Unreadable and off-schema record files are cleaned up. They were skipped by every reader and so
   were never revisited by anything, accumulating indefinitely.
+
+### Platform note
+
+Tree-walking needs `/proc`, so it is Linux-only. On macOS and Windows a sample sees the supervised
+process alone: `--stall` falls back to output-only detection (as in 0.1.x), and `--max-mem`
+measures the root process rather than the tree. Give quiet-but-busy runs a longer `--stall` on
+those platforms.
 
 ### Upgrading
 

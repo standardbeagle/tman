@@ -61,9 +61,15 @@ public class TreeStatsTests
     }
 
     [Fact]
+    public void CoversTree_OnlyWhereParentPidsAreCheaplyAvailable()
+    {
+        Assert.Equal(OperatingSystem.IsLinux(), TreeStats.CoversTree);
+    }
+
+    [Fact]
     public void TrySample_IncludesChildProcesses()
     {
-        if (!OperatingSystem.IsLinux()) return;
+        if (!TreeStats.CoversTree) return;
 
         using var child = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
         {

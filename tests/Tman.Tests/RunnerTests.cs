@@ -34,7 +34,9 @@ public class RunnerTests : IDisposable
     [Fact]
     public async Task SilentBusyChild_IsNotStalled()
     {
-        if (!Unix) return;
+        // The busy work happens in a grandchild, so seeing it requires walking the tree.
+        // Where tman cannot do that, silence is all it has to go on and the kill is correct.
+        if (!Unix || !TreeStats.CoversTree) return;
 
         var err = new StringWriter();
         var prevErr = Console.Error;

@@ -57,9 +57,12 @@ public static class Canon
     public static string Dir(string dir)
     {
         var full = TryFullPath(dir);
-        return full.Length > 1
-            ? full.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
-            : full;
+        // A root keeps its separator: "/" would trim to "" and "D:\" to "D:", which is
+        // drive-relative rather than the drive root.
+        var root = Path.GetPathRoot(full);
+        if (!string.IsNullOrEmpty(root) && string.Equals(full, root, StringComparison.Ordinal))
+            return full;
+        return full.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
     }
 
     /// <summary>Short name for a resolved command, for table columns where the full path is noise.</summary>

@@ -8,8 +8,15 @@ internal readonly record struct ProcStat(int Ppid, char State, long CpuJiffies, 
 
 public static class TreeStats
 {
+    /// <summary>
+    /// True when a sample covers the whole process tree. Only Linux exposes parent pids and
+    /// per-process io counters cheaply (/proc); elsewhere a sample sees the root process alone,
+    /// so work happening in a descendant is invisible and must not be read as idleness.
+    /// </summary>
+    public static bool CoversTree => OperatingSystem.IsLinux();
+
     public static bool TrySample(int rootPid, out TreeSample sample) =>
-        OperatingSystem.IsLinux() ? TrySampleLinux(rootPid, out sample) : TrySampleRootOnly(rootPid, out sample);
+        CoversTree ? TrySampleLinux(rootPid, out sample) : TrySampleRootOnly(rootPid, out sample);
 
     static bool TrySampleRootOnly(int rootPid, out TreeSample sample)
     {

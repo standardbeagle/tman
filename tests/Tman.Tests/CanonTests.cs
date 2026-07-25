@@ -43,9 +43,22 @@ public class CanonTests
     [Fact]
     public void Dir_IsAbsoluteWithoutTrailingSeparator()
     {
-        Assert.Equal("/tmp", Canon.Dir("/tmp/"));
-        Assert.Equal("/tmp", Canon.Dir("/tmp"));
-        Assert.Equal("/", Canon.Dir("/"));
+        var sep = Path.DirectorySeparatorChar;
+        var dir = Path.Combine(Path.GetTempPath(), "canon-dir-check");
+
+        Assert.Equal(Canon.Dir(dir), Canon.Dir(dir + sep));
+        Assert.False(Canon.Dir(dir + sep).EndsWith(sep), "trailing separator should be trimmed");
+        Assert.True(Path.IsPathRooted(Canon.Dir("relative-thing")), "should absolutize against the cwd");
+    }
+
+    [Fact]
+    public void Dir_KeepsTheRootItself()
+    {
+        // trimming a root turns "/" into "" and "D:\" into "D:", which means the drive's
+        // current directory rather than the drive root
+        var root = Path.GetPathRoot(Path.GetFullPath(Path.GetTempPath()))!;
+        Assert.Equal(root, Canon.Dir(root));
+        Assert.True(Path.IsPathRooted(Canon.Dir(root)));
     }
 
     [Theory]

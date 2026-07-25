@@ -8,7 +8,7 @@
 
 LLM agents start test suites and then hang, get distracted, or survive a machine suspend — leaving processes that drain your system for hours. `tman` wraps every run with hard limits and a reaper, so nothing outlives its welcome.
 
-- **wall-time + stall kills** — `--max-time 10m`, `--stall 60s` (silent *and* idle = hung; quiet-but-busy work like `go test` keeps running)
+- **wall-time + stall kills** — `--max-time 10m`, `--stall 60s` (on Linux: silent *and* idle = hung, so quiet-but-busy work like `go test` keeps running)
 - **resource culling** — opt-in `--max-mem 2g`, `--max-cpu 95` (sustained) kill the whole process tree
 - **orphan reaping** — every `tman` command kills children whose runner died, prunes expired records, and frees dead locks
 - **dedup locks** — `--name test` refuses duplicates; `--replace` kills the old run
@@ -70,13 +70,20 @@ tman init --shims --gitignore
 | `--name N` | — | dedup lock; refuses if a live run has the same name **in this directory** |
 | `--replace` | off | with `--name`: kill the existing run first |
 | `--max-time T` | — | wall-clock limit → kill, exit 124 |
-| `--stall T` | 60s | no output **and** no cpu/io activity in the process tree for T → kill, exit 125 |
+| `--stall T` | 60s | no output **and** no cpu/io activity for T → kill, exit 125 |
 | `--max-mem M` | — | ceiling on the process tree's RSS (MB or `2g`) → cull, exit 126 |
 | `--max-cpu P` | — | sustained CPU% → cull, exit 126 |
 | `--max-parallel N` | 2 | queue while N live runs share this run's bucket |
 | `--queue-timeout T` | 5m | give up waiting for a slot |
 
 Cap precedence: CLI flags > alias block > `defaults` block > built-ins.
+
+> **Platform note.** Activity-aware stall detection walks the whole process tree on **Linux**
+> only, where `/proc` exposes parent pids and per-process io counters cheaply. On macOS and
+> Windows a sample sees the supervised process alone, so work done by a descendant is invisible
+> and `--stall` falls back to output-only detection. Give quiet-but-busy runs a longer `--stall`
+> on those platforms. `--max-mem` has the same limit: it sums the tree on Linux and measures the
+> root process elsewhere.
 
 ### Buckets
 

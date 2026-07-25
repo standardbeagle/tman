@@ -30,8 +30,8 @@ curl -fsSL https://raw.githubusercontent.com/standardbeagle/tman/main/install.sh
     <tr><td><code>--name N</code></td><td>—</td><td>dedup lock; refuses to start if a live run has the same name <strong>in this directory</strong></td></tr>
     <tr><td><code>--replace</code></td><td>off</td><td>with <code>--name</code>: kill the existing run first</td></tr>
     <tr><td><code>--max-time T</code></td><td>—</td><td>wall-clock limit → kill, exit 124</td></tr>
-    <tr><td><code>--stall T</code></td><td>60s</td><td>no output <strong>and</strong> no cpu/io activity in the process tree for T → kill, exit 125</td></tr>
-    <tr><td><code>--max-mem M</code></td><td>—</td><td>process tree RSS above M (MB, or <code>2g</code>) → cull, exit 126</td></tr>
+    <tr><td><code>--stall T</code></td><td>60s</td><td>no output <strong>and</strong> no cpu/io activity for T → kill, exit 125</td></tr>
+    <tr><td><code>--max-mem M</code></td><td>—</td><td>RSS above M (MB, or <code>2g</code>) → cull, exit 126</td></tr>
     <tr><td><code>--max-cpu P</code></td><td>—</td><td>CPU above P% for 3 consecutive seconds → cull, exit 126</td></tr>
     <tr><td><code>--max-parallel N</code></td><td>2</td><td>queue while N live runs share this run's bucket</td></tr>
     <tr><td><code>--queue-timeout T</code></td><td>5m</td><td>give up waiting for a parallel slot</td></tr>
@@ -41,6 +41,16 @@ curl -fsSL https://raw.githubusercontent.com/standardbeagle/tman/main/install.sh
     <code>--max-time</code>, <code>--max-mem</code>, and <code>--max-cpu</code> have no built-in
     default. A build is supposed to saturate cores and can legitimately want several GB, so culling
     it out of the box would break <code>tman run -- vite build</code> in a project with no config.
+  </p>
+
+  <h2>platform note</h2>
+  <p>
+    Activity-aware stall detection walks the whole process tree on <strong>Linux</strong> only, where
+    <code>/proc</code> exposes parent pids and per-process io counters cheaply. On macOS and Windows a
+    sample sees the supervised process alone, so work done by a descendant is invisible and
+    <code>--stall</code> falls back to output-only detection — give quiet-but-busy runs a longer
+    <code>--stall</code> there. <code>--max-mem</code> has the same limit: it sums the tree on Linux and
+    measures the root process elsewhere.
   </p>
 
   <h2>buckets</h2>
