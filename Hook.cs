@@ -92,10 +92,12 @@ public static class Hook
         Decide(command, cwd, parentRunId, Environment.ProcessPath);
 
     /// <param name="supervisorPath">
-    /// argv[0] for the rewritten command: this binary. tman ships with an apphost, so
-    /// <see cref="Environment.ProcessPath"/> is the tman executable itself. Passed in rather than
-    /// read here so the unresolvable case — the one that must not emit a rewrite — is reachable
-    /// from a test.
+    /// Candidate argv[0] for the rewritten command — normally
+    /// <see cref="Environment.ProcessPath"/>, which is the tman apphost when tman was launched as
+    /// itself and some other host's binary when it was not. It is a candidate, not a fact: see
+    /// <see cref="IsProvenTmanExecutable"/>. Passed in rather than read here because the test host
+    /// this suite runs under is one of those other hosts, so a test that let this default would be
+    /// asserting against an accident of its own environment.
     /// </param>
     public static HookDecision Decide(
         string command, string? cwd, string? parentRunId, string? supervisorPath)
@@ -126,28 +128,55 @@ public static class Hook
                         "Run `tman init` to adopt supervision, or `tman run -- " + trimmed +
                         "` for this one command.");
 
-        // The Bash tool resolves argv[0] against its own PATH, not this process's, and tman lives in
-        // ~/.local/bin or a node bin dir — both routinely absent from a non-interactive PATH. A bare
-        // program name would turn a working build into exit 127 with nothing run, so without a path
-        // that resolves, say so and leave the command alone rather than rewriting it into a failure.
-        if (!IsResolvableExecutable(supervisorPath))
+        if (!IsProvenTmanExecutable(supervisorPath))
             return new(HookAction.Warn,
-                Reason: $"tman: '{trimmed}' is running unsupervised — tman could not locate its own " +
-                        "executable, so rewriting the command would risk replacing a working build " +
-                        "with `command not found`. Run `tman run -- " + trimmed + "` yourself, from " +
-                        "a shell where tman is on PATH, to supervise it.");
+                Reason: $"tman: '{trimmed}' is running unsupervised — tman cannot prove that " +
+                        $"'{supervisorPath ?? ""}' is a tman executable, so rewriting the command " +
+                        "would risk replacing a working build with `command not found` or with an " +
+                        "entirely different program. Run `tman run -- " + trimmed + "` yourself, " +
+                        "from a shell where tman is on PATH, to supervise it.");
 
         var supervised = Canon.Quote(supervisorPath!) + " run -- " + trimmed;
         return new(HookAction.Rewrite, supervised,
             Reason: $"tman: supervising `{trimmed}` as `{supervised}`");
     }
 
+    /// <summary>The file names tman is published under — an apphost, never the managed dll.</summary>
+    static readonly IReadOnlySet<string> TmanExecutableNames =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "tman", "tman.exe" };
+
     /// <summary>
-    /// True only for a fully qualified path to a file that is there now. A relative path is no
-    /// better than a bare name — an exec resolves it through PATH, not cwd.
+    /// THE SUPERVISOR IDENTITY INVARIANT. The argv[0] this hook emits must be <em>proven</em> to be
+    /// a tman executable; anything short of proof degrades to an announced <see cref="HookAction.Warn"/>
+    /// and leaves the command exactly as written.
+    /// <para>
+    /// Proof is three positive facts about one path: it is fully qualified (an exec resolves a bare
+    /// or relative argv[0] through PATH, not cwd), it names an executable tman actually ships as,
+    /// and that file is on disk right now. All three are required, and no fourth kind of evidence is
+    /// consulted.
+    /// </para>
+    /// <para>
+    /// Deliberately <em>not</em> a list of hosts to reject. Two shipped failures came from checks
+    /// that only excluded the last symptom seen: emitting the bare name <c>tman</c> (exit 127 when
+    /// the Bash tool's PATH lacks the install dir), then requiring merely an absolute path that
+    /// exists — which <c>dotnet bin/Debug/net10.0/tman.dll hook pretooluse</c> satisfies with
+    /// <c>/usr/lib/dotnet/dotnet</c>, rewriting the user's build into <c>dotnet run</c>. A blacklist
+    /// would have to grow an entry for every future host; positive identification does not.
+    /// </para>
+    /// <para>
+    /// Both failure shapes — no path at all, and a path belonging to something else — are one
+    /// violation of one invariant, handled in one place. Renaming the binary also fails the proof,
+    /// which is the honest answer: this hook cannot show that a differently-named file is tman.
+    /// </para>
     /// </summary>
-    static bool IsResolvableExecutable(string? path) =>
-        !string.IsNullOrEmpty(path) && Path.IsPathFullyQualified(path) && File.Exists(path);
+    static bool IsProvenTmanExecutable(string? path) =>
+        !string.IsNullOrEmpty(path)
+        && Path.IsPathFullyQualified(path)
+        // Path.GetFileName, not Basename: this is a filesystem path, so the platform's own
+        // separator rules apply. Basename answers a different question — the program name inside a
+        // command line the agent wrote, which may use either separator.
+        && TmanExecutableNames.Contains(Path.GetFileName(path))
+        && File.Exists(path);
 
     /// <summary>
     /// Deliberately narrow: only the invocations the fleet audit actually found running bare.
