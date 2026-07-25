@@ -8,7 +8,7 @@
 
 LLM agents start test suites and then hang, get distracted, or survive a machine suspend — leaving processes that drain your system for hours. `tman` wraps every run with hard limits and a reaper, so nothing outlives its welcome.
 
-- **wall-time + stall kills** — `--max-time 10m`, `--stall 60s` (on Linux: silent *and* idle = hung, so quiet-but-busy work like `go test` keeps running)
+- **wall-time + stall kills** — `--max-time 10m`, `--stall 30m` (on Linux: silent *and* idle = hung, so quiet-but-busy work like `go test` keeps running)
 - **resource culling** — opt-in `--max-mem 2g`, `--max-cpu 95` (sustained) kill the whole process tree
 - **orphan reaping** — every `tman` command kills children whose runner died, prunes expired records, and frees dead locks
 - **dedup locks** — `--name test` refuses duplicates; `--replace` kills the old run
@@ -48,7 +48,7 @@ tman run --max-time 10m --max-mem 2g -- npm test
 # adopt in a project (auto-detects npm / pytest / go / make)
 cd your-project
 tman init --shims --gitignore
-./test        # now supervised: 60s stall, dedup + parallel gating
+./test        # now supervised: stall backstop, dedup + parallel gating
 ```
 
 ## Commands
@@ -61,7 +61,7 @@ tman init --shims --gitignore
 | `tman kill <id\|name\|all> [--stale-only]` | kill run(s) |
 | `tman clean` | run the housekeeping sweep now and report what it did |
 | `tman status [id\|name\|id-prefix] [--json]` | summary counts, or one run's detail |
-| `tman init [--shims] [--gitignore]` | scaffold `.tman.kdl` + shims |
+| `tman init [--shims] [--gitignore]` | scaffold `.tman.kdl` + shims (aliases it cannot detect are left commented out, so `./test` fails loudly instead of faking a pass) |
 
 ## Run flags
 
@@ -70,13 +70,19 @@ tman init --shims --gitignore
 | `--name N` | — | dedup lock; refuses if a live run has the same name **in this directory** |
 | `--replace` | off | with `--name`: kill the existing run first |
 | `--max-time T` | — | wall-clock limit → kill, exit 124 |
-| `--stall T` | 60s | no output **and** no cpu/io activity for T → kill, exit 125 |
+| `--stall T` | 60s (`tman init` scaffolds `30m`) | no output **and** no cpu/io activity for T → kill, exit 125 |
 | `--max-mem M` | — | ceiling on the process tree's RSS (MB or `2g`) → cull, exit 126 |
 | `--max-cpu P` | — | sustained CPU% → cull, exit 126 |
 | `--max-parallel N` | 2 | queue while N live runs share this run's bucket |
 | `--queue-timeout T` | 5m | give up waiting for a slot |
 
 Cap precedence: CLI flags > alias block > `defaults` block > built-ins.
+
+> **`--stall` is a hang backstop, not a runtime budget.** It answers "is this process dead?",
+> not "is this taking too long?" — use `--max-time` for the latter. A cold `go build ./...`,
+> `npm run typecheck` or `dotnet test` can legitimately run for many minutes while printing
+> nothing, so a stall sized like an expected runtime kills healthy work. Set it well above the
+> longest quiet stretch you ever expect; `tman init` scaffolds `30m`.
 
 > **Platform note.** Activity-aware stall detection walks the whole process tree on **Linux**
 > only, where `/proc` exposes parent pids and per-process io counters cheaply. On macOS and
@@ -106,7 +112,7 @@ Resolved from the current directory upward, like `.git`:
 
 ```kdl
 defaults {
-    stall "60s"
+    stall "30m"       // hang backstop, not a runtime budget — see --stall above
     max-parallel 2
     retain "24h"      // how long finished run records are kept
     // opt-in ceilings — a build is supposed to saturate cores and can want several GB
