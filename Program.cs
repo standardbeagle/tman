@@ -415,7 +415,7 @@ public static partial class Program
           --replace           kill existing run with same name first
           --max-time T        wall-clock limit (30s, 10m, 2h)
           --stall T           kill if no output or cpu/io activity for T
-          --max-mem M         kill above memory (2048, 2g)
+          --max-mem M         kill above process-tree memory (4096, 2g)
           --max-cpu P         kill above P% sustained CPU
           --max-parallel N    queue when N runs share this bucket (name-or-command @ dir)
           --queue-timeout T   give up queueing after T

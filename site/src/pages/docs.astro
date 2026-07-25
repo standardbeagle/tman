@@ -19,40 +19,85 @@ curl -fsSL https://raw.githubusercontent.com/standardbeagle/tman/main/install.sh
     <tr><td><code>tman &lt;alias&gt; [args]</code></td><td>shorthand for an alias</td></tr>
     <tr><td><code>tman list [--all]</code></td><td>list live runs (or all records)</td></tr>
     <tr><td><code>tman kill &lt;id|name|all&gt; [--stale-only]</code></td><td>kill run(s) by id, name, or everything</td></tr>
-    <tr><td><code>tman clean</code></td><td>reap orphans, prune records older than 24h</td></tr>
-    <tr><td><code>tman status [id|name]</code></td><td>summary counts or a single run's JSON record</td></tr>
+    <tr><td><code>tman clean</code></td><td>run the housekeeping sweep now and report what it did</td></tr>
+    <tr><td><code>tman status [id|name|id-prefix] [--json]</code></td><td>summary counts, or one run's detail</td></tr>
     <tr><td><code>tman init [--shims] [--gitignore]</code></td><td>scaffold <code>.tman.kdl</code> (+ repo-root shims)</td></tr>
   </table>
 
   <h2>run flags</h2>
   <table>
     <tr><th>flag</th><th>default</th><th>what it does</th></tr>
-    <tr><td><code>--name N</code></td><td>—</td><td>dedup lock; refuses to start if a live run has the same name</td></tr>
+    <tr><td><code>--name N</code></td><td>—</td><td>dedup lock; refuses to start if a live run has the same name <strong>in this directory</strong></td></tr>
     <tr><td><code>--replace</code></td><td>off</td><td>with <code>--name</code>: kill the existing run first</td></tr>
     <tr><td><code>--max-time T</code></td><td>—</td><td>wall-clock limit → kill, exit 124</td></tr>
-    <tr><td><code>--stall T</code></td><td>60s</td><td>no stdout/stderr for T → kill, exit 125</td></tr>
-    <tr><td><code>--max-mem M</code></td><td>2048</td><td>working set above M (MB, or <code>2g</code>) → cull, exit 126</td></tr>
-    <tr><td><code>--max-cpu P</code></td><td>95</td><td>CPU above P% for 3 consecutive seconds → cull, exit 126</td></tr>
-    <tr><td><code>--max-parallel N</code></td><td>2</td><td>queue while N live runs are active</td></tr>
+    <tr><td><code>--stall T</code></td><td>60s</td><td>no output <strong>and</strong> no cpu/io activity in the process tree for T → kill, exit 125</td></tr>
+    <tr><td><code>--max-mem M</code></td><td>—</td><td>process tree RSS above M (MB, or <code>2g</code>) → cull, exit 126</td></tr>
+    <tr><td><code>--max-cpu P</code></td><td>—</td><td>CPU above P% for 3 consecutive seconds → cull, exit 126</td></tr>
+    <tr><td><code>--max-parallel N</code></td><td>2</td><td>queue while N live runs share this run's bucket</td></tr>
     <tr><td><code>--queue-timeout T</code></td><td>5m</td><td>give up waiting for a parallel slot</td></tr>
   </table>
   <p>Durations accept <code>ms</code>, <code>s</code>, <code>m</code>, <code>h</code> (e.g. <code>90s</code>, <code>10m</code>). Cap precedence: CLI flags &gt; alias block &gt; <code>defaults</code> block &gt; built-ins.</p>
-
-  <h2>orphan reaping</h2>
   <p>
-    Every <code>tman</code> invocation first scans the run store (<code>~/.tman/runs</code>, override with
-    <code>TMAN_HOME</code>). If a recorded run's runner process is dead but its child is still alive — the
-    classic agent-got-distracted or machine-suspended case — the child's entire process tree is killed and
-    the record marked <code>reaped</code>. PID reuse is guarded by comparing process start times.
+    <code>--max-time</code>, <code>--max-mem</code>, and <code>--max-cpu</code> have no built-in
+    default. A build is supposed to saturate cores and can legitimately want several GB, so culling
+    it out of the box would break <code>tman run -- vite build</code> in a project with no config.
+  </p>
+
+  <h2>buckets</h2>
+  <p>
+    Dedup locks and parallel slots are counted per <strong>bucket</strong>, not machine-wide. A bucket is
+    <code>&lt;name&gt;@&lt;dir&gt;</code> for a named run and <code>&lt;command&gt;@&lt;dir&gt;</code> for
+    an unnamed one, where <code>&lt;dir&gt;</code> is the <code>.tman.kdl</code> directory governing the
+    run (or the cwd when there is none).
+  </p>
+  <pre>/repo-a  tman test          <span class="c">-&gt; bucket  test@/repo-a</span>
+/repo-b  tman test          <span class="c">-&gt; bucket  test@/repo-b   # independent of repo-a</span>
+/repo-a  tman run -- vite   <span class="c">-&gt; bucket  vite@/repo-a   # independent of test@/repo-a</span></pre>
+  <p>
+    So <code>max-parallel 2</code> means <em>two of this thing here</em>, and a long test run in one
+    checkout never starves a build in another. A supervised process that re-enters tman — a PATH shim
+    calling <code>tman</code> again — is recorded as a child of the run that launched it and does not
+    claim a second slot.
+  </p>
+
+  <h2>housekeeping</h2>
+  <p>
+    There is no daemon and no cron entry. Every <code>tman</code> invocation — including
+    <code>tman list</code> — sweeps the run store (<code>~/.tman/runs</code>, override with
+    <code>TMAN_HOME</code>) before doing its own work:
+  </p>
+  <ul>
+    <li>
+      <strong>Orphans are killed.</strong> If a recorded run's runner process is dead but its child is
+      still alive — the classic agent-got-distracted or machine-suspended case — the child's entire
+      process tree is killed and the record marked <code>reaped</code>. PID reuse is guarded by
+      comparing process start times.
+    </li>
+    <li>
+      <strong>Finished records past <code>retain</code> are deleted</strong> (24h by default), along with
+      record files this tman cannot read, which nothing else would ever revisit.
+    </li>
+    <li>
+      <strong>Locks whose owning runner died are released</strong>, so a runner killed mid-run frees its
+      bucket instead of wedging it.
+    </li>
+  </ul>
+  <p>
+    <code>tman clean</code> runs the same sweep on demand and prints the counts. Records are canonical on
+    disk — the command resolved to an absolute path, an absolute cwd, the caps the run actually ran
+    under, and a schema version, so a record written by a different tman version is discarded rather
+    than half-read.
   </p>
 
   <h2>.tman.kdl</h2>
-  <p>Resolved from the current directory upward (like <code>.git</code>). <code>tman init</code> auto-detects npm, pytest, go, and make projects.</p>
+  <p>Resolved from the current directory upward (like <code>.git</code>). <code>tman init</code> auto-detects npm (<code>test</code>, <code>e2e</code>, <code>lint</code>, <code>integration</code>, <code>build</code>, <code>typecheck</code>), pytest, go, and make projects.</p>
   <pre>defaults &#123;
     stall "60s"
-    max-mem 2048      <span class="c">// MB</span>
-    max-cpu 95        <span class="c">// percent, sustained</span>
     max-parallel 2
+    retain "24h"      <span class="c">// how long finished run records are kept</span>
+    <span class="c">// opt-in ceilings; builds legitimately saturate cores and eat RAM</span>
+    <span class="c">// max-mem 8192</span>
+    <span class="c">// max-cpu 95</span>
 &#125;
 
 alias "test" &#123;

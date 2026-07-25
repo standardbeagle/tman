@@ -20,9 +20,10 @@ const base = import.meta.env.BASE_URL;
   <section class="hero">
     <h1>your test agents <em>will</em> run away.<br />tman won't let them.</h1>
     <p>
-      A single NativeAOT binary that supervises every process it launches — capping time,
-      memory, and CPU, killing stalled runs, and automatically reaping the orphans your
-      LLM agents leave behind when they hang, get distracted, or your machine suspends.
+      A single NativeAOT binary that supervises every process it launches — killing runs that
+      have genuinely hung, capping time, memory, and CPU when you ask it to, and automatically
+      reaping the orphans your LLM agents leave behind when they hang, get distracted, or your
+      machine suspends.
     </p>
     <a class="cta" href={`${base}/docs`}>get started</a>
   </section>
@@ -35,23 +36,23 @@ const base = import.meta.env.BASE_URL;
   <div class="grid">
     <div class="card">
       <h3>--max-time / --stall</h3>
-      <p>Wall-clock limits and no-output stall detection. A silent, hung test is killed and reported — exit 124 or 125.</p>
+      <p>Wall-clock limits, plus stall detection that needs silence <em>and</em> an idle process tree — so quiet-but-working runs like <code>go test</code> survive. Exit 124 or 125.</p>
     </div>
     <div class="card">
       <h3>--max-mem / --max-cpu</h3>
-      <p>Resource culling. Breach the memory ceiling or sustain high CPU and the whole process tree is killed — exit 126.</p>
+      <p>Opt-in resource culling. Breach the memory ceiling, measured across the whole process tree, or sustain high CPU, and the tree is killed — exit 126.</p>
     </div>
     <div class="card">
       <h3>orphan reaper</h3>
-      <p>Machine suspended? Agent crashed? Every tman command reaps children whose runner died. Nothing drains your system overnight.</p>
+      <p>Machine suspended? Agent crashed? Every tman command reaps children whose runner died, prunes expired records, and frees dead locks. Nothing drains your system overnight.</p>
     </div>
     <div class="card">
       <h3>--max-parallel</h3>
-      <p>Resource-gated multi-process runs. Excess runs queue with a timeout instead of stampeding your cores.</p>
+      <p>Resource-gated multi-process runs, counted per name-and-directory bucket. Excess runs queue instead of stampeding your cores — and one repo never starves another.</p>
     </div>
     <div class="card">
       <h3>--name dedup</h3>
-      <p>Duplicate processes never start. Same-name runs refuse by default, or <code>--replace</code> kills the old one first.</p>
+      <p>Duplicate processes never start. Same-name runs in the same directory refuse by default, or <code>--replace</code> kills the old one first.</p>
     </div>
     <div class="card">
       <h3>.tman.kdl aliases</h3>
@@ -71,7 +72,7 @@ const base = import.meta.env.BASE_URL;
   <h2>adopt in a project</h2>
   <pre><span class="p">$</span> cd your-project
 <span class="p">$</span> tman init --shims --gitignore   <span class="c"># auto-detects npm / pytest / go / make</span>
-<span class="p">$</span> ./test                          <span class="c"># now supervised: 60s stall, 2GB, 95% cpu, dedup + parallel gating</span></pre>
+<span class="p">$</span> ./test                          <span class="c"># now supervised: 60s stall, dedup + parallel gating</span></pre>
 
   <p><span class="badge">~3.8 MB native binary · no dependencies · cross-platform</span></p>
 </Base>

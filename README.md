@@ -1,6 +1,6 @@
 # tman
 
-**Runaway tests, meet the reaper.** A single NativeAOT binary that supervises every process it launches — capping time, memory, and CPU, killing stalled runs, and automatically reaping the orphans your LLM agents leave behind when they hang, get distracted, or your machine suspends.
+**Runaway tests, meet the reaper.** A single NativeAOT binary that supervises every process it launches — killing runs that have genuinely hung, capping time, memory, and CPU when you ask it to, and automatically reaping the orphans your LLM agents leave behind when they hang, get distracted, or your machine suspends.
 
 ![demo](assets/demo.gif)
 
@@ -147,7 +147,7 @@ record written by a different tman version is discarded rather than half-read.
 
 ## Docs + demo
 
-Full docs: **https://standardbeagle.github.io/tman/** · regenerate the demo gif with `vhs assets/demo.tape`
+Full docs: **https://standardbeagle.github.io/tman/** · release history: [CHANGELOG.md](CHANGELOG.md) · regenerate the demo gif with `vhs assets/demo.tape`
 
 ## License
 
