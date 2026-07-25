@@ -138,7 +138,7 @@ public static partial class Program
         }
     }
 
-    static async Task<int> GatedRun(
+    internal static async Task<int> GatedRun(
         string command, string[] args, Caps caps, string? name, string? alias, bool replace, string scopeDir)
     {
         command = Canon.ResolveCommand(command);
