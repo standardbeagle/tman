@@ -60,7 +60,7 @@ tman init --shims --gitignore
 | `tman list [--all]` | list live runs (or all records) |
 | `tman kill <id\|name\|all> [--stale-only]` | kill run(s) |
 | `tman clean` | reap orphans, prune records older than 24h |
-| `tman status [id\|name]` | summary counts or a run's JSON record |
+| `tman status [id\|name\|id-prefix] [--json]` | summary counts, or one run's detail |
 | `tman init [--shims] [--gitignore]` | scaffold `.tman.kdl` + shims |
 
 ## Run flags
@@ -77,6 +77,12 @@ tman init --shims --gitignore
 | `--queue-timeout T` | 5m | give up waiting for a slot |
 
 Cap precedence: CLI flags > alias block > `defaults` block > built-ins.
+
+Run records are canonical on disk: the command resolved to an absolute path, an absolute cwd, one
+nested `Caps` object holding the caps the run actually ran under, and a schema version — so a record
+written by a different tman version is discarded rather than half-read. A supervised process that
+re-enters tman (a PATH shim calling `tman` again) records its parent's id and is marked `└` in
+`tman list` instead of looking like a second, unrelated run.
 
 ### Buckets
 

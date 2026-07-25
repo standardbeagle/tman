@@ -97,6 +97,20 @@ public class StoreTests : IDisposable
     }
 
     [Fact]
+    public void Load_SkipsRecordsFromAnotherSchema()
+    {
+        var r = NewRecord("future", RunState.Exited);
+        Store.Save(r);
+        var path = System.IO.Path.Combine(_home.Path, "runs", "future.json");
+        File.WriteAllText(path, File.ReadAllText(path).Replace(
+            $"\"Schema\":{RunRecord.CurrentSchema}", $"\"Schema\":{RunRecord.CurrentSchema + 1}"));
+
+        // a half-read record would have Pid 0, which the reaper would act on
+        Assert.Null(Store.Load("future"));
+        Assert.Empty(Store.LoadAll());
+    }
+
+    [Fact]
     public void LockPathFor_SanitizesKeyAndStaysReadable()
     {
         var p = Store.LockPathFor("my/test:name@/repo");
@@ -117,5 +131,16 @@ public class StoreTests : IDisposable
         Assert.True(r.Matches("abc"));
         Assert.True(r.Matches("NAME-abc"));
         Assert.False(r.Matches("other"));
+    }
+
+    [Fact]
+    public void Matches_ByIdPrefix_OnceLongEnoughToBeUnambiguous()
+    {
+        var r = NewRecord("351dd67eae5b");
+        Assert.True(r.Matches("351d"));
+        Assert.True(r.Matches("351DD67"));
+        // a one- or two-character prefix would collide across runs
+        Assert.False(r.Matches("35"));
+        Assert.False(r.Matches("999d"));
     }
 }

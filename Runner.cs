@@ -10,6 +10,9 @@ public static class Runner
     public const int ExitNotFound = 127;
     public const int ExitKilled = 130;
 
+    /// <summary>Set on supervised children so a nested tman knows which run launched it.</summary>
+    public const string ParentIdEnvVar = "TMAN_RUN_ID";
+
     const int MonitorTickMs = 1000;
     const int CpuBreachLimit = 3;
     const int SampleFailLimit = 5;
@@ -23,6 +26,8 @@ public static class Runner
         string? group = null,
         CancellationToken ct = default)
     {
+        var id = Guid.NewGuid().ToString("N")[..12];
+
         var psi = new ProcessStartInfo
         {
             FileName = command,
@@ -31,6 +36,7 @@ public static class Runner
             UseShellExecute = false,
         };
         foreach (var a in args) psi.ArgumentList.Add(a);
+        psi.Environment[ParentIdEnvVar] = id;
 
         Process proc;
         try
@@ -45,23 +51,21 @@ public static class Runner
 
         var record = new RunRecord
         {
-            Id = Guid.NewGuid().ToString("N")[..12],
+            Id = id,
             Name = name ?? alias,
             Pid = proc.Id,
             RunnerPid = Environment.ProcessId,
             RunnerStartUtc = ProcUtil.StartTimeUtc(Environment.ProcessId) ?? DateTime.UtcNow,
             Command = command,
             Args = args,
-            Cwd = Directory.GetCurrentDirectory(),
+            Cwd = Canon.Dir(Directory.GetCurrentDirectory()),
             Group = group,
+            ParentId = Environment.GetEnvironmentVariable(ParentIdEnvVar),
             StartedUtc = DateTime.UtcNow,
             ChildStartUtc = ProcUtil.StartTimeUtc(proc.Id) ?? DateTime.UtcNow,
             HeartbeatUtc = DateTime.UtcNow,
             LastOutputUtc = DateTime.UtcNow,
-            MaxTimeSec = (long?)(caps.MaxTime?.TotalSeconds),
-            StallSec = (long?)(caps.Stall?.TotalSeconds),
-            MaxMemMb = caps.MaxMemMb,
-            MaxCpuPct = caps.MaxCpuPct,
+            Caps = caps,
         };
         Store.Save(record);
 

@@ -51,6 +51,18 @@ public static class Reaper
     public static RunRecord? FindLiveByNameOrId(string nameOrId) =>
         LiveRuns().FirstOrDefault(r => r.Matches(nameOrId));
 
+    /// <summary>
+    /// Resolves a name, id, or id prefix against every record, not just live ones — a run's detail is
+    /// most often wanted right after it failed, when it is no longer live. Live runs win, then the
+    /// most recent, so a name reused across runs resolves to the one the user means.
+    /// </summary>
+    public static RunRecord? Resolve(string nameOrId) =>
+        Store.LoadAll()
+            .Where(r => r.Matches(nameOrId))
+            .OrderByDescending(r => r.State == RunState.Running)
+            .ThenByDescending(r => r.StartedUtc)
+            .FirstOrDefault();
+
     /// <summary>Live runs sharing a dedup/slot bucket. See <see cref="RunKey"/>.</summary>
     public static List<RunRecord> LiveInGroup(string group) =>
         LiveRuns().Where(r => r.Group == group).ToList();

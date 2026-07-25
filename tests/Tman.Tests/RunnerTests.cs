@@ -87,4 +87,65 @@ public class RunnerTests : IDisposable
 
         Assert.Equal(42, exit);
     }
+
+    [Fact]
+    public async Task Record_CapturesCanonicalContextAndEffectiveCaps()
+    {
+        if (!Unix) return;
+
+        var caps = new Caps { Stall = TimeSpan.FromSeconds(30), MaxMemMb = 4096 };
+        await Runner.RunAsync("sh", new[] { "-c", "exit 0" }, caps, "unit", null, "unit@/repo");
+
+        var r = Assert.Single(Store.LoadAll());
+        Assert.Equal(RunRecord.CurrentSchema, r.Schema);
+        Assert.Equal("unit@/repo", r.Group);
+        Assert.Equal(Canon.Dir(Directory.GetCurrentDirectory()), r.Cwd);
+        Assert.Equal(TimeSpan.FromSeconds(30), r.Caps.Stall);
+        Assert.Equal(4096, r.Caps.MaxMemMb);
+        Assert.Null(r.ParentId);
+        Assert.False(r.IsNested);
+        Assert.True(r.IsFinished);
+    }
+
+    [Fact]
+    public async Task Child_IsToldWhichRunLaunchedIt()
+    {
+        if (!Unix) return;
+
+        var outw = new StringWriter();
+        var prevOut = Console.Out;
+        Console.SetOut(outw);
+        try
+        {
+            await Runner.RunAsync("sh", new[] { "-c", $"printf %s \"${Runner.ParentIdEnvVar}\"" },
+                new Caps(), null, null);
+        }
+        finally
+        {
+            Console.SetOut(prevOut);
+        }
+
+        var r = Assert.Single(Store.LoadAll());
+        Assert.Equal(r.Id, outw.ToString());
+    }
+
+    [Fact]
+    public async Task NestedRun_RecordsItsParent()
+    {
+        if (!Unix) return;
+
+        Environment.SetEnvironmentVariable(Runner.ParentIdEnvVar, "outerrun1234");
+        try
+        {
+            await Runner.RunAsync("sh", new[] { "-c", "exit 0" }, new Caps(), null, null);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(Runner.ParentIdEnvVar, null);
+        }
+
+        var r = Assert.Single(Store.LoadAll());
+        Assert.Equal("outerrun1234", r.ParentId);
+        Assert.True(r.IsNested);
+    }
 }

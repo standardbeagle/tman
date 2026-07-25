@@ -131,7 +131,10 @@ public static partial class Program
     static async Task<int> GatedRun(
         string command, string[] args, Caps caps, string? name, string? alias, bool replace, string scopeDir)
     {
+        command = Canon.ResolveCommand(command);
         var group = RunKey.For(name, command, scopeDir);
+        // a supervised process that re-enters tman is one logical run, not a second claim on a slot
+        var nested = Environment.GetEnvironmentVariable(Runner.ParentIdEnvVar) is not null;
 
         FileStream? lockFile = null;
         string? lockPath = null;
@@ -187,7 +190,7 @@ public static partial class Program
 
         try
         {
-            if (caps.MaxParallel is { } maxPar && maxPar > 0)
+            if (!nested && caps.MaxParallel is { } maxPar && maxPar > 0)
             {
                 var deadline = DateTime.UtcNow + (caps.QueueTimeout ?? TimeSpan.FromMinutes(5));
                 while (true)
@@ -227,12 +230,16 @@ public static partial class Program
             .ToList();
         if (runs.Count == 0) { Console.WriteLine("no runs"); return 0; }
 
-        Console.WriteLine($"{"ID",-14}{"NAME",-16}{"PID",-8}{"STATE",-10}{"AGE",-10}{"PEAKMEM",-9}COMMAND");
+        var now = DateTime.UtcNow;
+        Console.WriteLine($"{"ID",-14}{"NAME",-16}{"PID",-8}{"STATE",-9}{"AGE",-8}{"PEAKMEM",-9}COMMAND");
         foreach (var r in runs)
         {
-            var age = (DateTime.UtcNow - r.StartedUtc).ToString(@"mm\:ss");
-            var cmdline = r.Args.Length > 0 ? $"{r.Command} {string.Join(' ', r.Args)}" : r.Command;
-            Console.WriteLine($"{r.Id,-14}{r.Name ?? "-",-16}{r.Pid,-8}{r.State,-10}{age,-10}{$"{r.PeakMemMb}MB",-9}{cmdline}");
+            // a nested run is the same work as its parent, marked so the list is not read as two runs
+            var name = r.IsNested ? "└ " + (r.Name ?? "-") : r.Name ?? "-";
+            Console.WriteLine(
+                $"{r.Id,-14}{Canon.Ellipsize(name, 15),-16}{r.Pid,-8}" +
+                $"{StateLabel(r.State),-9}{Canon.Duration(now - r.StartedUtc),-8}" +
+                $"{Canon.Mem(r.PeakMemMb),-9}{Canon.CommandLine(r.Command, r.Args)}");
         }
         return 0;
     }
@@ -287,14 +294,55 @@ public static partial class Program
             var counts = Store.LoadAll().GroupBy(r => r.State).ToDictionary(g => g.Key, g => g.Count());
             Console.WriteLine($"live: {live.Count}");
             foreach (var (state, count) in counts.OrderBy(kv => kv.Key.ToString()))
-                Console.WriteLine($"{state.ToString().ToLowerInvariant()}: {count}");
+                Console.WriteLine($"{StateLabel(state)}: {count}");
             return 0;
         }
 
-        var r = Store.Load(target) ?? Reaper.FindLiveByNameOrId(target);
+        var r = Reaper.Resolve(target);
         if (r is null) { Console.Error.WriteLine($"tman: no run '{target}'"); return Runner.ExitNotFound; }
-        Console.WriteLine(JsonSerializer.Serialize(r, RunRecordJsonContext.Default.RunRecord));
+        if (argv.Contains("--json"))
+        {
+            Console.WriteLine(RunRecordReport.ToJson(r));
+            return 0;
+        }
+        PrintRunDetail(r);
         return 0;
+    }
+
+    static string StateLabel(RunState state) => state.ToString().ToLowerInvariant();
+
+    static void PrintRunDetail(RunRecord r)
+    {
+        var now = DateTime.UtcNow;
+        void Row(string label, string? value)
+        {
+            if (!string.IsNullOrEmpty(value)) Console.WriteLine($"{label + ":",-12}{value}");
+        }
+
+        Row("id", r.Id);
+        Row("name", r.Name);
+        Row("state", StateLabel(r.State) + (r.ExitCode is { } ec ? $" (exit {ec})" : ""));
+        Row("command", Canon.CommandLine(r.Command, r.Args, full: true));
+        Row("cwd", r.Cwd);
+        Row("bucket", r.Group);
+        Row("parent", r.ParentId);
+        Row("pid", $"{r.Pid} (runner {r.RunnerPid})");
+        Row("started", $"{r.StartedUtc:u} ({Canon.Duration(now - r.StartedUtc)} ago)");
+        Row("heartbeat", $"{r.HeartbeatUtc:u} ({Canon.Duration(now - r.HeartbeatUtc)} ago)");
+        Row("peak mem", Canon.Mem(r.PeakMemMb));
+        Row("caps", DescribeCaps(r.Caps));
+        Row("killed", r.KillReason);
+    }
+
+    static string DescribeCaps(Caps c)
+    {
+        var parts = new List<string>();
+        if (c.MaxTime is { } mt) parts.Add($"max-time {Canon.Duration(mt)}");
+        if (c.Stall is { } st) parts.Add($"stall {Canon.Duration(st)}");
+        if (c.MaxMemMb is { } mm) parts.Add($"max-mem {Canon.Mem(mm)}");
+        if (c.MaxCpuPct is { } mc) parts.Add($"max-cpu {mc:0.#}%");
+        if (c.MaxParallel is { } mp) parts.Add($"max-parallel {mp}");
+        return parts.Count == 0 ? "none" : string.Join(", ", parts);
     }
 
     internal static int CmdInit(string[] argv)
@@ -343,7 +391,7 @@ public static partial class Program
           tman list|ls [--all]                    list live (or all) runs
           tman kill <id|name|all> [--stale-only]  kill run(s)
           tman clean                              reap orphans, prune old records
-          tman status [id|name]                   summary or run detail
+          tman status [id|name] [--json]          summary or run detail
           tman init [--shims] [--gitignore]       scaffold .tman.kdl (+ shim scripts)
 
         run flags:

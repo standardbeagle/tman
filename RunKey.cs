@@ -19,19 +19,7 @@ public static class RunKey
     /// `npm` and `/usr/bin/npm` in the same directory share a bucket.
     /// </summary>
     public static string For(string? name, string command, string scopeDir) =>
-        $"{name ?? CommandLabel(command)}@{Normalize(scopeDir)}";
-
-    static string CommandLabel(string command)
-    {
-        var leaf = Path.GetFileName(command);
-        return string.IsNullOrEmpty(leaf) ? command : leaf;
-    }
-
-    static string Normalize(string dir)
-    {
-        try { dir = Path.GetFullPath(dir); } catch (ArgumentException) { }
-        return dir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-    }
+        $"{name ?? Canon.CommandLabel(command)}@{Canon.Dir(scopeDir)}";
 
     /// <summary>
     /// Filesystem-safe lock file stem. The readable prefix keeps `ls ~/.tman/runs` diagnosable;
