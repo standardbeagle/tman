@@ -30,9 +30,16 @@ sh -c "exec ./test"                              # preferred
 dotnet test tests/Tman.Tests/Tman.Tests.csproj   # explicit path
 ```
 
-Worktrack tasks in this repo must attach `templateName="tman-slice-v2"`.
+Worktrack tasks in this repo must attach `templateName="tman-slice-v3"`.
 **Do not use `slice-default`** — its test gate is wired to bare `dotnet test` and therefore cannot
 go red.
+
+`tman-slice-v2` is archived. It carried a `file_scope` gate that diffed against `HEAD`, but commit
+discipline requires implementers to commit *during* implementation, so by the time the gate ran the
+diff was always empty — it passed with `checkedFiles: []` on every task it ever gated. By rule 2
+below, a gate that has never been observed failing is not a gate, so v3 drops it rather than
+carrying a green that means nothing. Scope is enforced by `review-context`, which reads the task's
+declared `fileScope` against the real commit range and has ruled on scope questions substantively.
 
 ## 2. Nothing may report success without doing work.
 
