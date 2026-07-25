@@ -87,6 +87,10 @@ public static class Store
     public static string LockPathFor(string runKey) =>
         Path.Combine(RunsDir, RunKey.LockStem(runKey) + ".lock");
 
+    /// <summary>One of a bucket's parallel slots. Named `.lock` so the stale sweep covers it too.</summary>
+    public static string SlotPathFor(string runKey, int slot) =>
+        Path.Combine(RunsDir, $"{RunKey.LockStem(runKey)}-slot{slot}.lock");
+
     public static void Save(RunRecord r)
     {
         EnsureDirs();
@@ -173,6 +177,49 @@ public static class Store
             $"{Environment.ProcessId} {startUtc:O}\n");
         lockFile.Write(bytes);
         lockFile.Flush(flushToDisk: false);
+    }
+
+    /// <summary>
+    /// Claims one of a bucket's <paramref name="maxParallel"/> slots, or returns null when every
+    /// slot is taken. Creating the slot file is the claim, so two runners racing for the last slot
+    /// cannot both win — counting live records could not offer that, because the count is read
+    /// before any of the racers has a record to be counted.
+    /// </summary>
+    public static FileStream? TryAcquireSlot(string runKey, int maxParallel)
+    {
+        EnsureDirs();
+        for (var slot = 0; slot < maxParallel; slot++)
+        {
+            var path = SlotPathFor(runKey, slot);
+            var claimed = TryClaimLock(path);
+            // a runner killed while holding a slot would otherwise take it out of circulation forever
+            if (claimed is null && IsLockStale(path))
+            {
+                BreakLock(path);
+                claimed = TryClaimLock(path);
+            }
+            if (claimed is not null) return claimed;
+        }
+        return null;
+    }
+
+    static FileStream? TryClaimLock(string path)
+    {
+        try
+        {
+            var file = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+            StampLockOwner(file);
+            return file;
+        }
+        catch (IOException) { return null; }
+    }
+
+    /// <summary>Gives up a held lock: drop the handle first, then the file it stands for.</summary>
+    public static void ReleaseLock(FileStream lockFile)
+    {
+        var path = lockFile.Name;
+        lockFile.Dispose();
+        Delete(path);
     }
 
     /// <summary>True when a lock file's owning runner is gone, so the lock can be broken.</summary>

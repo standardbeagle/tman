@@ -205,22 +205,24 @@ public static partial class Program
             }
         }
 
+        FileStream? slotFile = null;
         try
         {
             if (!nested && caps.MaxParallel is { } maxPar && maxPar > 0)
             {
                 var deadline = DateTime.UtcNow + (caps.QueueTimeout ?? TimeSpan.FromMinutes(5));
-                while (true)
+                // holding the slot file, rather than counting live runs, is what admits this run:
+                // every racer would read the same count, but only one can create the same file
+                while ((slotFile = Store.TryAcquireSlot(group, maxPar)) is null)
                 {
+                    // a slot may be held by a live child whose runner died; free it before waiting on it
                     Reaper.ReapOrphans(quiet: true);
-                    var live = Reaper.LiveInGroup(group).Count;
-                    if (live < maxPar) break;
                     if (DateTime.UtcNow >= deadline)
                     {
-                        Console.Error.WriteLine($"tman: queue timeout waiting for a '{group}' slot ({live}/{maxPar} running)");
+                        Console.Error.WriteLine($"tman: queue timeout waiting for a '{group}' slot (all {maxPar} busy)");
                         return Runner.ExitKilled;
                     }
-                    Console.Error.WriteLine($"tman: {live}/{maxPar} '{group}' slots busy, waiting...");
+                    Console.Error.WriteLine($"tman: all {maxPar} '{group}' slots busy, waiting...");
                     await Task.Delay(2000);
                 }
             }
@@ -229,6 +231,7 @@ public static partial class Program
         }
         finally
         {
+            if (slotFile is not null) Store.ReleaseLock(slotFile);
             lockFile?.Dispose();
             if (lockPath is not null) Store.BreakLock(lockPath);
         }

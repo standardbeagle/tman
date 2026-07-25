@@ -78,10 +78,7 @@ public static class Reaper
             .ThenByDescending(r => r.StartedUtc)
             .FirstOrDefault();
 
-    /// <summary>Live runs sharing a dedup/slot bucket. See <see cref="RunKey"/>.</summary>
-    public static List<RunRecord> LiveInGroup(string group) =>
-        LiveRuns().Where(r => r.Group == group).ToList();
-
+    /// <summary>Live run holding a dedup/slot bucket. See <see cref="RunKey"/>.</summary>
     public static RunRecord? FindLiveInGroup(string group) =>
         LiveRuns().FirstOrDefault(r => r.Group == group);
 }

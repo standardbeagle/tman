@@ -66,6 +66,74 @@ public class SlotGateTests : IDisposable
     }
 
     [Fact]
+    public void TryAcquireSlot_HandsOutExactlyMaxParallelSlots()
+    {
+        const string group = "test@/repo";
+
+        var first = Store.TryAcquireSlot(group, 2);
+        var second = Store.TryAcquireSlot(group, 2);
+
+        Assert.NotNull(first);
+        Assert.NotNull(second);
+        Assert.NotEqual(first.Name, second.Name);
+        Assert.Null(Store.TryAcquireSlot(group, 2));
+
+        Store.ReleaseLock(second);
+        // a released slot goes straight back into circulation
+        var reused = Store.TryAcquireSlot(group, 2);
+        Assert.NotNull(reused);
+        Store.ReleaseLock(first);
+        Store.ReleaseLock(reused);
+    }
+
+    [Fact]
+    public void TryAcquireSlot_ReclaimsTheSlotOfADeadRunner()
+    {
+        const string group = "test@/repo";
+        var held = Store.TryAcquireSlot(group, 1);
+        Assert.NotNull(held);
+        var path = held.Name;
+        held.Dispose();
+        // the runner died holding its slot: the file outlives the process that stamped it
+        File.WriteAllText(path, $"2147483646 {DateTime.UtcNow:O}\n");
+
+        var reclaimed = Store.TryAcquireSlot(group, 1);
+
+        Assert.NotNull(reclaimed);
+        Store.ReleaseLock(reclaimed);
+    }
+
+    [Fact]
+    public void StaleSlotLocks_AreSweptLikeDedupLocks()
+    {
+        var slot = Store.TryAcquireSlot("test@/repo", 1);
+        Assert.NotNull(slot);
+        var path = slot.Name;
+        slot.Dispose();
+        File.WriteAllText(path, $"2147483646 {DateTime.UtcNow:O}\n");
+
+        Assert.Equal(1, Store.PruneStaleLocks());
+        Assert.False(File.Exists(path));
+    }
+
+    [Fact]
+    public async Task NestedRun_TakesNoSlot()
+    {
+        if (!Unix) return;
+
+        var held = Store.TryAcquireSlot(Group("sleep"), 1);
+        Assert.NotNull(held);
+        var caps = new Caps { MaxParallel = 1, QueueTimeout = TimeSpan.Zero };
+
+        Assert.Equal(Runner.ExitKilled, await Sleep("0", caps));
+        // a supervised process re-entering tman would otherwise queue behind its own parent
+        Environment.SetEnvironmentVariable(Runner.ParentIdEnvVar, "parent-run-id");
+        Assert.Equal(0, await Sleep("0", caps));
+
+        Store.ReleaseLock(held);
+    }
+
+    [Fact]
     public async Task RunsStartedAtTheSameInstant_NeverExceedMaxParallel()
     {
         if (!Unix) return;
