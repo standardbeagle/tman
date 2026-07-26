@@ -49,7 +49,8 @@ public static partial class Program
         // A hang backstop, not a runtime budget: cold builds and test suites legitimately
         // run for many quiet minutes, and killing those is far more costly than noticing a
         // real hang late.
-        sb.AppendLine("    stall \"30m\"");
+        // Same constant as the built-in: two literals for one question is how they drifted before.
+        sb.AppendLine($"    stall \"{(int)Caps.DefaultStall.TotalMinutes}m\"");
         sb.AppendLine("    max-parallel 2");
         sb.AppendLine("    retain \"24h\"");
         sb.AppendLine("    // opt-in ceilings; builds legitimately saturate cores and eat RAM");

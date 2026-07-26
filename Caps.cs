@@ -14,6 +14,15 @@ public sealed record Caps
     public TimeSpan? Retain { get; init; }
 
     /// <summary>
+    /// The hang backstop, used both here and by the config `tman init` scaffolds — one question,
+    /// one number. It answers "is this process dead?", never "is this taking too long?"; that is
+    /// <c>max-time</c>'s job. Sized above the longest quiet stretch healthy work is expected to
+    /// have, because killing a live run costs the whole run while noticing a dead one late costs
+    /// only idle minutes in a bucket that <c>max-parallel</c> already bounds.
+    /// </summary>
+    public static readonly TimeSpan DefaultStall = TimeSpan.FromMinutes(30);
+
+    /// <summary>
     /// Built-in floor. Deliberately only catches pathologies: a run that is both silent and idle,
     /// and a stampede within one bucket. Resource ceilings (max-time/max-mem/max-cpu) are opt-in —
     /// a real build is *supposed* to saturate cores and can legitimately want several GB, so
@@ -21,7 +30,7 @@ public sealed record Caps
     /// </summary>
     public static readonly Caps SaneDefaults = new()
     {
-        Stall = TimeSpan.FromSeconds(60),
+        Stall = DefaultStall,
         MaxParallel = 2,
         QueueTimeout = TimeSpan.FromMinutes(5),
         Retain = TimeSpan.FromHours(24),
