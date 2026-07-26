@@ -11,8 +11,6 @@ namespace Tman.Tests;
 [Collection("cwd")]
 public class SlotGateTests : IDisposable
 {
-    static bool Unix => OperatingSystem.IsLinux() || OperatingSystem.IsMacOS();
-
     readonly TempDir _home = new();
     readonly string? _prevHome = Environment.GetEnvironmentVariable("TMAN_HOME");
     readonly string? _prevParent = Environment.GetEnvironmentVariable(Runner.ParentIdEnvVar);
@@ -147,11 +145,9 @@ public class SlotGateTests : IDisposable
     /// busy slot. Reporting it as one buries the fault behind a full queue timeout and a "all N
     /// slots busy" message that names the wrong problem.
     /// </summary>
-    [Fact]
+    [UnixFact("dangles the slot through a symlink, which needs POSIX symlink semantics without elevation")]
     public void SlotThatCannotBeOpenedAtAll_ReportsTheIoFaultRatherThanBusy()
     {
-        if (!Unix) return;
-
         const string group = "test@/repo";
         Store.EnsureDirs();
         File.CreateSymbolicLink(Store.SlotPathFor(group, 0), Path.Combine(_home.Path, "gone", "slot"));
@@ -176,11 +172,9 @@ public class SlotGateTests : IDisposable
         Store.ReleaseLock(reclaimed);
     }
 
-    [Fact]
+    [UnixFact("gates real runs of the sleep binary")]
     public async Task NestedRun_TakesNoSlot()
     {
-        if (!Unix) return;
-
         var held = Store.TryAcquireSlot(Group("sleep"), 1);
         Assert.NotNull(held);
         var caps = new Caps { MaxParallel = 1, QueueTimeout = TimeSpan.Zero };
@@ -193,11 +187,9 @@ public class SlotGateTests : IDisposable
         Store.ReleaseLock(held);
     }
 
-    [Fact]
+    [UnixFact("races real runs of the sleep binary")]
     public async Task RunsStartedAtTheSameInstant_NeverExceedMaxParallel()
     {
-        if (!Unix) return;
-
         var caps = new Caps { MaxParallel = 2, QueueTimeout = TimeSpan.FromSeconds(30) };
         var exits = await RaceToTheGate(3, () => Sleep("1", caps));
 
@@ -207,11 +199,9 @@ public class SlotGateTests : IDisposable
         Assert.Equal(2, PeakOverlap(records));
     }
 
-    [Fact]
+    [UnixFact("races real runs of the sleep binary")]
     public async Task ConcurrentRunsOfOneName_LeaveExactlyOneWinner()
     {
-        if (!Unix) return;
-
         var caps = new Caps { QueueTimeout = TimeSpan.FromSeconds(30) };
         var exits = await RaceToTheGate(5, () => Sleep("1", caps, name: "dedup"));
 
@@ -225,11 +215,9 @@ public class SlotGateTests : IDisposable
     /// running — the one thing a lock cannot see. The run is refused, and the name it briefly held
     /// is left free for the sweep's reaping to hand on rather than pinned by the refusal.
     /// </summary>
-    [Fact]
+    [UnixFact("needs a real orphaned sleep child and its /proc start time")]
     public async Task ARunWhoseChildOutlivedItsRunner_IsRefusedAndLeavesTheNameFree()
     {
-        if (!Unix) return;
-
         var group = RunKey.For("dedup", Canon.ResolveCommand("sleep"), _scope);
         using var orphan = System.Diagnostics.Process.Start("sleep", "30")
             ?? throw new IOException("could not start sleep");
@@ -267,11 +255,9 @@ public class SlotGateTests : IDisposable
     /// it is not given up in time, the replacement does not happen — running anyway would be two
     /// runs of the name, which is what --replace exists to prevent.
     /// </summary>
-    [Fact]
+    [UnixFact("drives the production gate against the sleep binary")]
     public async Task AReplaceThatIsNeverGivenTheName_DoesNotRun()
     {
-        if (!Unix) return;
-
         var group = RunKey.For("dedup", Canon.ResolveCommand("sleep"), _scope);
         var heldByAnotherRunner = Store.TryAcquireNameLock(group);
         Assert.NotNull(heldByAnotherRunner);
@@ -293,11 +279,9 @@ public class SlotGateTests : IDisposable
     /// being hit — on POSIX an unlink goes through whether or not somebody holds the file, so no
     /// exclusive hold makes break-then-create safe.
     /// </summary>
-    [Fact]
+    [UnixFact("the inode probe is a hard link made with ln, and the unlink it rules out is POSIX")]
     public async Task ReclaimingADeadRunnersName_TakesOverItsLockFileRatherThanReplacingIt()
     {
-        if (!Unix) return;
-
         Store.EnsureDirs();
         var lockPath = Store.LockPathFor(RunKey.For("dedup", Canon.ResolveCommand("sleep"), _scope));
         // the dedup lock of a runner that was killed while holding it
@@ -328,11 +312,9 @@ public class SlotGateTests : IDisposable
     /// arrival creates it again — two runs of one name. The window is a few instructions wide, so
     /// the race is driven to it repeatedly rather than assumed to be hit once.
     /// </summary>
-    [Fact]
+    [UnixFact("races real runs of the sleep binary through the production gate")]
     public void ConcurrentRunsOfOneName_ReclaimingADeadRunnersLockWhileSwept_AdmitOnlyOne()
     {
-        if (!Unix) return;
-
         // enough arrivals and enough rounds that a window this narrow shows up on every run
         const int rounds = 400;
         const int racerCount = 4;

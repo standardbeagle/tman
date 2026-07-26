@@ -6,8 +6,6 @@ namespace Tman.Tests;
 [Collection("cwd")]
 public class RunnerTests : IDisposable
 {
-    static bool Unix => OperatingSystem.IsLinux() || OperatingSystem.IsMacOS();
-
     readonly TempDir _home = new();
     readonly string? _prevHome = Environment.GetEnvironmentVariable("TMAN_HOME");
 
@@ -21,15 +19,13 @@ public class RunnerTests : IDisposable
 
     static Caps StallOnly(int seconds) => new() { Stall = TimeSpan.FromSeconds(seconds) };
 
-    [Fact]
+    [UnixFact("supervises the sleep binary and reads the POSIX state it parks in")]
     public async Task IdleProcess_InInterruptibleSleep_IsStillStalled()
     {
         // The true positive the whole guard exists for. `sleep` parks in S with no io, which is
         // exactly the state a blocked socket read shows — so widening the progress signal to S
         // would silently retire stall detection. The stderr assertion keeps this non-vacuous:
         // it fails loudly if the kill was decided against some other state.
-        if (!Unix) return;
-
         var err = new StringWriter();
         var prevErr = Console.Error;
         Console.SetError(err);
@@ -48,13 +44,11 @@ public class RunnerTests : IDisposable
             Assert.Contains("[S]", err.ToString());
     }
 
-    [Fact]
+    [TreeSamplingFact("the busy work is a grandchild, so only tree-wide sampling can see it")]
     public async Task SilentBusyChild_IsNotStalled()
     {
         // The busy work happens in a grandchild, so seeing it requires walking the tree.
         // Where tman cannot do that, silence is all it has to go on and the kill is correct.
-        if (!Unix || !TreeStats.CoversTree) return;
-
         var err = new StringWriter();
         var prevErr = Console.Error;
         Console.SetError(err);
@@ -77,38 +71,32 @@ public class RunnerTests : IDisposable
     static Func<int, TreeSample?> Frozen(string states) =>
         _ => new TreeSample(CpuJiffies: 100, IoBytes: 100, RssMb: 1, Procs: 1, States: states);
 
-    [Fact]
+    [UnixFact("needs a real sleep child to hold the stall window open")]
     public async Task ChildBlockedInUninterruptibleSleep_SurvivesTheStallWindow()
     {
         // A real child, a real 1s stall window, real silence — only the sample is injected, because
         // an on-demand uninterruptible io wait cannot be manufactured. Counters are frozen, so `D`
         // is the sole reason this run may live: if the runner stops consulting the state, it dies.
-        if (!Unix) return;
-
         var exit = await Runner.RunAsync("sleep", new[] { "3" }, StallOnly(1), null, null,
             null, default, Frozen("D"));
 
         Assert.Equal(0, exit);
     }
 
-    [Fact]
+    [UnixFact("needs a real sleep child to hold the stall window open")]
     public async Task ChildInInterruptibleSleep_IsKilledUnderTheSameFrozenCounters()
     {
         // Same child, same window, same frozen counters — only the state differs. The pair is what
         // makes the D test load-bearing: it is the state, not the injection, that spares the run.
-        if (!Unix) return;
-
         var exit = await Runner.RunAsync("sleep", new[] { "3" }, StallOnly(1), null, null,
             null, default, Frozen("S"));
 
         Assert.Equal(Runner.ExitStalled, exit);
     }
 
-    [Fact]
+    [UnixFact("the trickle of output comes from an sh loop")]
     public async Task PartialLineOutput_CountsAsActivity()
     {
-        if (!Unix) return;
-
         var exit = await Runner.RunAsync("sh",
             new[] { "-c", "for i in 1 2 3 4 5 6; do printf x; sleep 0.5; done" },
             StallOnly(1), null, null);
@@ -116,33 +104,27 @@ public class RunnerTests : IDisposable
         Assert.Equal(0, exit);
     }
 
-    [Fact]
+    [UnixFact("supervises the sleep binary")]
     public async Task MaxTime_StillKills()
     {
-        if (!Unix) return;
-
         var exit = await Runner.RunAsync("sleep", new[] { "30" },
             new Caps { MaxTime = TimeSpan.FromSeconds(2) }, null, null);
 
         Assert.Equal(Runner.ExitTimeout, exit);
     }
 
-    [Fact]
+    [UnixFact("the exit code comes from `sh -c`")]
     public async Task ExitCode_PassesThrough()
     {
-        if (!Unix) return;
-
         var exit = await Runner.RunAsync("sh", new[] { "-c", "exit 42" },
             new Caps(), null, null);
 
         Assert.Equal(42, exit);
     }
 
-    [Fact]
+    [UnixFact("the recorded run is an `sh -c` child")]
     public async Task Record_CapturesCanonicalContextAndEffectiveCaps()
     {
-        if (!Unix) return;
-
         var caps = new Caps { Stall = TimeSpan.FromSeconds(30), MaxMemMb = 4096 };
         await Runner.RunAsync("sh", new[] { "-c", "exit 0" }, caps, "unit", null, "unit@/repo");
 
@@ -157,11 +139,9 @@ public class RunnerTests : IDisposable
         Assert.True(r.IsFinished);
     }
 
-    [Fact]
+    [UnixFact("reads the env var back out of the child through sh printf")]
     public async Task Child_IsToldWhichRunLaunchedIt()
     {
-        if (!Unix) return;
-
         var outw = new StringWriter();
         var prevOut = Console.Out;
         Console.SetOut(outw);
@@ -179,11 +159,9 @@ public class RunnerTests : IDisposable
         Assert.Equal(r.Id, outw.ToString());
     }
 
-    [Fact]
+    [UnixFact("the nested run is an `sh -c` child")]
     public async Task NestedRun_RecordsItsParent()
     {
-        if (!Unix) return;
-
         Environment.SetEnvironmentVariable(Runner.ParentIdEnvVar, "outerrun1234");
         try
         {

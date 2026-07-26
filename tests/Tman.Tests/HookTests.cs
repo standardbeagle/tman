@@ -183,11 +183,9 @@ public class HookTests
     /// <c>sub\tman</c> — not tman — and must be refused. On Windows the same string really does name
     /// tman in a subdirectory, so the case only exists where the separator rules make it exist.
     /// </summary>
-    [Fact]
+    [UnixFact("the case only exists where a backslash is an ordinary file-name character")]
     public void ABackslashInAFileName_IsNotASeparatorWhereThePlatformSaysItIsNot()
     {
-        if (Path.DirectorySeparatorChar != '/') return;
-
         using var dir = SupervisedProject();
         var notTman = dir.WriteFile("host/sub\\tman", "#!/bin/sh\nexec true\n");
 

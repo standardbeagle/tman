@@ -13,8 +13,6 @@ namespace Tman.Tests;
 [Collection("cwd")]
 public class ProgramCapsTests : IDisposable
 {
-    static bool Unix => OperatingSystem.IsLinux() || OperatingSystem.IsMacOS();
-
     readonly TempDir _home = new();
     readonly string? _prevHome = Environment.GetEnvironmentVariable("TMAN_HOME");
     readonly string? _prevParent = Environment.GetEnvironmentVariable(Runner.ParentIdEnvVar);
@@ -62,11 +60,9 @@ public class ProgramCapsTests : IDisposable
         return Assert.Single(Store.LoadAll()).Caps;
     }
 
-    [Fact]
+    [UnixFact("drives `tman run -- sleep 0`, and there is no sleep binary to supervise off Unix")]
     public async Task StallFlag_OverridesTheDefaultsBlock()
     {
-        if (!Unix) return;
-
         var caps = await ResolvedCaps(
             """
             defaults {
@@ -84,11 +80,9 @@ public class ProgramCapsTests : IDisposable
         Assert.Equal(TimeSpan.FromSeconds(90), caps.Stall);
     }
 
-    [Fact]
+    [UnixFact("drives `tman run -- sleep 0`, and there is no sleep binary to supervise off Unix")]
     public async Task MaxTimeFlag_OverridesTheDefaultsBlock()
     {
-        if (!Unix) return;
-
         var caps = await ResolvedCaps(
             """
             defaults {

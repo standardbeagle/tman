@@ -5,11 +5,9 @@ namespace Tman.Tests;
 
 public class CanonTests
 {
-    [Fact]
+    [UnixFact("resolves sh across a colon-separated PATH")]
     public void ResolveCommand_FindsBareNameOnPath()
     {
-        if (OperatingSystem.IsWindows()) return;
-
         var resolved = Canon.ResolveCommand("sh");
 
         Assert.True(System.IO.Path.IsPathRooted(resolved), $"expected an absolute path, got '{resolved}'");
@@ -17,11 +15,9 @@ public class CanonTests
         Assert.Equal("sh", Canon.CommandLabel(resolved));
     }
 
-    [Fact]
+    [UnixFact("resolves sh across a colon-separated PATH")]
     public void ResolveCommand_IsIdempotent()
     {
-        if (OperatingSystem.IsWindows()) return;
-
         var once = Canon.ResolveCommand("sh");
         Assert.Equal(once, Canon.ResolveCommand(once));
     }
@@ -33,10 +29,9 @@ public class CanonTests
         Assert.Equal("definitely-not-a-real-command-xyz", Canon.ResolveCommand("definitely-not-a-real-command-xyz"));
     }
 
-    [Fact]
+    [UnixFact("asserts the absolute form of /bin/sh")]
     public void ResolveCommand_CollapsesRelativeSegments()
     {
-        if (OperatingSystem.IsWindows()) return;
         Assert.Equal("/bin/sh", Canon.ResolveCommand("/bin/./sh"));
     }
 
