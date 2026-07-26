@@ -139,8 +139,25 @@ public class HookTests
         var decision = Hook.Decide("go test ./...", dir.Path, parentRunId: null, tman);
 
         Assert.Equal(HookAction.Rewrite, decision.Action);
-        Assert.Equal(tman + " run -- go test ./...", decision.Command);
+        // Whether the path comes back quoted is a property of the host, not of the decision: a
+        // Windows temp path holds ':' and '\' and so must be quoted, a POSIX one usually needs
+        // nothing. Asserting the bare literal made this pass only where the host happened to hand
+        // out unquoted-shaped paths. The property is that a shell reading the rewrite back runs
+        // *this* binary, so read the token the way a shell would.
+        const string suffix = " run -- go test ./...";
+        Assert.EndsWith(suffix, decision.Command);
+        Assert.Equal(tman, AsAShellWouldReadIt(decision.Command![..^suffix.Length]));
     }
+
+    /// <summary>
+    /// One word of a POSIX command line, unquoted. Written out here rather than borrowed from
+    /// <c>Canon.Quote</c>: an expectation computed by the code under test agrees with that code
+    /// whatever the code does, including when it is wrong.
+    /// </summary>
+    static string AsAShellWouldReadIt(string word) =>
+        word.Length >= 2 && word[0] == '\'' && word[^1] == '\''
+            ? word[1..^1].Replace("'\\''", "'")
+            : word;
 
     [Theory]
     [InlineData(null)]
