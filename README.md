@@ -71,7 +71,7 @@ tman init --shims --gitignore
 | `--name N` | — | dedup lock; refuses if a live run has the same name **in this directory** |
 | `--replace` | off | with `--name`: kill the existing run first |
 | `--max-time T` | — | wall-clock limit → kill, exit 124 |
-| `--stall T` | 60s (`tman init` scaffolds `30m`) | no output **and** no cpu/io activity for T → kill, exit 125 |
+| `--stall T` | 30m | no output **and** no cpu/io activity for T → kill, exit 125 |
 | `--max-mem M` | — | ceiling on the process tree's RSS (MB or `2g`) → cull, exit 126 |
 | `--max-cpu P` | — | sustained CPU% → cull, exit 126 |
 | `--max-parallel N` | 2 | queue while N live runs share this run's bucket |
@@ -83,7 +83,19 @@ Cap precedence: CLI flags > alias block > `defaults` block > built-ins.
 > not "is this taking too long?" — use `--max-time` for the latter. A cold `go build ./...`,
 > `npm run typecheck` or `dotnet test` can legitimately run for many minutes while printing
 > nothing, so a stall sized like an expected runtime kills healthy work. Set it well above the
-> longest quiet stretch you ever expect; `tman init` scaffolds `30m`.
+> longest quiet stretch you ever expect.
+>
+> The built-in is `30m`, and `tman init` scaffolds the same value from the same constant. It was
+> `60s` through 0.2.0, which was a runtime budget wearing a backstop's name: across 959 supervised
+> runs that guard fired 32 times and caught **no actual hang**, killing work like
+> `go build ./...` at 60s that succeeded 14 other times, once taking 75s.
+>
+> **If your `.tman.kdl` has no `stall` line, you get `30m` — including configs written before
+> 0.2.1.** That is deliberate. Omitting `stall` never meant "60s"; it meant you had no opinion,
+> and the built-in supplied a bad one. Widening a backstop cannot make a passing run fail — it can
+> only stop kills — and the only run it keeps alive longer is one that is silent *and* idle, which
+> stays visible in `tman list`, killable, and bounded by `max-parallel` / `queue-timeout`. If you
+> do want a tight bound, that is `--max-time`, or write `stall` explicitly and it wins.
 
 > **Platform note.** Activity-aware stall detection walks the whole process tree on **Linux**
 > only, where `/proc` exposes parent pids and per-process io counters cheaply. On macOS and

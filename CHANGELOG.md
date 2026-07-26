@@ -21,6 +21,16 @@ below 1.0, behavior changes land in minor releases.
 
 ### Changed
 
+- **The built-in `--stall` default is now `30m`, up from `60s`.** `stall` is a hang backstop, not a
+  runtime budget, and 60s was only ever defensible as the latter. Across 959 supervised runs the
+  60s guard fired 32 times and caught no actual hang; it killed `go build ./...` at 60s in
+  directories with no `.tman.kdl` while the same command succeeded 14 times elsewhere, once taking
+  75s. 0.2.0 scaffolded `30m` into new configs but left the built-in at `60s`, so the hazard
+  survived on the two paths the scaffold does not reach.
+  **A `.tman.kdl` that omits `stall` now resolves to `30m` as well** — omitting it meant no
+  opinion, not a request for 60s. An explicit `stall`, an alias-level `stall`, and `--stall` are
+  all unaffected, and widening a backstop cannot turn a passing run into a failing one. Use
+  `--max-time` if you want a runtime bound.
 - **The sweep no longer removes lock files, and `tman clean` no longer reports freeing them.** No
   unlink of a lock is safe, including one made while holding it exclusively: a run that opened the
   name a moment earlier takes the lock as the unlinker drops it and is then holding a file with no
