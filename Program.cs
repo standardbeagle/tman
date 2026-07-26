@@ -456,16 +456,19 @@ public static partial class Program
 
         run flags:
           --name N            dedup lock name (per directory; fail if already running)
-          --replace           kill existing run with same name first
+          --replace           kill the run holding the name, then wait for its runner to release
+                              the name (up to --queue-timeout; refuses to start if still held)
           --max-time T        wall-clock limit (30s, 10m, 2h)
           --stall T           kill if no output or cpu/io/io-wait activity for T
           --max-mem M         kill above process-tree memory (4096, 2g)
           --max-cpu P         kill above P% sustained CPU
-          --max-parallel N    queue when N runs share this bucket (name-or-command @ dir)
+          --max-parallel N    queue until one of this bucket's N slot files can be held
+                              (bucket: name-or-command @ dir)
           --queue-timeout T   give up queueing after T
 
-        every command sweeps: orphans (dead runner, live child) are killed, finished records past
-        the retention window are pruned, and locks whose owner died are released. Set the window
-        with `retain` in .tman.kdl defaults (24h by default).
+        every command sweeps: orphans (dead runner, live child) are killed, and finished records
+        past the retention window are pruned. Set the window with `retain` in .tman.kdl defaults
+        (24h by default). Lock files are not part of it — a bucket whose holder died is taken over
+        in place by the next run that claims it.
         """);
 }
