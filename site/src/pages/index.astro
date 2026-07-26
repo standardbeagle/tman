@@ -58,6 +58,10 @@ const base = import.meta.env.BASE_URL;
       <h3>.tman.kdl aliases</h3>
       <p>Folder-level aliases with per-alias caps. Repo-root shims make <code>./test</code> route through supervision transparently.</p>
     </div>
+    <div class="card">
+      <h3>Claude Code hook</h3>
+      <p>An agent that runs <code>npm test</code> directly bypasses your shims. Registered as a PreToolUse hook, tman rewrites those bare commands to run supervised — and never blocks one: anything uncertain passes through untouched.</p>
+    </div>
   </div>
 
   <h2>install</h2>

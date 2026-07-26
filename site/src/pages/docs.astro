@@ -22,6 +22,7 @@ curl -fsSL https://raw.githubusercontent.com/standardbeagle/tman/main/install.sh
     <tr><td><code>tman clean</code></td><td>run the housekeeping sweep now and report what it did</td></tr>
     <tr><td><code>tman status [id|name|id-prefix] [--json]</code></td><td>summary counts, or one run's detail</td></tr>
     <tr><td><code>tman init [--shims] [--gitignore]</code></td><td>scaffold <code>.tman.kdl</code> (+ repo-root shims)</td></tr>
+    <tr><td><code>tman hook pretooluse</code></td><td>Claude Code PreToolUse hook: route bare test/build commands through tman</td></tr>
   </table>
 
   <h2>run flags</h2>
@@ -164,6 +165,35 @@ alias "e2e" &#123;
     <tr><td>127</td><td>command / config not found</td></tr>
     <tr><td>130</td><td>killed (dedup refusal, queue timeout, <code>tman kill</code>)</td></tr>
   </table>
+
+  <h2>claude code hook</h2>
+  <p>
+    Shims only catch commands that go through a shell lookup, in a project where
+    <code>tman init --shims</code> ran. An agent calling a Bash tool with <code>npm test</code> walks
+    straight past them. <code>tman hook pretooluse</code> applies the same policy one level up: it
+    reads the tool call on stdin and re-issues bare test and build commands through tman.
+  </p>
+  <pre>&#123;
+  "hooks": &#123;
+    "PreToolUse": [
+      &#123; "matcher": "Bash", "hooks": [&#123; "type": "command", "command": "tman hook pretooluse" &#125;] &#125;
+    ]
+  &#125;
+&#125;</pre>
+  <table>
+    <tr><th>the agent runs</th><th>what happens</th></tr>
+    <tr><td><code>go test ./...</code> in a project with <code>.tman.kdl</code></td><td>rewritten to <code>/path/to/tman run -- go test ./...</code>, and the rewrite is announced</td></tr>
+    <tr><td><code>go test ./...</code> with no <code>.tman.kdl</code></td><td>runs unchanged; the agent is told it was unsupervised</td></tr>
+    <tr><td>anything already inside a supervised tree</td><td>untouched — no double supervision</td></tr>
+    <tr><td><code>cd app &amp;&amp; npm test</code>, <code>CI=1 npm test</code></td><td>runs unchanged, with a note; the hook does not parse shell and will not prefix a string it did not parse</td></tr>
+    <tr><td>tman cannot prove which binary it is running as</td><td>runs unchanged, with a note naming the path it refused to use</td></tr>
+  </table>
+  <p>
+    It <strong>never blocks a command.</strong> It also supervises exactly what was asked for
+    (<code>tman run -- &lt;command&gt;</code>) and never the project's alias of the same name — an
+    alias can point elsewhere, and silently running something other than the command in the
+    transcript is worse than running it unsupervised.
+  </p>
 
   <h2>scope</h2>
   <p>

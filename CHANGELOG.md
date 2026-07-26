@@ -6,20 +6,47 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). While the version is
 below 1.0, behavior changes land in minor releases.
 
-## [Unreleased]
+## [0.3.0] - 2026-07-26
 
-### Documented
+### Added
+- **`tman hook pretooluse` — a Claude Code PreToolUse hook.** PATH shims only cover commands typed
+  in a project that has them installed; an agent that runs `npm test`, `go test`, `pytest` or
+  `dotnet test` directly bypasses supervision entirely. Registered as a hook, tman rewrites those
+  bare commands to run under `tman run` in projects it governs, so an agent's test run gets the
+  same caps and reaping as yours. It **never blocks a command**: if anything about the rewrite is
+  uncertain — no `.tman.kdl`, an unrecognised command, or a tman binary it cannot positively
+  identify — it passes the command through untouched and says why on stderr. The rewrite targets
+  this binary's own absolute path, so a hook installed from one tman cannot silently route work
+  through another.
 
-- **Where tman stops.** It supervises one machine — a laptop, or a department-sized CI host with a
-  handful of runners — and is not a fleet scheduler. Stated in the README and on the docs site so
-  the boundary is checkable rather than folklore.
-- **What lock files cost, and how to clear them.** Nothing in tman removes a `.lock`; each occupies
-  one filesystem block, so budget ~4 KB per bucket. A development machine settles at a few dozen
-  kilobytes. A CI host whose workspace path carries a build number seeds a new bucket per build and
-  accumulates on the order of 20 MB a year at twenty builds a day — clear it with
-  `rm ~/.tman/runs/*.lock` while no runs are live. tman does not reclaim them itself: making that
-  safe against a concurrent claim costs every `tman run` a store-wide lock, which is a bad trade for
-  a few megabytes a year.
+### Changed
+
+- **The built-in `--stall` default is now `30m`, up from `60s`.** `stall` is a hang backstop, not a
+  runtime budget, and 60s was only ever defensible as the latter. Across 959 supervised runs the
+  60s guard fired 32 times and caught no actual hang; it killed `go build ./...` at 60s in
+  directories with no `.tman.kdl` while the same command succeeded 14 times elsewhere, once taking
+  75s. 0.2.0 scaffolded `30m` into new configs but left the built-in at `60s`, so the hazard
+  survived on the two paths the scaffold does not reach.
+  **A `.tman.kdl` that omits `stall` now resolves to `30m` as well** — omitting it meant no
+  opinion, not a request for 60s. An explicit `stall`, an alias-level `stall`, and `--stall` are
+  all unaffected, and widening a backstop cannot turn a passing run into a failing one. Use
+  `--max-time` if you want a runtime bound.
+- **The sweep no longer removes lock files, and `tman clean` no longer reports freeing them.** No
+  unlink of a lock is safe, including one made while holding it exclusively: a run that opened the
+  name a moment earlier takes the lock as the unlinker drops it and is then holding a file with no
+  name, while the next arrival creates a fresh one. It also bought nothing — a lock whose owner is
+  gone is taken over in place, because the kernel drops the hold when the process dies.
+  `~/.tman/runs` therefore keeps one `.lock` per bucket it has seen for the name dedup, plus one per
+  parallel slot that bucket has ever handed out — see **Documented** below for what that costs and
+  how to clear it.
+- **`tman run --replace` waits for the run it killed to release the name** instead of taking the
+  name from it, and reports that it is not replacing anything if the lock is still held when the
+  queue timeout runs out.
+- **`tman init` no longer scaffolds a test alias that passes without running anything.** It wrote
+  `echo "replace me"`, which exits 0, so a project that adopted tman and never edited the alias got
+  a green suite that ran nothing — found byte-identical in 20 repos. When no test command can be
+  detected, `tman init` now emits a commented-out template and no alias, so `./test` fails loudly
+  with exit 127 naming the undefined alias instead of reporting a pass.
 
 ### Fixed
 
@@ -44,29 +71,28 @@ below 1.0, behavior changes land in minor releases.
 - **A record could throw `FileNotFoundException` out of the middle of a live run.** A run record's
   runner and another command's housekeeping sweep wrote it through the same temp path, so
   whichever renamed second found the file already gone.
+- **`--stall` killed runs that were blocked on the kernel.** A process in uninterruptible sleep —
+  waiting on disk or a network filesystem — produces no output and burns no CPU, so it looked
+  identical to a hang and was killed at the stall bound. Kernel io-wait now counts as activity.
+  Note the honest limit, documented rather than papered over: a process wedged in that state
+  *permanently* now looks alive forever, and only `--max-time` bounds it.
+- **A slot that could not be opened at all was reported as a busy slot.** An IO fault — no space,
+  a missing directory, a dangling symlink — was indistinguishable from contention, so the run
+  waited out its whole `--queue-timeout` and then blamed a full bucket for a problem that was
+  nothing of the kind. The fault is now surfaced as itself.
 
-### Changed
+### Documented
 
-- **The built-in `--stall` default is now `30m`, up from `60s`.** `stall` is a hang backstop, not a
-  runtime budget, and 60s was only ever defensible as the latter. Across 959 supervised runs the
-  60s guard fired 32 times and caught no actual hang; it killed `go build ./...` at 60s in
-  directories with no `.tman.kdl` while the same command succeeded 14 times elsewhere, once taking
-  75s. 0.2.0 scaffolded `30m` into new configs but left the built-in at `60s`, so the hazard
-  survived on the two paths the scaffold does not reach.
-  **A `.tman.kdl` that omits `stall` now resolves to `30m` as well** — omitting it meant no
-  opinion, not a request for 60s. An explicit `stall`, an alias-level `stall`, and `--stall` are
-  all unaffected, and widening a backstop cannot turn a passing run into a failing one. Use
-  `--max-time` if you want a runtime bound.
-- **The sweep no longer removes lock files, and `tman clean` no longer reports freeing them.** No
-  unlink of a lock is safe, including one made while holding it exclusively: a run that opened the
-  name a moment earlier takes the lock as the unlinker drops it and is then holding a file with no
-  name, while the next arrival creates a fresh one. It also bought nothing — a lock whose owner is
-  gone is taken over in place, because the kernel drops the hold when the process dies.
-  `~/.tman/runs` now keeps one small `.lock` per bucket it has seen for the name dedup, plus one
-  per parallel slot that bucket has ever handed out.
-- **`tman run --replace` waits for the run it killed to release the name** instead of taking the
-  name from it, and reports that it is not replacing anything if the lock is still held when the
-  queue timeout runs out.
+- **Where tman stops.** It supervises one machine — a laptop, or a department-sized CI host with a
+  handful of runners — and is not a fleet scheduler. Stated in the README and on the docs site so
+  the boundary is checkable rather than folklore.
+- **What lock files cost, and how to clear them.** Nothing in tman removes a `.lock`; each occupies
+  one filesystem block, so budget ~4 KB per bucket. A development machine settles at a few dozen
+  kilobytes. A CI host whose workspace path carries a build number seeds a new bucket per build and
+  accumulates on the order of 20 MB a year at twenty builds a day — clear it with
+  `rm ~/.tman/runs/*.lock` while no runs are live. tman does not reclaim them itself: making that
+  safe against a concurrent claim costs every `tman run` a store-wide lock, which is a bad trade for
+  a few megabytes a year.
 
 ## [0.2.0] - 2026-07-25
 
@@ -187,6 +213,7 @@ reaping; dedup locks; parallel gating; `.tman.kdl` folder aliases with repo-root
 binaries for linux-x64, linux-arm64, win-x64, osx-arm64, and osx-x64, distributed via npm, PyPI,
 PSGallery, and a shell installer.
 
+[0.3.0]: https://github.com/standardbeagle/tman/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/standardbeagle/tman/compare/v0.1.4...v0.2.0
 [0.1.4]: https://github.com/standardbeagle/tman/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/standardbeagle/tman/compare/v0.1.2...v0.1.3
