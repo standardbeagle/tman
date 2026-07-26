@@ -323,7 +323,7 @@ public class SlotGateTests : IDisposable
         var caps = new Caps { QueueTimeout = TimeSpan.FromSeconds(30) };
         var lockPath = Store.LockPathFor(RunKey.For("dedup", Canon.ResolveCommand("sleep"), _scope));
         var runsDir = Path.Combine(_home.Path, "runs");
-        var doubleClaims = 0;
+        var badRounds = 0;
 
         for (var i = 0; i < rounds; i++)
         {
@@ -352,11 +352,14 @@ public class SlotGateTests : IDisposable
 
             // two runs of one name that overlap in time are the violation — two that merely both
             // finished are not, since the name is free again the moment the first one releases it
-            if (PeakOverlap(Store.LoadAll()) > 1) doubleClaims++;
+            // Exactly one, not at most one: the lock this round starts from is a dead runner's, so
+            // some racer has to get through it, and a round where nobody did would otherwise be
+            // counted as a round that admitted only one
+            if (PeakOverlap(Store.LoadAll()) != 1) badRounds++;
             // records are per-round evidence; keeping them all would make every round scan the last
             foreach (var f in Directory.EnumerateFiles(runsDir, "*.json")) File.Delete(f);
         }
 
-        Assert.Equal(0, doubleClaims);
+        Assert.Equal(0, badRounds);
     }
 }
