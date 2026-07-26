@@ -73,6 +73,37 @@ public class RunnerTests : IDisposable
         Assert.True(exit == 0, $"exit={exit} stderr: {err}");
     }
 
+    /// <summary>A sampler that reports the same frozen counters every tick, differing only in state.</summary>
+    static Func<int, TreeSample?> Frozen(string states) =>
+        _ => new TreeSample(CpuJiffies: 100, IoBytes: 100, RssMb: 1, Procs: 1, States: states);
+
+    [Fact]
+    public async Task ChildBlockedInUninterruptibleSleep_SurvivesTheStallWindow()
+    {
+        // A real child, a real 1s stall window, real silence — only the sample is injected, because
+        // an on-demand uninterruptible io wait cannot be manufactured. Counters are frozen, so `D`
+        // is the sole reason this run may live: if the runner stops consulting the state, it dies.
+        if (!Unix) return;
+
+        var exit = await Runner.RunAsync("sleep", new[] { "3" }, StallOnly(1), null, null,
+            null, default, Frozen("D"));
+
+        Assert.Equal(0, exit);
+    }
+
+    [Fact]
+    public async Task ChildInInterruptibleSleep_IsKilledUnderTheSameFrozenCounters()
+    {
+        // Same child, same window, same frozen counters — only the state differs. The pair is what
+        // makes the D test load-bearing: it is the state, not the injection, that spares the run.
+        if (!Unix) return;
+
+        var exit = await Runner.RunAsync("sleep", new[] { "3" }, StallOnly(1), null, null,
+            null, default, Frozen("S"));
+
+        Assert.Equal(Runner.ExitStalled, exit);
+    }
+
     [Fact]
     public async Task PartialLineOutput_CountsAsActivity()
     {

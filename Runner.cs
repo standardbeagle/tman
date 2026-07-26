@@ -17,7 +17,7 @@ public static class Runner
     const int CpuBreachLimit = 3;
     const int SampleFailLimit = 5;
 
-    public static async Task<int> RunAsync(
+    public static Task<int> RunAsync(
         string command,
         string[] args,
         Caps caps,
@@ -25,6 +25,23 @@ public static class Runner
         string? alias,
         string? group = null,
         CancellationToken ct = default)
+        => RunAsync(command, args, caps, name, alias, group, ct, sampler: null);
+
+    /// <summary>
+    /// Test seam. <paramref name="sampler"/> stands in for the real <see cref="TreeStats.TrySample"/>
+    /// walk so a test can put a real child through a real stall window while deciding exactly what
+    /// the monitor sees — frozen counters plus a chosen process state. Reproducing a genuine
+    /// uninterruptible io wait on demand is not possible; deciding on one is what needs pinning.
+    /// </summary>
+    internal static async Task<int> RunAsync(
+        string command,
+        string[] args,
+        Caps caps,
+        string? name,
+        string? alias,
+        string? group,
+        CancellationToken ct,
+        Func<int, TreeSample?>? sampler)
     {
         var id = Guid.NewGuid().ToString("N")[..12];
 
@@ -89,7 +106,7 @@ public static class Runner
         var lastOutput = record.LastOutputUtc;
         var lastProgress = record.StartedUtc;
         var prevOutputBytes = 0L;
-        var haveSample = TreeStats.TrySample(record.Pid, out var prevSample);
+        var haveSample = TrySample(sampler, record.Pid, out var prevSample);
         var sampleFailures = 0;
         var treeDiag = "unknown";
 
@@ -110,7 +127,7 @@ public static class Runner
                 record.LastOutputUtc = lastOutput;
 
                 long memMb = 0;
-                var sampleOk = TreeStats.TrySample(record.Pid, out var sample);
+                var sampleOk = TrySample(sampler, record.Pid, out var sample);
                 if (sampleOk)
                 {
                     memMb = sample.RssMb;
@@ -201,6 +218,14 @@ public static class Runner
                 _ => ExitKilled,
             };
         return record.ExitCode ?? 0;
+    }
+
+    static bool TrySample(Func<int, TreeSample?>? sampler, int pid, out TreeSample sample)
+    {
+        if (sampler is null) return TreeStats.TrySample(pid, out sample);
+        var injected = sampler(pid);
+        sample = injected ?? default;
+        return injected is not null;
     }
 
     static async Task PumpAsync(StreamReader reader, TextWriter sink, Action<int> onData, CancellationToken ct)
