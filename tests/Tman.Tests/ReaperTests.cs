@@ -46,10 +46,21 @@ public class ReaperTests : IDisposable
     {
         Store.EnsureDirs();
         var held = Store.LockPathFor("busy@/repo");
-        using var fs = new FileStream(held, FileMode.CreateNew, FileAccess.Write, FileShare.None);
-        Store.StampLockOwner(fs);
+        using (var stamp = new FileStream(held, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            Store.StampLockOwner(stamp);
         var abandoned = Store.LockPathFor("gone@/repo");
         File.WriteAllText(abandoned, $"2147483646 {DateTime.UtcNow:O}\n");
+        var slot = Store.SlotPathFor("busy@/repo", 0);
+        File.WriteAllText(slot, $"2147483646 {DateTime.UtcNow:O}\n");
+
+        // age every lock past the retention the sweep is given: a fresh lock survives an
+        // age-gated prune whether or not that prune looks at locks at all, so only an aged one
+        // can tell "the sweep leaves locks alone" apart from "the sweep has not got to them yet"
+        var ancient = DateTime.UtcNow - TimeSpan.FromHours(48);
+        foreach (var f in new[] { held, abandoned, slot }) File.SetLastWriteTimeUtc(f, ancient);
+
+        // reopening does not touch mtime — the lock stays held, and stays older than the cutoff
+        using var fs = new FileStream(held, FileMode.Open, FileAccess.Write, FileShare.None);
 
         Reaper.Sweep(TimeSpan.FromHours(24), quiet: true);
 
@@ -57,6 +68,7 @@ public class ReaperTests : IDisposable
         // name it removed could be taken by a run that had already opened it — so it removes none
         Assert.True(File.Exists(held));
         Assert.True(File.Exists(abandoned));
+        Assert.True(File.Exists(slot));
     }
 
     [Fact]
