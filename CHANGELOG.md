@@ -6,6 +6,31 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). While the version is
 below 1.0, behavior changes land in minor releases.
 
+## [Unreleased]
+
+### Fixed
+
+- **Two runs of one `--name` could start at once.** The dedup gate broke a stale lock and created
+  a fresh one — the sequence the parallel-slot gate was fixed for in 0.2.0, on the path that was
+  left behind. Two runners each removed the file the other had just created and each held one of
+  the two files answering to the name. A name is now claimed by holding its lock file open
+  exclusively, as slots already were.
+- **A record could throw `FileNotFoundException` out of the middle of a live run.** A run record's
+  runner and another command's housekeeping sweep wrote it through the same temp path, so
+  whichever renamed second found the file already gone.
+
+### Changed
+
+- **The sweep no longer removes lock files, and `tman clean` no longer reports freeing them.** No
+  unlink of a lock is safe, including one made while holding it exclusively: a run that opened the
+  name a moment earlier takes the lock as the unlinker drops it and is then holding a file with no
+  name, while the next arrival creates a fresh one. It also bought nothing — a lock whose owner is
+  gone is taken over in place, because the kernel drops the hold when the process dies.
+  `~/.tman/runs` now keeps one small `.lock` file per bucket it has ever seen.
+- **`tman run --replace` waits for the run it killed to release the name** instead of taking the
+  name from it, and reports that it is not replacing anything if the lock is still held when the
+  queue timeout runs out.
+
 ## [0.2.0] - 2026-07-25
 
 Limits used to be counted across your whole machine and enforced by defaults that killed healthy

@@ -10,7 +10,7 @@ LLM agents start test suites and then hang, get distracted, or survive a machine
 
 - **wall-time + stall kills** — `--max-time 10m`, `--stall 30m` (on Linux: silent *and* idle = hung, so quiet-but-busy work like `go test` keeps running)
 - **resource culling** — opt-in `--max-mem 2g`, `--max-cpu 95` (sustained) kill the whole process tree
-- **orphan reaping** — every `tman` command kills children whose runner died, prunes expired records, and frees dead locks
+- **orphan reaping** — every `tman` command kills children whose runner died and prunes expired records; a lock whose runner died is taken over in place by the next run of that name
 - **dedup locks** — `--name test` refuses duplicates; `--replace` kills the old run
 - **resource gating** — `--max-parallel 2` queues excess runs instead of stampeding cores
 - **per-project scoping** — locks and slots bucket by name (or command) *and* directory, so one repo's runs never block another's
@@ -190,7 +190,13 @@ same sweep before it does anything else:
 - kills orphans (a live child whose runner died, e.g. after a machine suspend)
 - deletes finished records older than `retain` (default 24h), along with unreadable or
   off-schema record files that nothing else would ever revisit
-- releases lock files whose owning runner is gone
+
+Lock files are not part of it. A lock is claimed by holding its file open exclusively, so the
+kernel releases it when its runner dies and the next run of that bucket takes the same file over
+in place. Removing one is never safe — a run that opened the name a moment earlier would take the
+lock as the sweep dropped it and end up holding a file with no name, while the next run created a
+fresh one — and it would gain nothing, so `~/.tman/runs` keeps one small `.lock` file per bucket
+it has ever seen.
 
 `tman clean` runs that sweep on demand and prints the counts. Records are canonical on disk:
 absolute resolved command paths, absolute cwd, one nested `Caps` object, and a schema version, so a
