@@ -10,10 +10,19 @@ below 1.0, behavior changes land in minor releases.
 
 ### Fixed
 
+- **`--max-parallel` did not bound runs that started at the same instant.** The gate counted the
+  bucket's live runs and admitted the run when the count was under the limit. Every member of a
+  fan-out read that count before any of them had a record to be counted, so all of them started:
+  under a barrier-synchronised launch with `max-parallel 2`, three runs were observed overlapping.
+  A run is now admitted by **holding** one of its bucket's slot files open exclusively, which only
+  one runner can do, so simultaneous launches queue as configured. A slot is given up when the
+  handle closes, which includes the runner dying and the kernel closing it — there is no stale-slot
+  reclaim to lose a race in. Runs already inside a supervised tree (`TMAN_RUN_ID` set) still claim
+  no slot.
 - **Two runs of one `--name` could start at once.** The dedup gate broke a stale lock and created
-  a fresh one — the sequence the parallel-slot gate was fixed for in 0.2.0, on the path that was
-  left behind. Two runners each removed the file the other had just created and each held one of
-  the two files answering to the name. A name is now claimed by holding its lock file open
+  a fresh one — the sequence the parallel-slot gate above was fixed for, on the path that was left
+  behind. Two runners each removed the file the other had just created and each held one of the
+  two files answering to the name. A name is now claimed by holding its lock file open
   exclusively, as slots already were.
 - **A record could throw `FileNotFoundException` out of the middle of a live run.** A run record's
   runner and another command's housekeeping sweep wrote it through the same temp path, so
