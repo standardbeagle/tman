@@ -95,4 +95,75 @@ public class CapsParseTests
         Assert.Null(caps.MaxMemMb);
         Assert.Null(caps.MaxCpuPct);
     }
+
+    /// <summary>
+    /// Path 1 of the built-in stall: `tman run -- go build ./...` in a directory with no
+    /// `.tman.kdl` at all. A fleet audit of 959 run records found 32 stall kills at 60s and
+    /// not one real hang; `go build ./...` was killed at 60s and 61s while succeeding 14
+    /// times elsewhere, longest 75s. The built-in must be a hang backstop, not that budget.
+    /// </summary>
+    [Fact]
+    public void NoConfigAtAll_ResolvesAStallBackstopNotASixtySecondBudget()
+    {
+        using var dir = new TempDir();
+
+        // Precondition: this really is the config-less path, not a config found by walking up.
+        Assert.Null(Config.Load(dir.Path));
+
+        var caps = Config.EffectiveCaps(null, new Caps(), null);
+
+        Assert.NotNull(caps.Stall);
+        Assert.True(caps.Stall >= TimeSpan.FromMinutes(30),
+            $"config-less stall {caps.Stall} is a runtime budget, not a hang backstop");
+    }
+
+    /// <summary>
+    /// Path 2: an existing `.tman.kdl` that never mentions `stall`. Omission is silence, not
+    /// a request for 60s — it resolves through the same built-in, so it gets the same backstop.
+    /// </summary>
+    [Fact]
+    public void ConfigOmittingStall_ResolvesAStallBackstopNotASixtySecondBudget()
+    {
+        using var dir = new TempDir();
+        dir.WriteFile(".tman.kdl", """
+defaults {
+    max-parallel 2
+}
+
+alias "build" {
+    command "go"
+    args "build" "./..."
+}
+""");
+
+        var config = Config.Load(dir.Path);
+
+        Assert.NotNull(config);
+        // Precondition: the fixture must actually omit `stall`, or this test proves nothing.
+        Assert.Null(config.Defaults.Stall);
+
+        var caps = Config.EffectiveCaps(config.Aliases["build"], new Caps(), config);
+
+        Assert.NotNull(caps.Stall);
+        Assert.True(caps.Stall >= TimeSpan.FromMinutes(30),
+            $"stall {caps.Stall} inherited by a config that omits it is a runtime budget");
+    }
+
+    /// <summary>
+    /// The scaffolded default and the built-in default answer the same question, so they are
+    /// one constant. They were two literals once and drifted (30m vs 60s) within a single release.
+    /// </summary>
+    [Fact]
+    public void ScaffoldedStall_AndConfigLessStall_AreTheSameValue()
+    {
+        using var dir = new TempDir();
+        dir.WriteFile(".tman.kdl", Program.RenderConfig(new List<Program.DetectedAlias>()));
+
+        var scaffolded = Config.Load(dir.Path);
+        var builtIn = Config.EffectiveCaps(null, new Caps(), null);
+
+        Assert.NotNull(scaffolded);
+        Assert.Equal(TimeSpan.FromMinutes(30), builtIn.Stall);
+        Assert.Equal(builtIn.Stall, scaffolded.Defaults.Stall);
+    }
 }
