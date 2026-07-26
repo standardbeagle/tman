@@ -136,11 +136,17 @@ public static class Store
 
     public static void Remove(string id) => Delete(PathFor(id));
 
-    static void Delete(string path)
+    /// <summary>
+    /// Removes a file if it is there, and says whether it went. Callers count what they removed, so
+    /// a delete that lost a race or was refused must not be counted as one — a housekeeping figure
+    /// that reports work it did not do is the one number nobody ever checks.
+    /// </summary>
+    static bool Delete(string path)
     {
-        try { if (File.Exists(path)) File.Delete(path); }
+        try { if (File.Exists(path)) { File.Delete(path); return true; } }
         catch (IOException) { }
         catch (UnauthorizedAccessException) { }
+        return false;
     }
 
     /// <summary>
@@ -159,13 +165,13 @@ public static class Store
             if (r is null)
             {
                 // unreadable: only reap once it is old enough to not be a record being written now
-                if (File.GetLastWriteTimeUtc(f) < cutoff) { Delete(f); removed++; }
+                if (File.GetLastWriteTimeUtc(f) < cutoff && Delete(f)) removed++;
                 continue;
             }
-            if (r.IsFinished && r.HeartbeatUtc < cutoff) { Delete(f); removed++; }
+            if (r.IsFinished && r.HeartbeatUtc < cutoff && Delete(f)) removed++;
         }
         foreach (var f in Directory.EnumerateFiles(RunsDir, "*.tmp"))
-            if (File.GetLastWriteTimeUtc(f) < cutoff) { Delete(f); removed++; }
+            if (File.GetLastWriteTimeUtc(f) < cutoff && Delete(f)) removed++;
         return removed;
     }
 
