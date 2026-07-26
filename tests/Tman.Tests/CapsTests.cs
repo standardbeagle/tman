@@ -150,6 +150,33 @@ alias "build" {
     }
 
     /// <summary>
+    /// Widening the built-in only stays safe if an explicit `stall` still wins. Before this
+    /// change the built-in and a typical explicit `60s` were the same number, so nothing here
+    /// could be observed; they now differ by 30x, and a regression in the config layer would
+    /// silently rewrite every explicit user's supervision.
+    /// </summary>
+    [Fact]
+    public void ConfigDeclaringStall_WinsOverTheBuiltIn()
+    {
+        using var dir = new TempDir();
+        dir.WriteFile(".tman.kdl", """
+defaults {
+    stall "60s"
+}
+""");
+
+        var config = Config.Load(dir.Path);
+
+        Assert.NotNull(config);
+        // Precondition: the fixture must actually declare `stall`, or this test proves nothing.
+        Assert.Equal(TimeSpan.FromSeconds(60), config.Defaults.Stall);
+
+        var caps = Config.EffectiveCaps(null, new Caps(), config);
+
+        Assert.Equal(TimeSpan.FromSeconds(60), caps.Stall);
+    }
+
+    /// <summary>
     /// The scaffolded default and the built-in default answer the same question, so they are
     /// one constant. They were two literals once and drifted (30m vs 60s) within a single release.
     /// </summary>
