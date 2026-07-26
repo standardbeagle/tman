@@ -4,7 +4,7 @@ using System.Text;
 namespace Tman;
 
 /// <summary>
-/// Identity of a run for the purposes of dedup locking and parallel-slot counting.
+/// Identity of a run for the purposes of dedup locking and parallel-slot admission.
 /// A run belongs to the bucket "&lt;name-or-command&gt;@&lt;scope dir&gt;", so a `test` run in
 /// one project neither blocks nor consumes a slot from a `test` run in another.
 /// </summary>

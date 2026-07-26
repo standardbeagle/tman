@@ -87,7 +87,10 @@ public static class Store
     public static string LockPathFor(string runKey) =>
         Path.Combine(RunsDir, RunKey.LockStem(runKey) + ".lock");
 
-    /// <summary>One of a bucket's parallel slots. Named `.lock` so the stale sweep covers it too.</summary>
+    /// <summary>
+    /// One of a bucket's parallel slots. Claimed, held, and given up exactly as the dedup name lock
+    /// is — one <see cref="TryClaimLock"/> serves both — hence the shared `.lock` suffix.
+    /// </summary>
     public static string SlotPathFor(string runKey, int slot) =>
         Path.Combine(RunsDir, $"{RunKey.LockStem(runKey)}-slot{slot}.lock");
 
@@ -167,9 +170,15 @@ public static class Store
     }
 
     /// <summary>
-    /// Stamps the owning runner over whatever the lock held before. A lock is taken before the run
-    /// record exists, so "no matching record" cannot be used to judge staleness without a race —
-    /// the owner pid can, and it is correct from the instant the lock is claimed.
+    /// Stamps the owning runner over whatever the lock held before. This is no longer a staleness
+    /// test — nothing judges staleness, because the kernel dropping a dead holder's handle is the
+    /// whole signal — but the stamp did not become dead with it. It is what makes the ownership
+    /// invariant below <em>observable</em>: a claim that took the existing file over in place and a
+    /// claim that unlinked the name and created a fresh one are indistinguishable by name, and
+    /// differ only in which inode ends up carrying the new owner's pid. That is what
+    /// <c>ReclaimingADeadRunnersName_TakesOverItsLockFileRatherThanReplacingIt</c> reads through a
+    /// hard link, and it is the only evidence the repo has that the dedup path obeys the invariant.
+    /// It also answers "who holds this bucket" from `~/.tman/runs/*.lock` with no running tman.
     /// </summary>
     public static void StampLockOwner(FileStream lockFile)
     {
