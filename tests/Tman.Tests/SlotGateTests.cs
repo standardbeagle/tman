@@ -214,4 +214,96 @@ public class SlotGateTests : IDisposable
         Assert.Equal(1, exits.Count(e => e == 0));
         Assert.Equal(4, exits.Count(e => e == Runner.ExitKilled));
     }
+
+    /// <summary>
+    /// The deterministic half of the race below. A lock name is only exclusive while every runner
+    /// reaching it opens the same file: unlink the name and create it again, and two runners hold
+    /// two different files that answer to it. The probe is a hard link, which follows the inode
+    /// rather than the name, so it says which of the two happened without depending on a window
+    /// being hit — on POSIX an unlink goes through whether or not somebody holds the file, so no
+    /// exclusive hold makes break-then-create safe.
+    /// </summary>
+    [Fact]
+    public async Task ReclaimingADeadRunnersName_TakesOverItsLockFileRatherThanReplacingIt()
+    {
+        if (!Unix) return;
+
+        Store.EnsureDirs();
+        var lockPath = Store.LockPathFor(RunKey.For("dedup", Canon.ResolveCommand("sleep"), _scope));
+        // the dedup lock of a runner that was killed while holding it
+        File.WriteAllText(lockPath, $"2147483646 {DateTime.UtcNow:O}\n");
+        var sameInode = Path.Combine(_home.Path, "reclaimed-lock-inode");
+        HardLink(lockPath, sameInode);
+
+        Assert.Equal(0, await Sleep("0", new Caps(), name: "dedup"));
+
+        // a claim that unlinked the name and created a fresh file stamped that other file instead
+        Assert.StartsWith($"{Environment.ProcessId} ", File.ReadAllText(sameInode));
+    }
+
+    /// <summary>A second name for one inode. .NET can create symlinks but not hard links.</summary>
+    static void HardLink(string target, string link)
+    {
+        using var ln = System.Diagnostics.Process.Start("ln", new[] { target, link })
+            ?? throw new IOException("could not start ln");
+        ln.WaitForExit();
+        if (ln.ExitCode != 0) throw new IOException($"ln exited {ln.ExitCode}");
+    }
+
+    /// <summary>
+    /// The dedup gate's counterpart to <see cref="ConcurrentReclaimOfADeadRunnersSlot_AdmitsOnlyOne"/>,
+    /// driven through the production entry point because that is where the name lock is taken. Two
+    /// runs and a stale sweep arrive at one dead runner's name at the same instant: whoever unlinks
+    /// that name without holding it strips it from under whoever just claimed it, and the next
+    /// arrival creates it again — two runs of one name. The window is a few instructions wide, so
+    /// the race is driven to it repeatedly rather than assumed to be hit once.
+    /// </summary>
+    [Fact]
+    public void ConcurrentRunsOfOneName_ReclaimingADeadRunnersLockWhileSwept_AdmitOnlyOne()
+    {
+        if (!Unix) return;
+
+        // enough arrivals and enough rounds that a window this narrow shows up on every run
+        const int rounds = 400;
+        const int racerCount = 4;
+
+        Store.EnsureDirs();
+        var caps = new Caps { QueueTimeout = TimeSpan.FromSeconds(30) };
+        var lockPath = Store.LockPathFor(RunKey.For("dedup", Canon.ResolveCommand("sleep"), _scope));
+        var runsDir = Path.Combine(_home.Path, "runs");
+        var doubleClaims = 0;
+
+        for (var i = 0; i < rounds; i++)
+        {
+            // the dedup lock of a runner that was killed while holding it
+            File.WriteAllText(lockPath, $"2147483646 {DateTime.UtcNow:O}\n");
+
+            var exits = new int[racerCount];
+            var atTheGate = new Barrier(racerCount + 1);
+            var racers = Enumerable.Range(0, racerCount)
+                .Select(t => new Thread(() =>
+                {
+                    atTheGate.SignalAndWait();
+                    exits[t] = Sleep("0", caps, name: "dedup").GetAwaiter().GetResult();
+                }))
+                .ToList();
+            // every tman command sweeps, so a sweep is one of the arrivals at this name
+            var sweeper = new Thread(() =>
+            {
+                atTheGate.SignalAndWait();
+                Store.PruneStaleLocks();
+            });
+            sweeper.Start();
+            foreach (var r in racers) r.Start();
+            foreach (var r in racers) r.Join();
+            sweeper.Join();
+
+            if (exits.Count(e => e == 0) > 1) doubleClaims++;
+            // records are per-round evidence; keeping them all would make every round scan the last
+            foreach (var f in Directory.EnumerateFiles(runsDir, "*.json")) File.Delete(f);
+        }
+
+        Assert.Equal(0, doubleClaims);
+    }
+
 }
