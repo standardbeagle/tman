@@ -15,6 +15,14 @@ public static class TreeStats
     /// </summary>
     public static bool CoversTree => OperatingSystem.IsLinux();
 
+    /// <summary>
+    /// Whether this tick's sample shows the tree doing work, given the previous tick's sample.
+    /// This is the whole "is it alive?" question for a run that is printing nothing.
+    /// </summary>
+    public static bool ShowsProgress(TreeSample prev, TreeSample now) =>
+        now.CpuJiffies > prev.CpuJiffies ||
+        now.IoBytes > prev.IoBytes;
+
     public static bool TrySample(int rootPid, out TreeSample sample) =>
         CoversTree ? TrySampleLinux(rootPid, out sample) : TrySampleRootOnly(rootPid, out sample);
 

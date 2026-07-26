@@ -114,8 +114,7 @@ public static class Runner
                 if (sampleOk)
                 {
                     memMb = sample.RssMb;
-                    if (haveSample && (sample.CpuJiffies > prevSample.CpuJiffies ||
-                                       sample.IoBytes > prevSample.IoBytes))
+                    if (haveSample && TreeStats.ShowsProgress(prevSample, sample))
                         progressed = true;
                     treeDiag = $"{sample.Procs} proc [{sample.States}]";
                     prevSample = sample;
