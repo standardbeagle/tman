@@ -71,7 +71,7 @@ tman init --shims --gitignore
 | `--name N` | — | dedup lock; refuses if a live run has the same name **in this directory** |
 | `--replace` | off | with `--name`: kill the existing run first |
 | `--max-time T` | — | wall-clock limit → kill, exit 124 |
-| `--stall T` | 30m | no output **and** no cpu/io activity for T → kill, exit 125 |
+| `--stall T` | 30m | no output **and** no cpu/io/kernel-io-wait activity for T → kill, exit 125 |
 | `--max-mem M` | — | ceiling on the process tree's RSS (MB or `2g`) → cull, exit 126 |
 | `--max-cpu P` | — | sustained CPU% → cull, exit 126 |
 | `--max-parallel N` | 2 | queue until one of the bucket's N slots can be held |
@@ -104,6 +104,33 @@ Cap precedence: CLI flags > alias block > `defaults` block > built-ins.
 > and `--stall` falls back to output-only detection. Give quiet-but-busy runs a longer `--stall`
 > on those platforms. `--max-mem` has the same limit: it sums the tree on Linux and measures the
 > root process elsewhere.
+
+#### Which waits `--stall` protects
+
+On Linux a tick counts as activity if the tree's CPU jiffies moved, its `rchar`/`wchar` moved, or
+any process in it sits in state `D` (uninterruptible sleep — the kernel is servicing an io request).
+So:
+
+| The run is… | Protected? | Why |
+| --- | --- | --- |
+| burning CPU silently (`go build`, a compile) | yes | cpu jiffies advance |
+| reading/writing files silently | yes | `rchar`/`wchar` advance |
+| blocked on disk or NFS io | yes | state `D` |
+| streaming over a socket, even slowly | yes | socket bytes move `rchar`/`wchar` |
+| **waiting on a peer that has sent nothing yet** | **no** | zero bytes, zero CPU, and it parks in `S` — indistinguishable from `sleep 3600` |
+| genuinely idle or hung | no — killed, as intended | same signals, correctly absent |
+
+The last two rows are the same signal, which is why the honest answer is a *wide* `--stall`: at the
+`30m` default a slow API, a long DB query, a lock wait or a long-poll has to be silent for half an
+hour before it trips. **If an alias legitimately waits on a network peer, do not tighten `--stall`
+to bound it — that is `--max-time`'s job.** `--stall` asks "is this dead?"; `--max-time` asks "has
+this taken too long?", and only the second can bound a wait that looks identical to a hang.
+
+Two Linux-only caveats. State `D` is read from `/proc`, so on macOS and Windows the disk/NFS row
+falls back to output-only detection like everything else. And WSL2 under-reports socket bytes in
+`/proc/<pid>/io` by roughly 5000x (6MB received moved `rchar` by 1187 bytes), so the streaming-socket
+row still holds there but with far less margin — a run trickling a few bytes a minute can round to
+no observable delta. File io accounting is exact on WSL2.
 
 ### Buckets
 
