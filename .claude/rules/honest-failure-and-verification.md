@@ -21,11 +21,52 @@ Section 3 promoted 2026-07-26 on the **third** recurrence (gate N=3) from:
 
 ---
 
+## 0. What tman is for, and the scale at which a feature is out of scope.
+
+Set by the project owner 2026-07-26, after a release-blocker slice shipped machine-wide
+serialization on the common claim path to reclaim disk that only accumulates on a CI runner.
+
+**tman keeps a few rogue processes on one machine from doing harm**: a test runner orphaned in a
+loop eating battery, a test server holding a port for hours after its last use. That machine is a
+developer's laptop or a **department-sized CI host** — a handful of runners, builds you could
+count in a day. Both are in scope; neither is a fleet.
+
+**Reject any feature whose motivating scenario requires more than a handful of concurrent
+processes on one machine.** Agent farms, thousands of runners, and anything measured in tens of
+thousands of buckets or dozens of simultaneous runs are **not** the target. A measurement taken at
+that scale does not justify a feature; it disqualifies one. When a defect report's evidence is "at
+20,000 X it costs Y", re-derive the number at department scale before deciding anything — the
+honest answer is usually to document the bound and move on, not to build the mechanism that
+removes it.
+
+Scale down the evidence, don't just discount it. A CI host that seeds one bucket per build is a
+real user, but 20 builds a day for a year is a few thousand small files — tens of megabytes, which
+a line in a runner's cleanup script removes. That is a documentation problem. The same report at
+20,000 buckets is a fleet problem, and not ours.
+
+Two corollaries, because this is where the cost actually lands:
+
+- **The common path pays first.** A guard added for a rare scenario that sits inside the ordinary
+  claim/run path taxes every invocation and adds a failure mode to the case that always happens.
+  Weigh it against the case that never does.
+- **Acceptance criteria offering "or document the bound instead" mean it.** Choosing that branch is
+  not an argument from difficulty when the scenario the mechanism serves is out of scope. Re-ask
+  whether the primary route is worth its price once its price is visible, rather than treating the
+  criteria as settled at planning time.
+
 ## 1. Verify this repo with `sh -c "exec ./test"`. Nothing else counts.
 
-**Never run bare `dotnet test` from the repo root.** It resolves `tman.csproj` — the application
-project, not a test project — and **exits 0 in about 3 seconds having run zero tests**. The real
-suite is 143 tests under `tests/Tman.Tests/`.
+**Bare `dotnet test` from the repo root now refuses.** It resolves `tman.csproj` — the application
+project, not a test project — and used to **exit 0 in about 3 seconds having run zero tests**. As of
+`tman.csproj`'s `RefuseTestRunsAgainstTheApplicationProject` target it exits 1 with `error TMAN0001`
+naming the commands below. The real suite lives under `tests/Tman.Tests/`.
+
+Do not read that refusal as permission to reach for the command: it is a backstop for people and
+tools that have not read this file, and it fires *instead of* a test run, never alongside one. The
+guard binds `BeforeTargets="VSTest"`, the one target `dotnet test` invokes, so `dotnet build`,
+`dotnet run`, `dotnet publish`, and building the project as a reference of `Tman.Tests` are all
+unaffected — a change that broke any of those would be a defect in the guard, and
+`RootDotnetTestGuardTests` covers both the refusal and that boundary.
 
 **Never pass a bare relative `argv[0]`** such as `./test` to a workflow command step or any exec
 that does not go through a shell. A relative `argv[0]` is resolved through **PATH, not cwd**; on
@@ -40,8 +81,9 @@ dotnet test tests/Tman.Tests/Tman.Tests.csproj   # explicit path
 ```
 
 Worktrack tasks in this repo must attach `templateName="tman-slice-v3"`.
-**Do not use `slice-default`** — its test gate is wired to bare `dotnet test` and therefore cannot
-go red.
+**Do not use `slice-default`** — its test gate is wired to bare `dotnet test`. Against this repo that
+gate can now only go red, since the guard above refuses the command outright; before the guard it
+could only go green, and never on evidence. Neither is a gate.
 
 `tman-slice-v2` is archived. It carried a `file_scope` gate that diffed against `HEAD`, but commit
 discipline requires implementers to commit *during* implementation, so by the time the gate ran the
