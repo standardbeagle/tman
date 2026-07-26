@@ -22,13 +22,30 @@ public class RunnerTests : IDisposable
     static Caps StallOnly(int seconds) => new() { Stall = TimeSpan.FromSeconds(seconds) };
 
     [Fact]
-    public async Task IdleProcess_IsStalled()
+    public async Task IdleProcess_InInterruptibleSleep_IsStillStalled()
     {
+        // The true positive the whole guard exists for. `sleep` parks in S with no io, which is
+        // exactly the state a blocked socket read shows — so widening the progress signal to S
+        // would silently retire stall detection. The stderr assertion keeps this non-vacuous:
+        // it fails loudly if the kill was decided against some other state.
         if (!Unix) return;
 
-        var exit = await Runner.RunAsync("sleep", new[] { "30" }, StallOnly(1), null, null);
+        var err = new StringWriter();
+        var prevErr = Console.Error;
+        Console.SetError(err);
+        int exit;
+        try
+        {
+            exit = await Runner.RunAsync("sleep", new[] { "30" }, StallOnly(1), null, null);
+        }
+        finally
+        {
+            Console.SetError(prevErr);
+        }
 
         Assert.Equal(Runner.ExitStalled, exit);
+        if (TreeStats.CoversTree)
+            Assert.Contains("[S]", err.ToString());
     }
 
     [Fact]

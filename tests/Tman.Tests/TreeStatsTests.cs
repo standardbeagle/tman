@@ -60,6 +60,67 @@ public class TreeStatsTests
             $"expected cpu jiffies to advance ({before.CpuJiffies} -> {after.CpuJiffies})");
     }
 
+    // A tick's progress verdict is pure, so it is exercised with synthetic samples rather than by
+    // manufacturing kernel states. TrySample_PopulatesStates_ForTheProgressVerdict keeps these
+    // honest by pinning that a real sample actually carries the States they read.
+    static TreeSample Tick(string states, long cpu = 100, long io = 500) =>
+        new(cpu, io, 8, 1, states);
+
+    [Fact]
+    public void ShowsProgress_UninterruptibleSleep_IsProgress()
+    {
+        // D = the kernel is servicing an io request for this process. Definitively not hung.
+        Assert.True(TreeStats.ShowsProgress(Tick("S"), Tick("D")));
+    }
+
+    [Fact]
+    public void ShowsProgress_UninterruptibleSleepAnywhereInTheTree_IsProgress()
+    {
+        Assert.True(TreeStats.ShowsProgress(Tick("SS"), Tick("DS")));
+    }
+
+    [Fact]
+    public void ShowsProgress_InterruptibleSleepAlone_IsNotProgress()
+    {
+        // `sleep 120` and a socket parked in recv() are both S. Reading S as activity would
+        // disable stall detection outright, so it stays a non-signal.
+        Assert.False(TreeStats.ShowsProgress(Tick("S"), Tick("S")));
+    }
+
+    [Fact]
+    public void ShowsProgress_RunnableAlone_IsNotProgress()
+    {
+        // R is already accounted for by the cpu counter; without counter movement it adds nothing.
+        Assert.False(TreeStats.ShowsProgress(Tick("S"), Tick("R")));
+    }
+
+    [Fact]
+    public void ShowsProgress_CountersAdvancing_IsProgress()
+    {
+        Assert.True(TreeStats.ShowsProgress(Tick("S", cpu: 100), Tick("S", cpu: 101)));
+        Assert.True(TreeStats.ShowsProgress(Tick("S", io: 500), Tick("S", io: 501)));
+    }
+
+    [Fact]
+    public void ShowsProgress_WithoutStates_FallsBackToCountersAlone()
+    {
+        // Off Linux a sample carries no states at all; the D signal must simply be unavailable
+        // there rather than silently reading as progress.
+        Assert.False(TreeStats.ShowsProgress(Tick(""), Tick("")));
+        Assert.True(TreeStats.ShowsProgress(Tick("", cpu: 100), Tick("", cpu: 101)));
+    }
+
+    [Fact]
+    public void TrySample_PopulatesStates_ForTheProgressVerdict()
+    {
+        if (!TreeStats.CoversTree) return;
+
+        Assert.True(TreeStats.TrySample(Environment.ProcessId, out var s));
+        Assert.NotEqual("", s.States);
+        foreach (var c in s.States)
+            Assert.True("RSDZTtWXxKPI".Contains(c), $"unexpected proc state '{c}' in \"{s.States}\"");
+    }
+
     [Fact]
     public void CoversTree_OnlyWhereParentPidsAreCheaplyAvailable()
     {
