@@ -113,11 +113,9 @@ public class TreeStatsTests
         Assert.True(TreeStats.ShowsProgress(Tick("", cpu: 100), Tick("", cpu: 101)));
     }
 
-    [Fact]
+    [TreeSamplingFact("proc states are read out of /proc")]
     public void TrySample_PopulatesStates_ForTheProgressVerdict()
     {
-        if (!TreeStats.CoversTree) return;
-
         Assert.True(TreeStats.TrySample(Environment.ProcessId, out var s));
         Assert.NotEqual("", s.States);
         foreach (var c in s.States)
@@ -130,11 +128,9 @@ public class TreeStatsTests
         Assert.Equal(OperatingSystem.IsLinux(), TreeStats.CoversTree);
     }
 
-    [Fact]
+    [TreeSamplingFact("walking from the root to its child needs /proc parent pids")]
     public void TrySample_IncludesChildProcesses()
     {
-        if (!TreeStats.CoversTree) return;
-
         using var child = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
         {
             FileName = "sleep",
