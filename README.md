@@ -11,7 +11,7 @@ LLM agents start test suites and then hang, get distracted, or survive a machine
 - **wall-time + stall kills** — `--max-time 10m`, `--stall 30m` (on Linux: silent *and* idle = hung, so quiet-but-busy work like `go test` keeps running)
 - **resource culling** — opt-in `--max-mem 2g`, `--max-cpu 95` (sustained) kill the whole process tree
 - **orphan reaping** — every `tman` command kills children whose runner died and prunes expired records; a lock whose runner died is taken over in place by the next run of that name
-- **dedup locks** — `--name test` refuses duplicates; `--replace` kills the old run
+- **dedup locks** — `--name test` refuses duplicates; `--replace` kills the old run and waits for it to hand the name back
 - **resource gating** — `--max-parallel 2` queues excess runs instead of stampeding cores
 - **per-project scoping** — locks and slots bucket by name (or command) *and* directory, so one repo's runs never block another's
 - **folder aliases** — `.tman.kdl` per project, with repo-root shims so `./test` is supervised transparently
@@ -69,7 +69,7 @@ tman init --shims --gitignore
 | flag | default | what it does |
 | --- | --- | --- |
 | `--name N` | — | dedup lock; refuses if a live run has the same name **in this directory** |
-| `--replace` | off | with `--name`: kill the existing run first |
+| `--replace` | off | with `--name`: kill the existing run, then wait for its runner to release the name (up to `--queue-timeout`); refuses to start if it is still held |
 | `--max-time T` | — | wall-clock limit → kill, exit 124 |
 | `--stall T` | 30m | no output **and** no cpu/io/kernel-io-wait activity for T → kill, exit 125 |
 | `--max-mem M` | — | ceiling on the process tree's RSS (MB or `2g`) → cull, exit 126 |
