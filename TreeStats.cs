@@ -21,9 +21,15 @@ public static class TreeStats
     /// <summary>
     /// Whether this tick's sample shows the tree doing work, given the previous tick's sample.
     /// This is the whole "is it alive?" question for a run that is printing nothing. Three
-    /// positive facts, any one of which means the tree is not hung:
+    /// positive facts, any one of which is read as progress:
     /// cpu jiffies advanced; io bytes advanced; or some process sits in <c>D</c>, where the
     /// kernel is servicing an io request on its behalf.
+    /// <para>
+    /// The two counter clauses are edge-triggered — they need movement between ticks — but the
+    /// <c>D</c> clause is level-triggered: the state alone suffices, every tick, forever. So a
+    /// process wedged permanently in <c>D</c> (a dead NFS server, a failing disk) is a genuine
+    /// hang that <c>--stall</c> can never kill, and <c>--max-time</c> is the only bound on it.
+    /// </para>
     /// <para>
     /// <c>S</c> is deliberately not a signal: `sleep 120` and a socket parked in recv() are both
     /// <c>S</c>, so reading it as activity would retire stall detection rather than sharpen it.

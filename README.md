@@ -115,10 +115,16 @@ So:
 | --- | --- | --- |
 | burning CPU silently (`go build`, a compile) | yes | cpu jiffies advance |
 | reading/writing files silently | yes | `rchar`/`wchar` advance |
-| blocked on disk or NFS io | yes | state `D` |
+| blocked on disk or NFS io | yes — see the caveat below | state `D` |
 | streaming over a socket, even slowly | yes | socket bytes move `rchar`/`wchar` |
 | **waiting on a peer that has sent nothing yet** | **no** | zero bytes, zero CPU, and it parks in `S` — indistinguishable from `sleep 3600` |
 | genuinely idle or hung | no — killed, as intended | same signals, correctly absent |
+
+**The `D` row is level-triggered, and that has a cost.** CPU and io count only when they *move*
+between ticks; `D` counts whenever it is merely *present*. A process wedged permanently in `D` — a
+dead NFS server, a failing disk — therefore looks alive to `--stall` on every tick forever. That is
+a real hang that `--stall` will never kill, and `--max-time` is the only thing that bounds it. If
+you touch network filesystems, do not run with `--stall` as your sole backstop.
 
 The last two rows are the same signal, which is why the honest answer is a *wide* `--stall`: at the
 `30m` default a slow API, a long DB query, a lock wait or a long-poll has to be silent for half an
