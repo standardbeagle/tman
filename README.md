@@ -215,8 +215,8 @@ Lock files are not part of it. A lock is claimed by holding its file open exclus
 kernel releases it when its runner dies and the next run of that bucket takes the same file over
 in place. Removing one is never safe — a run that opened the name a moment earlier would take the
 lock as the sweep dropped it and end up holding a file with no name, while the next run created a
-fresh one — and it would gain nothing, so `~/.tman/runs` keeps one small `.lock` file per bucket
-it has ever seen.
+fresh one — and it would gain nothing, so `~/.tman/runs` keeps one small `.lock` per bucket it has
+seen for the name dedup, plus one per parallel slot that bucket has ever handed out.
 
 `tman clean` runs that sweep on demand and prints the counts. Records are canonical on disk:
 absolute resolved command paths, absolute cwd, one nested `Caps` object, and a schema version, so a

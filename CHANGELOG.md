@@ -45,7 +45,8 @@ below 1.0, behavior changes land in minor releases.
   name a moment earlier takes the lock as the unlinker drops it and is then holding a file with no
   name, while the next arrival creates a fresh one. It also bought nothing — a lock whose owner is
   gone is taken over in place, because the kernel drops the hold when the process dies.
-  `~/.tman/runs` now keeps one small `.lock` file per bucket it has ever seen.
+  `~/.tman/runs` now keeps one small `.lock` per bucket it has seen for the name dedup, plus one
+  per parallel slot that bucket has ever handed out.
 - **`tman run --replace` waits for the run it killed to release the name** instead of taking the
   name from it, and reports that it is not replacing anything if the lock is still held when the
   queue timeout runs out.
