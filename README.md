@@ -90,12 +90,13 @@ Cap precedence: CLI flags > alias block > `defaults` block > built-ins.
 > runs that guard fired 32 times and caught **no actual hang**, killing work like
 > `go build ./...` at 60s that succeeded 14 other times, once taking 75s.
 >
-> **If your `.tman.kdl` has no `stall` line, you get `30m` — including configs written before
-> 0.2.1.** That is deliberate. Omitting `stall` never meant "60s"; it meant you had no opinion,
-> and the built-in supplied a bad one. Widening a backstop cannot make a passing run fail — it can
-> only stop kills — and the only run it keeps alive longer is one that is silent *and* idle, which
-> stays visible in `tman list`, killable, and bounded by `max-parallel` / `queue-timeout`. If you
-> do want a tight bound, that is `--max-time`, or write `stall` explicitly and it wins.
+> **If your `.tman.kdl` has no `stall` line, you get `30m` — including configs written against
+> 0.2.0 and earlier.** That is deliberate. Omitting `stall` never meant "60s"; it meant you had no
+> opinion, and the built-in supplied a bad one. Widening a backstop cannot make a passing run fail
+> — it can only stop kills — and the only run it keeps alive longer is one that is silent *and*
+> idle, which stays visible in `tman list`, endable with `tman kill`, and holds at most one of its
+> bucket's `max-parallel` slots. If you do want a tight bound, that is `--max-time`, or write
+> `stall` explicitly and it wins.
 
 > **Platform note.** Activity-aware stall detection walks the whole process tree on **Linux**
 > only, where `/proc` exposes parent pids and per-process io counters cheaply. On macOS and
