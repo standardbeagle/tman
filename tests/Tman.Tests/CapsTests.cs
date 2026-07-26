@@ -177,6 +177,117 @@ defaults {
     }
 
     /// <summary>
+    /// README:98 offers the CLI as the escape hatch for a user who wants a tighter bound than the
+    /// config gives them. That promise is only kept if `cliCaps` is actually the top of the chain:
+    /// starting the merge from an empty `Caps` instead turns every cap flag into a silent no-op.
+    /// </summary>
+    [Fact]
+    public void CliStall_WinsOverTheDefaultsBlock()
+    {
+        using var dir = new TempDir();
+        dir.WriteFile(".tman.kdl", """
+defaults {
+    stall "60s"
+}
+""");
+
+        var config = Config.Load(dir.Path);
+        var cliStall = TimeSpan.FromSeconds(90);
+
+        Assert.NotNull(config);
+        // Precondition: the config must declare a stall that competes with — and differs from —
+        // both the CLI value and the built-in, or the CLI value could win by default.
+        Assert.Equal(TimeSpan.FromSeconds(60), config.Defaults.Stall);
+        Assert.NotEqual(cliStall, config.Defaults.Stall);
+        Assert.NotEqual(Caps.SaneDefaults.Stall, config.Defaults.Stall);
+
+        var caps = Config.EffectiveCaps(null, new Caps { Stall = cliStall }, config);
+
+        Assert.Equal(cliStall, caps.Stall);
+    }
+
+    /// <summary>
+    /// The alias layer sits between the CLI and the `defaults` block. Every prior test threaded an
+    /// alias that declared no caps of its own, so the layer carried nothing that could be lost.
+    /// </summary>
+    [Fact]
+    public void AliasStall_BeatsTheDefaultsBlockAndLosesToTheCli()
+    {
+        using var dir = new TempDir();
+        dir.WriteFile(".tman.kdl", """
+defaults {
+    stall "60s"
+}
+
+alias "build" {
+    command "go"
+    args "build" "./..."
+    stall "5m"
+}
+""");
+
+        var config = Config.Load(dir.Path);
+        var cliStall = TimeSpan.FromSeconds(90);
+
+        Assert.NotNull(config);
+        var alias = config.Aliases["build"];
+        // Precondition: three distinct values, one per layer, so each layer's win is observable.
+        Assert.Equal(TimeSpan.FromMinutes(5), alias.Caps.Stall);
+        Assert.Equal(TimeSpan.FromSeconds(60), config.Defaults.Stall);
+        Assert.NotEqual(Caps.SaneDefaults.Stall, alias.Caps.Stall);
+        Assert.NotEqual(cliStall, alias.Caps.Stall);
+
+        Assert.Equal(TimeSpan.FromMinutes(5),
+            Config.EffectiveCaps(alias, new Caps(), config).Stall);
+        Assert.Equal(cliStall,
+            Config.EffectiveCaps(alias, new Caps { Stall = cliStall }, config).Stall);
+    }
+
+    /// <summary>
+    /// `max-time` has no built-in, so a `defaults` block that declares one is the only thing
+    /// standing between the user and an unbounded run.
+    /// </summary>
+    [Fact]
+    public void DefaultsMaxTime_ResolvesByValue()
+    {
+        using var dir = new TempDir();
+        dir.WriteFile(".tman.kdl", """
+defaults {
+    max-time "4m"
+}
+""");
+
+        var config = Config.Load(dir.Path);
+
+        Assert.NotNull(config);
+        // Precondition: the fixture must actually declare `max-time`, or this test proves nothing.
+        Assert.Equal(TimeSpan.FromMinutes(4), config.Defaults.MaxTime);
+
+        Assert.Equal(TimeSpan.FromMinutes(4), Config.EffectiveCaps(null, new Caps(), config).MaxTime);
+    }
+
+    [Fact]
+    public void DefaultsQueueTimeout_ResolvesByValue()
+    {
+        using var dir = new TempDir();
+        dir.WriteFile(".tman.kdl", """
+defaults {
+    queue-timeout "45s"
+}
+""");
+
+        var config = Config.Load(dir.Path);
+
+        Assert.NotNull(config);
+        // Precondition: declared, and different from the built-in it has to override.
+        Assert.Equal(TimeSpan.FromSeconds(45), config.Defaults.QueueTimeout);
+        Assert.NotEqual(Caps.SaneDefaults.QueueTimeout, config.Defaults.QueueTimeout);
+
+        Assert.Equal(TimeSpan.FromSeconds(45),
+            Config.EffectiveCaps(null, new Caps(), config).QueueTimeout);
+    }
+
+    /// <summary>
     /// The scaffolded default and the built-in default answer the same question, so they are
     /// one constant. They were two literals once and drifted (30m vs 60s) within a single release.
     /// </summary>
