@@ -147,55 +147,50 @@ public static partial class Program
         // a supervised process that re-enters tman is one logical run, not a second claim on a slot
         var nested = Environment.GetEnvironmentVariable(Runner.ParentIdEnvVar) is not null;
 
+        var queueTimeout = caps.QueueTimeout ?? TimeSpan.FromMinutes(5);
+
         FileStream? lockFile = null;
-        string? lockPath = null;
         if (name is not null)
         {
-            Store.EnsureDirs();
-            lockPath = Store.LockPathFor(group);
-            while (lockFile is null)
+            // holding the name is the claim on it; a name held by a runner that died is free again
+            // the moment the kernel drops its handle, so nothing here breaks a lock to take it
+            lockFile = Store.TryAcquireNameLock(group);
+            if (lockFile is null)
             {
-                try
+                var holder = Reaper.FindLiveInGroup(group);
+                var who = holder is not null ? $" (pid {holder.Pid}, id {holder.Id})" : "";
+                if (!replace)
                 {
-                    lockFile = new FileStream(lockPath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
-                    Store.StampLockOwner(lockFile);
+                    Console.Error.WriteLine($"tman: run '{name}' already active{who}; use --replace to kill it");
+                    return Runner.ExitKilled;
                 }
-                catch (IOException)
+                Console.Error.WriteLine($"tman: replacing run '{name}'{who}");
+                if (holder is not null)
                 {
-                    var holder = Reaper.FindLiveInGroup(group);
-                    // A lock is created before its run record exists, so "no matching record" is not
-                    // evidence the lock is free — only a dead owner is.
-                    if (holder is null && Store.IsLockStale(lockPath))
-                    {
-                        Store.BreakLock(lockPath);
-                        continue;
-                    }
-                    var who = holder is not null ? $" (pid {holder.Pid}, id {holder.Id})" : "";
-                    if (!replace)
-                    {
-                        Console.Error.WriteLine($"tman: run '{name}' already active{who}; use --replace to kill it");
-                        return Runner.ExitKilled;
-                    }
-                    Console.Error.WriteLine($"tman: replacing run '{name}'{who}");
-                    if (holder is not null)
-                    {
-                        ProcUtil.KillTree(holder.Pid);
-                        holder.State = RunState.Killed;
-                        holder.KillReason = "replaced by newer run";
-                        Store.Save(holder);
-                    }
-                    Store.BreakLock(lockPath);
+                    ProcUtil.KillTree(holder.Pid);
+                    holder.State = RunState.Killed;
+                    holder.KillReason = "replaced by newer run";
+                    Store.Save(holder);
+                }
+                // killing the child does not release the name — the runner that holds it does, as
+                // it winds up. Waiting for that is what replaces the old run instead of joining it.
+                lockFile = await AwaitNameLock(group, queueTimeout);
+                if (lockFile is null)
+                {
+                    Console.Error.WriteLine($"tman: run '{name}' has not released its lock; not replacing it");
+                    return Runner.ExitKilled;
                 }
             }
 
+            // the name can still be held by a runner that died leaving its child alive: the kernel
+            // handed the name back, but the work it stood for is still running
             var existing = Reaper.FindLiveInGroup(group);
             if (existing is not null)
             {
                 if (!replace)
                 {
                     Console.Error.WriteLine($"tman: run '{name}' already active (pid {existing.Pid}, id {existing.Id}); use --replace to kill it");
-                    lockFile.Dispose();
-                    Store.BreakLock(lockPath);
+                    Store.ReleaseLock(lockFile);
                     return Runner.ExitKilled;
                 }
                 Console.Error.WriteLine($"tman: replacing run '{name}' (pid {existing.Pid})");
@@ -211,7 +206,7 @@ public static partial class Program
         {
             if (!nested && caps.MaxParallel is { } maxPar && maxPar > 0)
             {
-                var deadline = DateTime.UtcNow + (caps.QueueTimeout ?? TimeSpan.FromMinutes(5));
+                var deadline = DateTime.UtcNow + queueTimeout;
                 // holding the slot file, rather than counting live runs, is what admits this run:
                 // every racer would read the same count, but only one can create the same file
                 while ((slotFile = Store.TryAcquireSlot(group, maxPar)) is null)
@@ -233,8 +228,24 @@ public static partial class Program
         finally
         {
             if (slotFile is not null) Store.ReleaseLock(slotFile);
-            lockFile?.Dispose();
-            if (lockPath is not null) Store.BreakLock(lockPath);
+            if (lockFile is not null) Store.ReleaseLock(lockFile);
+        }
+    }
+
+    /// <summary>
+    /// Waits for a name the caller has just told to go away, up to <paramref name="timeout"/>.
+    /// Returns null when it is still held then — reporting that is the honest end of a replace that
+    /// could not happen, where taking the name anyway is the unlink that let two runs share it.
+    /// </summary>
+    static async Task<FileStream?> AwaitNameLock(string group, TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (true)
+        {
+            var claimed = Store.TryAcquireNameLock(group);
+            if (claimed is not null) return claimed;
+            if (DateTime.UtcNow >= deadline) return null;
+            await Task.Delay(50);
         }
     }
 
@@ -296,10 +307,10 @@ public static partial class Program
     static int CmdClean()
     {
         var retain = Retention();
-        var (reaped, pruned, locksFreed) = Reaper.Sweep(retain);
+        var (reaped, pruned) = Reaper.Sweep(retain);
         Console.WriteLine(
             $"tman: reaped {reaped.Count} orphan(s), pruned {pruned} record(s) older than " +
-            $"{Canon.Duration(retain)}, freed {locksFreed} stale lock(s)");
+            Canon.Duration(retain));
         return 0;
     }
 

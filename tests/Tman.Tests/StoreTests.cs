@@ -132,33 +132,22 @@ public class StoreTests : IDisposable
     }
 
     [Fact]
-    public void StampedLock_IsHeldByALiveOwner_AndStaleWhenOwnerIsGone()
+    public void AReleasedNameLock_StaysOnDiskAndNamesItsLastHolder()
     {
-        Store.EnsureDirs();
+        var claimed = Store.TryAcquireNameLock("test@/repo");
+        Assert.NotNull(claimed);
         var path = Store.LockPathFor("test@/repo");
-        using (var fs = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None))
-            Store.StampLockOwner(fs);
+        Assert.Null(Store.TryAcquireNameLock("test@/repo"));
 
-        Assert.False(Store.IsLockStale(path));
-        Assert.Equal(0, Store.PruneStaleLocks());
+        Store.ReleaseLock(claimed);
 
-        // rewrite the stamp as a pid that cannot be this process
-        File.WriteAllText(path, $"2147483646 {DateTime.UtcNow:O}\n");
-        Assert.True(Store.IsLockStale(path));
-        Assert.Equal(1, Store.PruneStaleLocks());
-        Assert.False(File.Exists(path));
-    }
-
-    [Fact]
-    public void UnstampedLock_IsNotTreatedAsStale()
-    {
-        Store.EnsureDirs();
-        var path = Store.LockPathFor("legacy@/repo");
-        File.WriteAllText(path, "");
-
-        // breaking a lock we cannot prove is dead would let two runs share a bucket
-        Assert.False(Store.IsLockStale(path));
-        Assert.Equal(0, Store.PruneStaleLocks());
+        // removing it is what let two runs share a name, and it buys nothing: the next claim opens
+        // this same file. The stamp stays readable so a busy name can be traced to a process.
+        Assert.True(File.Exists(path));
+        Assert.StartsWith($"{Environment.ProcessId} ", File.ReadAllText(path));
+        var again = Store.TryAcquireNameLock("test@/repo");
+        Assert.NotNull(again);
+        Store.ReleaseLock(again);
     }
 
     [Fact]

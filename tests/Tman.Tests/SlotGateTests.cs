@@ -160,7 +160,7 @@ public class SlotGateTests : IDisposable
     }
 
     [Fact]
-    public void StaleSlotLocks_AreSweptLikeDedupLocks()
+    public void ASlotLeftByADeadRunner_IsReclaimedInPlaceRatherThanSwept()
     {
         var slot = Store.TryAcquireSlot("test@/repo", 1);
         Assert.NotNull(slot);
@@ -168,8 +168,12 @@ public class SlotGateTests : IDisposable
         slot.Dispose();
         File.WriteAllText(path, $"2147483646 {DateTime.UtcNow:O}\n");
 
-        Assert.Equal(1, Store.PruneStaleLocks());
-        Assert.False(File.Exists(path));
+        var reclaimed = Store.TryAcquireSlot("test@/repo", 1);
+
+        Assert.NotNull(reclaimed);
+        Assert.Equal(path, reclaimed.Name);
+        Assert.True(File.Exists(path));
+        Store.ReleaseLock(reclaimed);
     }
 
     [Fact]
@@ -278,32 +282,33 @@ public class SlotGateTests : IDisposable
             // the dedup lock of a runner that was killed while holding it
             File.WriteAllText(lockPath, $"2147483646 {DateTime.UtcNow:O}\n");
 
-            var exits = new int[racerCount];
             var atTheGate = new Barrier(racerCount + 1);
             var racers = Enumerable.Range(0, racerCount)
-                .Select(t => new Thread(() =>
+                .Select(_ => new Thread(() =>
                 {
                     atTheGate.SignalAndWait();
-                    exits[t] = Sleep("0", caps, name: "dedup").GetAwaiter().GetResult();
+                    Sleep("0", caps, name: "dedup").GetAwaiter().GetResult();
                 }))
                 .ToList();
-            // every tman command sweeps, so a sweep is one of the arrivals at this name
+            // every tman command sweeps before it does anything else, so a sweep is one of the
+            // arrivals at this name
             var sweeper = new Thread(() =>
             {
                 atTheGate.SignalAndWait();
-                Store.PruneStaleLocks();
+                Reaper.Sweep(TimeSpan.FromHours(24), quiet: true);
             });
             sweeper.Start();
             foreach (var r in racers) r.Start();
             foreach (var r in racers) r.Join();
             sweeper.Join();
 
-            if (exits.Count(e => e == 0) > 1) doubleClaims++;
+            // two runs of one name that overlap in time are the violation — two that merely both
+            // finished are not, since the name is free again the moment the first one releases it
+            if (PeakOverlap(Store.LoadAll()) > 1) doubleClaims++;
             // records are per-round evidence; keeping them all would make every round scan the last
             foreach (var f in Directory.EnumerateFiles(runsDir, "*.json")) File.Delete(f);
         }
 
         Assert.Equal(0, doubleClaims);
     }
-
 }

@@ -133,8 +133,6 @@ public static class Store
 
     public static void Remove(string id) => Delete(PathFor(id));
 
-    public static void BreakLock(string lockPath) => Delete(lockPath);
-
     static void Delete(string path)
     {
         try { if (File.Exists(path)) File.Delete(path); }
@@ -183,6 +181,32 @@ public static class Store
         lockFile.Flush(flushToDisk: false);
     }
 
+    // THE LOCK OWNERSHIP INVARIANT, which every claim and release below obeys:
+    //
+    //     a lock is claimed by opening its file exclusively, and a lock file is never unlinked.
+    //
+    // Both halves are load-bearing, and neither is a check that can be tightened. Creating a lock
+    // only after removing someone else's is two steps that no ordering makes atomic — two
+    // claimants each remove the file the other created, and each holds a different file answering
+    // to one name. And no unlink is safe, not even one made while holding the file exclusively: a
+    // claimant that opened the name a moment earlier takes the lock the instant the unlinker drops
+    // it, and is then holding a file that no longer has a name, while the next arrival creates a
+    // fresh one and holds that. Measured on this platform, driving runs and a stale-lock sweep at
+    // one name: 2% of rounds ran two runs of that name at once, and none once the sweep stopped
+    // unlinking. Nothing is gained by removing them either — a lock whose holder is gone is taken
+    // over in place, because the kernel drops the hold when the process dies. So a lock file is
+    // created once per bucket and then lives as long as the tman home does, and holding it is the
+    // whole of the claim.
+
+    /// <summary>
+    /// Takes a bucket's dedup lock, or returns null when another runner holds the name.
+    /// </summary>
+    public static FileStream? TryAcquireNameLock(string runKey)
+    {
+        EnsureDirs();
+        return TryClaimLock(LockPathFor(runKey));
+    }
+
     /// <summary>
     /// Claims one of a bucket's <paramref name="maxParallel"/> slots, or returns null when every
     /// slot is taken. Holding the slot file exclusively is the claim, so two runners racing for the
@@ -201,17 +225,15 @@ public static class Store
     }
 
     /// <summary>
-    /// Takes a lock file exclusively, creating it when absent and taking it over when its previous
-    /// holder is gone: the OS drops an exclusive handle when the process holding it dies, so a slot
-    /// never has to be unlinked to come back into circulation. Deleting a stale lock and creating a
-    /// fresh one is two steps that cannot be made atomic — two runners reclaiming the same slot each
-    /// delete the file the other just created, and both come away believing they hold it.
+    /// Takes a lock file exclusively, creating it when absent and taking it over in place when its
+    /// previous holder is gone. The single claim both the dedup name and the parallel slots are
+    /// taken with — see the ownership invariant above.
     /// </summary>
     static FileStream? TryClaimLock(string path)
     {
         FileStream file;
-        // the holder can release and unlink the lock between the failed open and the check below,
-        // which then reads as a fault it is not; one retry settles that without hiding a real one
+        // tman never removes a lock file, but a user or another tool can, and a claim that raced
+        // that removal reads as a fault it is not; one retry settles it without hiding a real one
         for (var attempt = 0; ; attempt++)
         {
             try
@@ -237,53 +259,8 @@ public static class Store
         e is not (FileNotFoundException or DirectoryNotFoundException) && File.Exists(path);
 
     /// <summary>
-    /// Gives up a held lock. The file stays: it is the handle, not the name, that admits a run, and
-    /// unlinking it here would open the same window the two-step reclaim had. A lock nobody holds is
-    /// swept once its owner is gone.
+    /// Gives up a held lock. The file stays: it is the handle, not the name, that admits a run.
     /// </summary>
     public static void ReleaseLock(FileStream lockFile) => lockFile.Dispose();
 
-    /// <summary>True when a lock file's owning runner is gone, so the lock can be broken.</summary>
-    public static bool IsLockStale(string lockPath)
-    {
-        string text;
-        try { text = File.ReadAllText(lockPath); }
-        catch (IOException) { return false; }
-        catch (UnauthorizedAccessException) { return false; }
-
-        var parts = text.Split(' ', 2, StringSplitOptions.TrimEntries);
-        // an unstamped lock predates owner tracking, or was caught mid-write; leave it to the holder check
-        if (parts.Length < 2 || !int.TryParse(parts[0], out var pid)) return false;
-        if (!DateTime.TryParse(parts[1], null,
-                System.Globalization.DateTimeStyles.RoundtripKind, out var startUtc)) return false;
-        return !ProcUtil.IsAlive(pid) || !ProcUtil.IsSameProcess(pid, startUtc);
-    }
-
-    /// <summary>
-    /// Releases locks whose owning runner died. A runner killed between taking its lock and
-    /// finishing would otherwise refuse its bucket forever.
-    /// </summary>
-    public static int PruneStaleLocks()
-    {
-        EnsureDirs();
-        var removed = 0;
-        foreach (var f in Directory.EnumerateFiles(RunsDir, "*.lock"))
-        {
-            if (!IsLockStale(f)) continue;
-            try
-            {
-                // The stamp is written just after the claim, so a lock can read as stale while a
-                // runner already holds it. Taking it exclusively is what proves nobody does, and
-                // deleting on close keeps the unlink inside that hold — a plain delete would strip
-                // the name from under a claimant and let the next one create it again.
-                using var _ = new FileStream(
-                    f, FileMode.Open, FileAccess.Write, FileShare.None, 1, FileOptions.DeleteOnClose);
-                removed++;
-            }
-            // a live holder took it back, or another sweep got there first: either way it is not ours
-            catch (IOException) { }
-            catch (UnauthorizedAccessException) { }
-        }
-        return removed;
-    }
 }

@@ -6,15 +6,15 @@ public static class Reaper
 
     /// <summary>
     /// The full housekeeping pass every tman command performs: kill orphans, drop expired and
-    /// unreadable records, release locks whose owner died. Old data is never left for a `tman clean`
-    /// that may never be run.
+    /// unreadable records. Old data is never left for a `tman clean` that may never be run. Lock
+    /// files are not part of it — see the ownership invariant in <see cref="Store"/> for why one is
+    /// never removed once created.
     /// </summary>
-    public static (List<RunRecord> Reaped, int Pruned, int LocksFreed) Sweep(TimeSpan retain, bool quiet = false)
+    public static (List<RunRecord> Reaped, int Pruned) Sweep(TimeSpan retain, bool quiet = false)
     {
         var reaped = ReapOrphans(quiet);
         var pruned = Store.Prune(retain);
-        var locksFreed = Store.PruneStaleLocks();
-        return (reaped, pruned, locksFreed);
+        return (reaped, pruned);
     }
 
     public static List<RunRecord> ReapOrphans(bool quiet = false)
