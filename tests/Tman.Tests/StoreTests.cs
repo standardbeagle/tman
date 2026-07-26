@@ -132,6 +132,29 @@ public class StoreTests : IDisposable
     }
 
     [Fact]
+    public void ARecordWrittenByTwoWritersAtOnce_SurvivesBothOfThem()
+    {
+        var r = NewRecord("shared00001");
+
+        var atTheGate = new Barrier(4);
+        var faults = new Exception?[4];
+        var writers = Enumerable.Range(0, 4)
+            .Select(t => new Thread(() =>
+            {
+                atTheGate.SignalAndWait();
+                // a runner and any other command's housekeeping sweep both save the same record
+                for (var i = 0; i < 50; i++)
+                    try { Store.Save(r); } catch (Exception e) { faults[t] ??= e; return; }
+            }))
+            .ToList();
+        foreach (var w in writers) w.Start();
+        foreach (var w in writers) w.Join();
+
+        Assert.All(faults, f => Assert.Null(f));
+        Assert.NotNull(Store.Load("shared00001"));
+    }
+
+    [Fact]
     public void AReleasedNameLock_StaysOnDiskAndNamesItsLastHolder()
     {
         var claimed = Store.TryAcquireNameLock("test@/repo");

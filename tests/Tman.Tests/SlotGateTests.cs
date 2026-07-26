@@ -220,6 +220,72 @@ public class SlotGateTests : IDisposable
     }
 
     /// <summary>
+    /// A child that outlived the runner which started it. The kernel handed the name back when
+    /// that runner died, so the lock says the name is free while the work it stood for is still
+    /// running — the one thing a lock cannot see. The run is refused, and the name it briefly held
+    /// is left free for the sweep's reaping to hand on rather than pinned by the refusal.
+    /// </summary>
+    [Fact]
+    public async Task ARunWhoseChildOutlivedItsRunner_IsRefusedAndLeavesTheNameFree()
+    {
+        if (!Unix) return;
+
+        var group = RunKey.For("dedup", Canon.ResolveCommand("sleep"), _scope);
+        using var orphan = System.Diagnostics.Process.Start("sleep", "30")
+            ?? throw new IOException("could not start sleep");
+        try
+        {
+            Store.Save(new RunRecord
+            {
+                Id = "orphanchild1",
+                Name = "dedup",
+                Pid = orphan.Id,
+                ChildStartUtc = ProcUtil.StartTimeUtc(orphan.Id) ?? DateTime.UtcNow,
+                Command = Canon.ResolveCommand("sleep"),
+                Args = new[] { "30" },
+                Group = group,
+                StartedUtc = DateTime.UtcNow,
+                HeartbeatUtc = DateTime.UtcNow,
+            });
+
+            Assert.Equal(Runner.ExitKilled, await Sleep("0", new Caps(), name: "dedup"));
+
+            var free = Store.TryAcquireNameLock(group);
+            Assert.NotNull(free);
+            Store.ReleaseLock(free);
+        }
+        finally
+        {
+            orphan.Kill(entireProcessTree: true);
+            orphan.WaitForExit();
+        }
+    }
+
+    /// <summary>
+    /// --replace kills the run holding a name and then waits for that run's runner to let the name
+    /// go, because taking it any other way is the unlink this gate was fixed to stop making. When
+    /// it is not given up in time, the replacement does not happen — running anyway would be two
+    /// runs of the name, which is what --replace exists to prevent.
+    /// </summary>
+    [Fact]
+    public async Task AReplaceThatIsNeverGivenTheName_DoesNotRun()
+    {
+        if (!Unix) return;
+
+        var group = RunKey.For("dedup", Canon.ResolveCommand("sleep"), _scope);
+        var heldByAnotherRunner = Store.TryAcquireNameLock(group);
+        Assert.NotNull(heldByAnotherRunner);
+
+        var exit = await Program.GatedRun(
+            "sleep", new[] { "0" }, new Caps { QueueTimeout = TimeSpan.Zero },
+            "dedup", null, replace: true, _scope);
+
+        Assert.Equal(Runner.ExitKilled, exit);
+        Assert.Empty(Store.LoadAll());
+        Store.ReleaseLock(heldByAnotherRunner);
+    }
+
+    /// <summary>
     /// The deterministic half of the race below. A lock name is only exclusive while every runner
     /// reaching it opens the same file: unlink the name and create it again, and two runners hold
     /// two different files that answer to it. The probe is a hard link, which follows the inode
