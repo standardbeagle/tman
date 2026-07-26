@@ -101,7 +101,8 @@ Recipe: throwaway **detached git worktree** at the head commit, record the basel
 suite run per mutation, restore the source between runs, remove the worktree. Note that `/test` is
 gitignored, so a fresh worktree has **no `./test` shim** — `sh -c "exec ./test"` fails with "not
 found" and reads as a surviving mutant when it is nothing of the kind. Use
-`dotnet test tests/Tman.Tests/Tman.Tests.csproj` there.
+`tman run -- dotnet test tests/Tman.Tests/Tman.Tests.csproj` there — see rule 5 for why the bare
+form is not an option even in a throwaway tree.
 
 **A surviving mutant must be disclosed, and the stated reason for its survival must be independently
 verified** — "this cannot be tested" is one of the most common shapes a false green takes. Verify by
@@ -129,3 +130,45 @@ forbidden by project standard.
 **Check every clause of a reviewer's `fix_hint` as a checklist and report per clause.** "Blocker
 fixed" is only true when all of them are addressed. A hint whose hard clause was silently dropped
 while the easy one shipped cost a full rewind here.
+
+## 5. A throwaway probe is a supervised run, and a self-respawning process dispatches on a sentinel it sets itself.
+
+Promoted 2026-07-26 from an incident, not from a task. At 01:52 CDT a `task-context` subagent on the
+lock-reclamation blocker wrote a scratchpad probe (`…/scratchpad/probe/gate/Program.cs`) for
+`FileShare` gate semantics and ran it as `timeout 300 dotnet run`. It fork-bombed the box:
+**28,061 SIGABRT crashes** (17.5k in the 02:00 hour alone), a high PID of **3,739,031** against a
+`pid_max` of 4,194,304, `libc++abi: thread constructor failed: Resource temporarily unavailable`,
+~439,000 journal lines in two hours, and journald flushing caches under memory pressure. No OOM
+kill — this was **PID, log, and IO exhaustion**. Two independent guards each would have stopped it.
+
+**Every process you start goes through `tman`, including the ones you intend to delete.** `timeout`
+sends one signal to one PID; it does not know the tree exists, so an exponentially branching child
+set outlives it silently. `tman run --` caps and reaps the whole tree and reports the kill as exit
+124/125/126. A scratchpad directory has no `.tman.kdl`, so the PATH shims do not fire there and the
+prefix must be explicit: `tman run -- dotnet run`. "It's a five-line probe I'm about to throw away"
+is the exact reasoning that removed the only supervisor in the loop.
+
+**Never infer "am I the child?" from `Environment.ProcessPath`.** The probe re-invoked itself with:
+
+```csharp
+new ProcessStartInfo(Environment.ProcessPath!)                 // under `dotnet run`: the apphost ./gate
+psi.ArgumentList.Add(Assembly.GetEntryAssembly()!.Location);   // muxer-style "gate.dll" as args[0]
+psi.ArgumentList.Add("hold");
+```
+
+Under `dotnet run` the running process is the **apphost**, not the `dotnet` muxer, so the child's
+`args[0]` was `…/gate.dll` and the `if (args[0] == "hold")` branch never fired. Every child re-ran
+the whole probe, spawn block included — 2 children per generation, unbounded. The dispatch key was
+a property of the **host mode**, which differs between `dotnet run`, `dotnet test`, a published
+apphost, and `dotnet gate.dll`; the parent had no way to know which shape its own child would see.
+
+- Dispatch on **a sentinel you set and the child cannot avoid seeing** — an environment variable
+  (`TMAN_PROBE_ROLE=hold`), read identically in every host mode. Argument position is host-shaped;
+  the environment is not.
+- **Invert the default: the child branch is what runs unless the parent branch is explicitly opted
+  into.** Then a mis-parse yields a process that holds a file and exits, not one that spawns two
+  more. Fail-safe means the failure mode is inert, not fertile.
+- **Bound the recursion in the code as well**, with a generation counter or a hard child cap, so a
+  dispatch bug costs one wasted process instead of the PID space.
+
+Ask of any process that starts a copy of itself: *if the dispatch is wrong, does this terminate?*
