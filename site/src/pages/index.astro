@@ -44,11 +44,11 @@ const base = import.meta.env.BASE_URL;
     </div>
     <div class="card">
       <h3>orphan reaper</h3>
-      <p>Machine suspended? Agent crashed? Every tman command reaps children whose runner died, prunes expired records, and frees dead locks. Nothing drains your system overnight.</p>
+      <p>Machine suspended? Agent crashed? Every tman command reaps children whose runner died and prunes expired records — and a bucket held by a dead runner is free the moment the kernel drops its lock. Nothing drains your system overnight.</p>
     </div>
     <div class="card">
       <h3>--max-parallel</h3>
-      <p>Resource-gated multi-process runs, counted per name-and-directory bucket. Excess runs queue instead of stampeding your cores — and one repo never starves another.</p>
+      <p>Resource-gated multi-process runs, scoped per name-and-directory bucket. Each run holds a slot file exclusively, so excess runs queue instead of stampeding your cores even when they launch at the same instant — and one repo never starves another.</p>
     </div>
     <div class="card">
       <h3>--name dedup</h3>

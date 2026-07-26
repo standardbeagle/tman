@@ -33,7 +33,7 @@ curl -fsSL https://raw.githubusercontent.com/standardbeagle/tman/main/install.sh
     <tr><td><code>--stall T</code></td><td>30m</td><td>no output <strong>and</strong> no cpu/io activity for T → kill, exit 125</td></tr>
     <tr><td><code>--max-mem M</code></td><td>—</td><td>RSS above M (MB, or <code>2g</code>) → cull, exit 126</td></tr>
     <tr><td><code>--max-cpu P</code></td><td>—</td><td>CPU above P% for 3 consecutive seconds → cull, exit 126</td></tr>
-    <tr><td><code>--max-parallel N</code></td><td>2</td><td>queue while N live runs share this run's bucket</td></tr>
+    <tr><td><code>--max-parallel N</code></td><td>2</td><td>queue until one of the bucket's N slots can be held</td></tr>
     <tr><td><code>--queue-timeout T</code></td><td>5m</td><td>give up waiting for a parallel slot</td></tr>
   </table>
   <p>Durations accept <code>ms</code>, <code>s</code>, <code>m</code>, <code>h</code> (e.g. <code>90s</code>, <code>10m</code>). Cap precedence: CLI flags &gt; alias block &gt; <code>defaults</code> block &gt; built-ins.</p>
@@ -55,7 +55,7 @@ curl -fsSL https://raw.githubusercontent.com/standardbeagle/tman/main/install.sh
 
   <h2>buckets</h2>
   <p>
-    Dedup locks and parallel slots are counted per <strong>bucket</strong>, not machine-wide. A bucket is
+    Dedup locks and parallel slots are scoped per <strong>bucket</strong>, not machine-wide. A bucket is
     <code>&lt;name&gt;@&lt;dir&gt;</code> for a named run and <code>&lt;command&gt;@&lt;dir&gt;</code> for
     an unnamed one, where <code>&lt;dir&gt;</code> is the <code>.tman.kdl</code> directory governing the
     run (or the cwd when there is none).
@@ -68,6 +68,13 @@ curl -fsSL https://raw.githubusercontent.com/standardbeagle/tman/main/install.sh
     checkout never starves a build in another. A supervised process that re-enters tman — a PATH shim
     calling <code>tman</code> again — is recorded as a child of the run that launched it and does not
     claim a second slot.
+  </p>
+  <p>
+    A run is admitted by <strong>holding</strong> one of its bucket's slot files open exclusively, not
+    by counting the live runs in the bucket. Only one runner can hold a given slot file, so runs
+    launched at the same instant queue as configured; counting could not offer that, because every
+    racer reads the count before any of them has a record to be counted. A slot is given up when the
+    handle closes, which includes the runner dying and the kernel closing it.
   </p>
 
   <h2>housekeeping</h2>
@@ -87,11 +94,13 @@ curl -fsSL https://raw.githubusercontent.com/standardbeagle/tman/main/install.sh
       <strong>Finished records past <code>retain</code> are deleted</strong> (24h by default), along with
       record files this tman cannot read, which nothing else would ever revisit.
     </li>
-    <li>
-      <strong>Locks whose owning runner died are released</strong>, so a runner killed mid-run frees its
-      bucket instead of wedging it.
-    </li>
   </ul>
+  <p>
+    <strong>Lock files are not part of the sweep.</strong> A lock is claimed by holding its file open
+    exclusively, so a runner killed mid-run frees its bucket the moment the kernel drops its handle,
+    and the next run of that bucket takes the lock over in place. Nothing ever removes a lock file:
+    <code>~/.tman/runs</code> keeps one small <code>.lock</code> per bucket it has seen.
+  </p>
   <p>
     <code>tman clean</code> runs the same sweep on demand and prints the counts. Records are canonical on
     disk — the command resolved to an absolute path, an absolute cwd, the caps the run actually ran

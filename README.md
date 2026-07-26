@@ -74,7 +74,7 @@ tman init --shims --gitignore
 | `--stall T` | 30m | no output **and** no cpu/io activity for T → kill, exit 125 |
 | `--max-mem M` | — | ceiling on the process tree's RSS (MB or `2g`) → cull, exit 126 |
 | `--max-cpu P` | — | sustained CPU% → cull, exit 126 |
-| `--max-parallel N` | 2 | queue while N live runs share this run's bucket |
+| `--max-parallel N` | 2 | queue until one of the bucket's N slots can be held |
 | `--queue-timeout T` | 5m | give up waiting for a slot |
 
 Cap precedence: CLI flags > alias block > `defaults` block > built-ins.
@@ -107,7 +107,7 @@ Cap precedence: CLI flags > alias block > `defaults` block > built-ins.
 
 ### Buckets
 
-Dedup locks and parallel slots are counted per **bucket**, not machine-wide. A bucket is
+Dedup locks and parallel slots are scoped per **bucket**, not machine-wide. A bucket is
 `<name>@<dir>` for a named run and `<command>@<dir>` for an unnamed one, where `<dir>` is the
 `.tman.kdl` directory governing the run (or the cwd when there is none):
 
@@ -119,6 +119,13 @@ Dedup locks and parallel slots are counted per **bucket**, not machine-wide. A b
 
 So `max-parallel 2` means *two of this thing here*, and a long test run in one checkout never
 starves a build in another.
+
+A run is admitted by **holding** one of its bucket's slot files open exclusively — not by counting
+the live runs in the bucket. Only one runner can hold a given slot file, so runs launched at the
+same instant queue as configured; counting could not offer that, because every racer reads the
+count before any of them has a record to be counted. A slot is given up when the handle closes,
+which includes the runner dying and the kernel closing it. A run that is already inside a
+supervised tree (`TMAN_RUN_ID` set) is the same work as its parent and claims no slot of its own.
 
 ## .tman.kdl
 
