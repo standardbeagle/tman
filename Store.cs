@@ -94,7 +94,15 @@ public static class Store
     public static string SlotPathFor(string runKey, int slot) =>
         Path.Combine(RunsDir, $"{RunKey.LockStem(runKey)}-slot{slot}.lock");
 
-    public static void Save(RunRecord r)
+    public static void Save(RunRecord r) =>
+        Save(r, (from, to) => File.Move(from, to, overwrite: true));
+
+    /// <summary>
+    /// Save with the rename injected. The one case this has to get right — another writer replacing
+    /// the same destination at that instant — is a thing rename(2) never reports and MoveFileEx
+    /// always might, so on any POSIX host it can only be driven from here.
+    /// </summary>
+    internal static void Save(RunRecord r, Action<string, string> rename)
     {
         EnsureDirs();
         // one record has two writers — its own runner, and the housekeeping sweep any other tman
@@ -102,7 +110,7 @@ public static class Store
         // finds the file already gone and throws in the middle of a run
         var tmp = $"{PathFor(r.Id)}.{Environment.ProcessId}-{Environment.CurrentManagedThreadId}.tmp";
         File.WriteAllText(tmp, JsonSerializer.Serialize(r, RunRecordJsonContext.Default.RunRecord));
-        File.Move(tmp, PathFor(r.Id), overwrite: true);
+        rename(tmp, PathFor(r.Id));
     }
 
     public static RunRecord? Load(string id) => ReadFile(PathFor(id));

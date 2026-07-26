@@ -154,6 +154,64 @@ public class StoreTests : IDisposable
         Assert.NotNull(Store.Load("shared00001"));
     }
 
+    /// <summary>
+    /// The message a sharing violation carries; what MoveFileEx(MOVEFILE_REPLACE_EXISTING) raises
+    /// while another writer holds the destination it is being asked to replace.
+    /// </summary>
+    static IOException TheDestinationIsHeldByAnotherWriter() =>
+        new("The process cannot access the file because it is being used by another process.");
+
+    [Fact]
+    public void ASaveThatLosesTheRenameToAnotherWriter_WaitsForTheDestinationInsteadOfFailing()
+    {
+        var r = NewRecord("contended001");
+        var renames = 0;
+
+        Store.Save(r, (from, to) =>
+        {
+            if (++renames <= 3) throw TheDestinationIsHeldByAnotherWriter();
+            File.Move(from, to, overwrite: true);
+        });
+
+        Assert.Equal(4, renames);
+        Assert.NotNull(Store.Load("contended001"));
+    }
+
+    [Fact]
+    public void ASaveThatNeverWinsTheRename_ThrowsRatherThanReportARecordItNeverPlaced()
+    {
+        var r = NewRecord("contended002");
+        var renames = 0;
+
+        Assert.Throws<IOException>(() => Store.Save(r, (_, _) =>
+        {
+            renames++;
+            throw TheDestinationIsHeldByAnotherWriter();
+        }));
+
+        // bounded on both sides: a transient that is never waited out is the win-x64 defect, and a
+        // wait with no end is a run that hangs instead of reporting a fault it cannot recover from
+        Assert.InRange(renames, 2, 64);
+        Assert.Null(Store.Load("contended002"));
+    }
+
+    [Fact]
+    public void ASaveWhoseTempRecordIsGone_ReportsItAtOnceRatherThanWaitingOnIt()
+    {
+        var r = NewRecord("contended003");
+        var renames = 0;
+
+        // nothing about this settles by waiting — only a destination held by another writer does
+        Assert.Throws<FileNotFoundException>(() => Store.Save(r, (from, _) =>
+        {
+            renames++;
+            File.Delete(from);
+            throw new FileNotFoundException("gone", from);
+        }));
+
+        Assert.Equal(1, renames);
+    }
+
     [Fact]
     public void AReleasedNameLock_StaysOnDiskAndNamesItsLastHolder()
     {
