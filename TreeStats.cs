@@ -15,13 +15,26 @@ public static class TreeStats
     /// </summary>
     public static bool CoversTree => OperatingSystem.IsLinux();
 
+    /// <summary>Linux process state: uninterruptible sleep, i.e. blocked inside a kernel io wait.</summary>
+    const char UninterruptibleSleep = 'D';
+
     /// <summary>
     /// Whether this tick's sample shows the tree doing work, given the previous tick's sample.
-    /// This is the whole "is it alive?" question for a run that is printing nothing.
+    /// This is the whole "is it alive?" question for a run that is printing nothing. Three
+    /// positive facts, any one of which means the tree is not hung:
+    /// cpu jiffies advanced; io bytes advanced; or some process sits in <c>D</c>, where the
+    /// kernel is servicing an io request on its behalf.
+    /// <para>
+    /// <c>S</c> is deliberately not a signal: `sleep 120` and a socket parked in recv() are both
+    /// <c>S</c>, so reading it as activity would retire stall detection rather than sharpen it.
+    /// <c>R</c> needs no clause of its own — a runnable process moves the cpu counter.
+    /// Off Linux <see cref="TrySample"/> reports no states at all, so only the counters apply.
+    /// </para>
     /// </summary>
     public static bool ShowsProgress(TreeSample prev, TreeSample now) =>
         now.CpuJiffies > prev.CpuJiffies ||
-        now.IoBytes > prev.IoBytes;
+        now.IoBytes > prev.IoBytes ||
+        now.States.Contains(UninterruptibleSleep);
 
     public static bool TrySample(int rootPid, out TreeSample sample) =>
         CoversTree ? TrySampleLinux(rootPid, out sample) : TrySampleRootOnly(rootPid, out sample);
