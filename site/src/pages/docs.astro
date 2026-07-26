@@ -98,9 +98,20 @@ curl -fsSL https://raw.githubusercontent.com/standardbeagle/tman/main/install.sh
   <p>
     <strong>Lock files are not part of the sweep.</strong> A lock is claimed by holding its file open
     exclusively, so a runner killed mid-run frees its bucket the moment the kernel drops its handle,
-    and the next run of that bucket takes the lock over in place. Nothing ever removes a lock file:
-    <code>~/.tman/runs</code> keeps one small <code>.lock</code> per bucket it has seen for the name
+    and the next run of that bucket takes the lock over in place. Nothing in tman ever removes a lock
+    file: <code>~/.tman/runs</code> keeps one <code>.lock</code> per bucket it has seen for the name
     dedup, plus one per parallel slot that bucket has ever handed out.
+  </p>
+  <p>
+    <strong>The bound, stated plainly.</strong> Each lock file is ~50 bytes but occupies one
+    filesystem block, so budget about 4 KB per bucket. A development machine reuses a handful of
+    buckets and settles at a few dozen kilobytes. The one case that grows without limit is a host
+    whose working directory changes every build — a CI runner whose workspace path carries a build
+    number — which seeds a new bucket each time: on the order of 20 MB a year at twenty builds a day.
+    If that is you, <code>rm ~/.tman/runs/*.lock</code> while no runs are live, from the same cleanup
+    step that clears the workspace. tman deliberately does not do this for you: making it safe against
+    a concurrent claim costs every <code>tman run</code> a store-wide lock, which is a poor trade for
+    reclaiming a few megabytes a year.
   </p>
   <p>
     <code>tman clean</code> runs the same sweep on demand and prints the counts. Records are canonical on
@@ -153,6 +164,19 @@ alias "e2e" &#123;
     <tr><td>127</td><td>command / config not found</td></tr>
     <tr><td>130</td><td>killed (dedup refusal, queue timeout, <code>tman kill</code>)</td></tr>
   </table>
+
+  <h2>scope</h2>
+  <p>
+    tman supervises one machine at a time — a developer's laptop, or a department-sized CI host with
+    a handful of runners. At that size it does what it says: a rogue test runner does not sit in a
+    loop on your battery, and a test server does not hold a port for the rest of the afternoon.
+  </p>
+  <p>
+    It is not a fleet scheduler. There is no cross-machine coordination, no central store, and
+    nothing here is tuned for dozens of simultaneous runs or for hosts that accumulate work
+    indefinitely. Under a build fleet's own scheduler tman is fine; it will not be the thing keeping
+    that fleet in order.
+  </p>
 
   <h2>building</h2>
   <pre><span class="c"># NativeAOT, zero external dependencies, .NET 10 SDK</span>

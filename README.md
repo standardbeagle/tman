@@ -246,10 +246,20 @@ same sweep before it does anything else:
 
 Lock files are not part of it. A lock is claimed by holding its file open exclusively, so the
 kernel releases it when its runner dies and the next run of that bucket takes the same file over
-in place. Removing one is never safe — a run that opened the name a moment earlier would take the
-lock as the sweep dropped it and end up holding a file with no name, while the next run created a
-fresh one — and it would gain nothing, so `~/.tman/runs` keeps one small `.lock` per bucket it has
-seen for the name dedup, plus one per parallel slot that bucket has ever handed out.
+in place. Removing one is never safe while tman is running — a run that opened the name a moment
+earlier would take the lock as the sweep dropped it and end up holding a file with no name, while
+the next run created a fresh one — so nothing in tman removes them. `~/.tman/runs` keeps one
+`.lock` per bucket it has seen for the name dedup, plus one per parallel slot that bucket has ever
+handed out.
+
+**The bound, stated plainly:** each is ~50 bytes but occupies one filesystem block, so budget about
+4 KB per bucket. A development machine reuses a handful of buckets and settles at a few dozen
+kilobytes. The one case that grows without limit is a host whose working directory changes every
+build — a CI runner whose workspace path carries a build number — which seeds a new bucket each
+time: on the order of 20 MB a year at twenty builds a day. If that is you, `rm ~/.tman/runs/*.lock`
+while no runs are live, from the same cleanup step that clears the workspace. tman deliberately
+does not do this for you: making it safe against a concurrent claim costs every `tman run` a
+store-wide lock, which is a poor trade for reclaiming a few megabytes a year.
 
 `tman clean` runs that sweep on demand and prints the counts. Records are canonical on disk:
 absolute resolved command paths, absolute cwd, one nested `Caps` object, and a schema version, so a
@@ -265,6 +275,17 @@ record written by a different tman version is discarded rather than half-read.
 | 126 | culled (`--max-mem` / `--max-cpu`) |
 | 127 | command / config not found |
 | 130 | killed (dedup refusal, queue timeout, `tman kill`) |
+
+## Scope
+
+tman is built for one machine at a time — a developer's laptop, or a department-sized CI host with
+a handful of runners. At that size it does what it says: a rogue test runner does not sit in a loop
+on your battery, and a test server does not hold a port for the rest of the afternoon.
+
+It is not a fleet scheduler. There is no cross-machine coordination, no central store, and nothing
+here is tuned for dozens of simultaneous runs or for hosts that accumulate work indefinitely. If
+you are running an agent farm or a build fleet, you want a job scheduler, and tman under it is
+fine — but it will not be the thing keeping that fleet in order.
 
 ## Docs + demo
 

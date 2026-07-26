@@ -8,7 +8,24 @@ below 1.0, behavior changes land in minor releases.
 
 ## [Unreleased]
 
+### Documented
+
+- **Where tman stops.** It supervises one machine — a laptop, or a department-sized CI host with a
+  handful of runners — and is not a fleet scheduler. Stated in the README and on the docs site so
+  the boundary is checkable rather than folklore.
+- **What lock files cost, and how to clear them.** Nothing in tman removes a `.lock`; each occupies
+  one filesystem block, so budget ~4 KB per bucket. A development machine settles at a few dozen
+  kilobytes. A CI host whose workspace path carries a build number seeds a new bucket per build and
+  accumulates on the order of 20 MB a year at twenty builds a day — clear it with
+  `rm ~/.tman/runs/*.lock` while no runs are live. tman does not reclaim them itself: making that
+  safe against a concurrent claim costs every `tman run` a store-wide lock, which is a bad trade for
+  a few megabytes a year.
+
 ### Fixed
+
+- **`tman clean` could report removals that never happened.** The delete helper swallowed a refused
+  or lost-race delete while every caller counted the attempt, so the printed count could name files
+  still on disk. It now reports whether it acted, and callers count only real removals.
 
 - **`--max-parallel` did not bound runs that started at the same instant.** The gate counted the
   bucket's live runs and admitted the run when the count was under the limit. Every member of a
