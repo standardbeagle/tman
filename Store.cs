@@ -94,6 +94,31 @@ public static class Store
     public static string SlotPathFor(string runKey, int slot) =>
         Path.Combine(RunsDir, $"{RunKey.LockStem(runKey)}-slot{slot}.lock");
 
+    /// <summary>
+    /// How many times a rename refused by another writer replacing the same record is re-attempted
+    /// before it is reported. The swap being waited on takes microseconds; the escalating pause adds
+    /// up to about 70ms, which is long enough that only a fault outlives it.
+    /// </summary>
+    const int RenameAttempts = 12;
+
+    /// <summary>
+    /// Writes a record whole. A reader sees the previous record or this one and never a half-written
+    /// file, because the record is built under a per-writer temp name and put in place by a rename.
+    ///
+    /// THE INVARIANT: <em>a save either lands the record or throws, and a rename refused because
+    /// another writer is replacing the same destination at that instant is not a fault.</em> POSIX
+    /// rename(2) does not report that case at all; Windows MoveFileEx(MOVEFILE_REPLACE_EXISTING)
+    /// fails with a sharing violation while the destination is held, which is how a runner and
+    /// another command's housekeeping sweep threw out of the middle of a live run on win-x64 while
+    /// every POSIX target passed. That one case is waited out. It is bounded, and what has not
+    /// settled by the end of the bound is thrown, never swallowed — a save that reported success
+    /// without placing the record would leave the run's state silently behind.
+    ///
+    /// File.Move(overwrite: true) rather than File.Replace: Replace requires the destination to
+    /// already exist, so every record's first save would need a second path, and Replace's backup
+    /// slot buys nothing here — the record it would preserve is the one being superseded. Both are
+    /// a rename, so neither gives up atomicity; Move keeps one path for first and later saves alike.
+    /// </summary>
     public static void Save(RunRecord r) =>
         Save(r, (from, to) => File.Move(from, to, overwrite: true));
 
@@ -110,8 +135,30 @@ public static class Store
         // finds the file already gone and throws in the middle of a run
         var tmp = $"{PathFor(r.Id)}.{Environment.ProcessId}-{Environment.CurrentManagedThreadId}.tmp";
         File.WriteAllText(tmp, JsonSerializer.Serialize(r, RunRecordJsonContext.Default.RunRecord));
-        rename(tmp, PathFor(r.Id));
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                rename(tmp, PathFor(r.Id));
+                return;
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException
+                                      && attempt < RenameAttempts
+                                      && OnlyTheDestinationIsLeftToBlame(tmp))
+            {
+                Thread.Sleep(attempt);
+            }
+        }
     }
+
+    /// <summary>
+    /// True when the only thing left that can have refused the rename is another writer holding the
+    /// destination: the record is still there to be placed, and the directory is still there to take
+    /// it. A temp file that has gone, or a tman home that has, is a fault in its own right, and
+    /// waiting on one only delays the report.
+    /// </summary>
+    static bool OnlyTheDestinationIsLeftToBlame(string tmp) =>
+        File.Exists(tmp) && Directory.Exists(RunsDir);
 
     public static RunRecord? Load(string id) => ReadFile(PathFor(id));
 
