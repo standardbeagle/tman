@@ -99,7 +99,8 @@ curl -fsSL https://raw.githubusercontent.com/standardbeagle/tman/main/install.sh
     <strong>Lock files are not part of the sweep.</strong> A lock is claimed by holding its file open
     exclusively, so a runner killed mid-run frees its bucket the moment the kernel drops its handle,
     and the next run of that bucket takes the lock over in place. Nothing ever removes a lock file:
-    <code>~/.tman/runs</code> keeps one small <code>.lock</code> per bucket it has seen.
+    <code>~/.tman/runs</code> keeps one small <code>.lock</code> per bucket it has seen for the name
+    dedup, plus one per parallel slot that bucket has ever handed out.
   </p>
   <p>
     <code>tman clean</code> runs the same sweep on demand and prints the counts. Records are canonical on
