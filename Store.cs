@@ -94,7 +94,10 @@ public static class Store
     public static void Save(RunRecord r)
     {
         EnsureDirs();
-        var tmp = PathFor(r.Id) + ".tmp";
+        // one record has two writers — its own runner, and the housekeeping sweep any other tman
+        // command runs — so the temp name is per writer: on a shared one, whichever renames second
+        // finds the file already gone and throws in the middle of a run
+        var tmp = $"{PathFor(r.Id)}.{Environment.ProcessId}-{Environment.CurrentManagedThreadId}.tmp";
         File.WriteAllText(tmp, JsonSerializer.Serialize(r, RunRecordJsonContext.Default.RunRecord));
         File.Move(tmp, PathFor(r.Id), overwrite: true);
     }
