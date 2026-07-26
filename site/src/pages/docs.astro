@@ -28,9 +28,9 @@ curl -fsSL https://raw.githubusercontent.com/standardbeagle/tman/main/install.sh
   <table>
     <tr><th>flag</th><th>default</th><th>what it does</th></tr>
     <tr><td><code>--name N</code></td><td>—</td><td>dedup lock; refuses to start if a live run has the same name <strong>in this directory</strong></td></tr>
-    <tr><td><code>--replace</code></td><td>off</td><td>with <code>--name</code>: kill the existing run first</td></tr>
+    <tr><td><code>--replace</code></td><td>off</td><td>with <code>--name</code>: kill the existing run, then wait for its runner to release the name (up to <code>--queue-timeout</code>); refuses to start if it is still held</td></tr>
     <tr><td><code>--max-time T</code></td><td>—</td><td>wall-clock limit → kill, exit 124</td></tr>
-    <tr><td><code>--stall T</code></td><td>30m</td><td>no output <strong>and</strong> no cpu/io activity for T → kill, exit 125</td></tr>
+    <tr><td><code>--stall T</code></td><td>30m</td><td>no output <strong>and</strong> no cpu/io/kernel-io-wait activity for T → kill, exit 125</td></tr>
     <tr><td><code>--max-mem M</code></td><td>—</td><td>RSS above M (MB, or <code>2g</code>) → cull, exit 126</td></tr>
     <tr><td><code>--max-cpu P</code></td><td>—</td><td>CPU above P% for 3 consecutive seconds → cull, exit 126</td></tr>
     <tr><td><code>--max-parallel N</code></td><td>2</td><td>queue until one of the bucket's N slots can be held</td></tr>
