@@ -16,12 +16,17 @@ sources:
   - task:01KYD8VQ8RZE581VG3VZQTMMM3#review_annotation_v1-attempt-1     # §3, §4, §5 recurred
 tags: [check-then-act, atomic-claim, file-lock, race-test, barrier, false-green-gate, path-resolution, reviewer-verification, missed-reuse]
 status: steering
-recurrence: 2
+recurrence: 3
 recurrence_note: >
   §3 (verify the gate can go red), §4 (relative argv[0] resolves through PATH) and §5 (reviewer
   re-derives independently) all recurred on task:01KYD8VQ8RZE581VG3VZQTMMM3, 2026-07-25.
   §3 and §4 were promoted to .claude/rules/honest-failure-and-verification.md on that recurrence
   under the explicitly-project-wide branch of the promotion gate.
+  §3 and §5 recurred a THIRD time on task:01KYD9AE3TWX4VM4F1R6ZCTJMY, 2026-07-26 — see
+  docs/solutions/tman/named-invariants-over-accreted-predicates-2026-07-26.md §3, §4, §5, where §3
+  took the sharper form "a test asserting a property of its own execution environment can be
+  satisfied by that environment" and §5 gained the surviving-mutant disclosure obligation. Both
+  crossed the N=3 gate and are promoted to .claude/rules/honest-failure-and-verification.md §3.
 ---
 
 # Atomic slot claim, and gates that can actually go red
