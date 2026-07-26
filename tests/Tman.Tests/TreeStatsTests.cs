@@ -69,7 +69,10 @@ public class TreeStatsTests
     [Fact]
     public void ShowsProgress_UninterruptibleSleep_IsProgress()
     {
-        // D = the kernel is servicing an io request for this process. Definitively not hung.
+        // D = the kernel is servicing an io request for this process, so a quiet tick is not
+        // evidence of a hang and --stall must not kill for it. It is not evidence of health
+        // either: a process wedged in D forever (dead NFS server, failing disk) is a real hang
+        // that only --max-time bounds. See TreeStats.ShowsProgress for why that is accepted.
         Assert.True(TreeStats.ShowsProgress(Tick("S"), Tick("D")));
     }
 
