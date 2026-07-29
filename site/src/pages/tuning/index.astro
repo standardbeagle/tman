@@ -1,0 +1,149 @@
+---
+import Base from "../../layouts/Base.astro";
+import { TOOLS, CATEGORIES, type Category } from "../../data/tools";
+import { faqJsonLd } from "../../lib/blocks";
+import { href, absolute } from "../../lib/site";
+
+const path = "/tuning";
+const order: Category[] = ["test", "e2e", "lint", "build"];
+
+const faqs = [
+  {
+    q: "What is the difference between --stall and --max-time?",
+    a: "--stall asks 'is this process dead?' and --max-time asks 'has this taken too long?'. A stall kill needs no output *and* no CPU, IO, or kernel IO-wait activity for the whole window, so a quiet-but-busy compile survives it. Only --max-time can bound a run that is genuinely working but will never finish, such as a wait on a peer that never answers.",
+    },
+  {
+    q: "Why does tman set no default memory or CPU ceiling?",
+    a: "Because a build is supposed to saturate cores and can legitimately want several gigabytes. Culling one out of the box would break `tman run -- vite build` in a project with no config. --max-mem and --max-cpu are opt-in, and worth opting into where a real leak mode exists — worker pools, browser fleets, whole-program analysers.",
+  },
+  {
+    q: "What do exit codes 124, 125, and 126 mean?",
+    a: "124 is a wall-clock timeout (--max-time), 125 is a stall (--stall), and 126 is a resource cull (--max-mem or --max-cpu). All three are findings rather than flakes: the right first response is to ask why the cap fired, not to widen it.",
+  },
+  {
+    q: "Should a lint alias and a test alias share a parallel limit?",
+    a: "No, and they do not have to. Slots are scoped per bucket — the alias name plus the directory governing the run — so a lint alias can hold four slots while the test alias in the same repository holds two, without either affecting the other.",
+  },
+];
+
+const jsonLd = [
+  {
+    "@type": "CollectionPage",
+    name: "tman tuning guides for test, lint, and build tools",
+    description: "Recommended tman caps for each major test runner, linter, and bundler.",
+    url: absolute(path),
+    hasPart: TOOLS.map((t) => ({
+      "@type": "TechArticle",
+      headline: t.title,
+      url: absolute(`/tuning/${t.slug}`),
+    })),
+  },
+  faqJsonLd(faqs),
+];
+
+const cell = (t: (typeof TOOLS)[number]) => ({
+  stall: t.caps.stall ?? "30m",
+  maxTime: t.caps.neverMaxTime ? "never" : (t.caps.maxTime ?? "—"),
+  maxMem: t.caps.maxMem ?? "—",
+  maxParallel: t.caps.maxParallel !== undefined ? String(t.caps.maxParallel) : "2",
+});
+---
+<Base
+  title="tman tuning: recommended caps per tool"
+  description="Recommended tman caps for Vitest, Jest, pytest, go test, dotnet test, cargo, Playwright, RSpec, Gradle, ESLint, Ruff, golangci-lint, tsc, and Vite."
+  path={path}
+  crumbs={[{ label: "Tuning", path }]}
+  jsonLd={jsonLd}
+>
+  <style>
+    .lede { font-size: 1.1rem; color: var(--fg-dim); max-width: 44rem; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1rem; margin: 1.25rem 0; }
+    .card {
+      background: var(--bg-alt);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1.1rem 1.3rem;
+      text-decoration: none;
+      color: inherit;
+      display: block;
+    }
+    .card:hover { border-color: var(--accent); }
+    .card h3 { margin: 0 0 0.35rem; color: var(--accent); font-family: var(--mono); font-size: 1rem; }
+    .card p { margin: 0; color: var(--fg-dim); font-size: 0.9rem; }
+    .card .eco { display: block; margin-top: 0.6rem; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--fg-dim); }
+    .faq h3 { margin-bottom: 0.25rem; }
+    .faq p { margin-top: 0.25rem; color: var(--fg-dim); }
+  </style>
+
+  <h1>Recommended tman settings, one tool at a time</h1>
+  <p class="lede">
+    The right caps depend on what the command actually does. A cold Rust build is silent for
+    minutes and must not be mistaken for a hang. A Playwright suite leaks browsers and binds a
+    port. A dev server is designed never to exit, so a wall-clock limit on it is guaranteed to fire
+    and guaranteed to mean nothing. One page per tool, with the reasoning behind each number.
+  </p>
+
+  <blockquote>
+    <p>
+      Every number below is a <strong>starting point derived from how the tool behaves</strong>, not
+      a measurement of your machine. Each guide ends with the one command that turns it into a real
+      one.
+    </p>
+  </blockquote>
+
+  <h2 id="all-tools">Every tool at a glance</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>tool</th><th>stall</th><th>max-time</th><th>max-mem</th><th>max-parallel</th>
+      </tr>
+    </thead>
+    <tbody>
+      {TOOLS.map((t) => {
+        const c = cell(t);
+        return (
+          <tr>
+            <td><a href={href(`/tuning/${t.slug}`)}>{t.name}</a></td>
+            <td><code>{c.stall}</code></td>
+            <td><code>{c.maxTime}</code></td>
+            <td><code>{c.maxMem}</code></td>
+            <td><code>{c.maxParallel}</code></td>
+          </tr>
+        );
+      })}
+    </tbody>
+  </table>
+
+  {order.map((cat) => (
+    <section>
+      <h2 id={cat}>{CATEGORIES[cat]}</h2>
+      <div class="cards">
+        {TOOLS.filter((t) => t.category === cat).map((t) => (
+          <a class="card" href={href(`/tuning/${t.slug}`)}>
+            <h3>{t.name}</h3>
+            <p>{t.tagline}</p>
+            <span class="eco">{t.ecosystem}</span>
+          </a>
+        ))}
+      </div>
+    </section>
+  ))}
+
+  <h2 id="first-attach-it">First, attach tman to your agent</h2>
+  <p>
+    Caps only apply to commands that actually run under tman. If your test runs are still being
+    issued bare by an AI agent, start with the
+    <a href={href("/setup")}>per-agent setup guides</a> — Claude Code, Codex CLI, Gemini CLI,
+    Cursor, Antigravity, Kimi, opencode, and Copilot CLI each attach differently.
+  </p>
+
+  <h2 id="faq">Frequently asked</h2>
+  <div class="faq">
+    {faqs.map((f) => (
+      <>
+        <h3>{f.q}</h3>
+        <p>{f.a}</p>
+      </>
+    ))}
+  </div>
+</Base>
