@@ -1,0 +1,69 @@
+---
+import type { Block } from "../lib/blocks";
+
+interface Props {
+  blocks: Block[];
+}
+const { blocks } = Astro.props;
+
+/** Anchor id for a heading, so every section on a long guide is linkable from search results. */
+const slugify = (text: string) =>
+  text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+---
+<style>
+  figure { margin: 1.5rem 0; }
+  figcaption {
+    font-family: var(--mono);
+    font-size: 0.8rem;
+    color: var(--fg-dim);
+    margin-bottom: 0.4rem;
+  }
+  h2 a.anchor, h2 a.anchor:hover { color: inherit; text-decoration: none; }
+  ul { padding-left: 1.2rem; }
+  li { margin: 0.35rem 0; }
+</style>
+{
+  blocks.map((b) => {
+    switch (b.kind) {
+      case "h":
+        return (
+          <h2 id={slugify(b.text)}>
+            <a class="anchor" href={`#${slugify(b.text)}`}>{b.text}</a>
+          </h2>
+        );
+      case "p":
+        return <p set:html={b.html} />;
+      case "note":
+        return <blockquote><p set:html={b.html} /></blockquote>;
+      case "list":
+        return (
+          <ul>
+            {b.items.map((i) => <li set:html={i} />)}
+          </ul>
+        );
+      case "code":
+        return (
+          <figure>
+            {b.caption && <figcaption>{b.caption}</figcaption>}
+            <pre><code class={b.lang && `language-${b.lang}`}>{b.text}</code></pre>
+          </figure>
+        );
+      case "table":
+        return (
+          <table>
+            <thead>
+              <tr>{b.head.map((th) => <th set:html={th} />)}</tr>
+            </thead>
+            <tbody>
+              {b.rows.map((row) => (
+                <tr>{row.map((td) => <td set:html={td} />)}</tr>
+              ))}
+            </tbody>
+          </table>
+        );
+    }
+  })
+}

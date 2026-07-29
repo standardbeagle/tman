@@ -1,19 +1,96 @@
 ---
-interface Props {
-  title: string;
-  description?: string;
+import { href, absolute, REPO } from "../lib/site";
+
+export interface Crumb {
+  label: string;
+  path: string;
 }
-const { title, description = "tman — supervised process runner that caps, culls, and reaps runaway test processes." } = Astro.props;
-const base = import.meta.env.BASE_URL;
+
+interface Props {
+  /** Head title. Rendered verbatim, so each page owns its own keyword order and length. */
+  title: string;
+  /** Meta description. Aim for 140–160 characters and lead with the concrete promise. */
+  description?: string;
+  /** In-site path this page is served at — canonical, og:url, and the breadcrumb tail. */
+  path: string;
+  /** Trail below the home page, nearest-last, ending with the current page. */
+  crumbs?: Crumb[];
+  /** Extra JSON-LD objects merged into the page's `@graph`. */
+  jsonLd?: Record<string, unknown>[];
+}
+
+const {
+  title,
+  description = "tman supervises every process it launches — wall-clock and stall kills, memory and CPU culling, orphan reaping, and dedup locks for runaway test runs.",
+  path,
+  crumbs = [],
+  jsonLd = [],
+} = Astro.props;
+
+const canonical = absolute(path);
+const ogImage = absolute("/og.png");
+
+const trail = [{ label: "tman", path: "/" }, ...crumbs];
+
+const graph: Record<string, unknown>[] = [
+  {
+    "@type": "SoftwareApplication",
+    "@id": `${absolute("/")}#app`,
+    name: "tman",
+    applicationCategory: "DeveloperApplication",
+    operatingSystem: "Linux, macOS, Windows",
+    description:
+      "A single NativeAOT binary that supervises every process it launches: wall-clock and stall kills, memory and CPU culling, orphan reaping, dedup locks, and parallel gating.",
+    url: absolute("/"),
+    codeRepository: REPO,
+    license: "https://opensource.org/licenses/MIT",
+    offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
+  },
+  ...(trail.length > 1
+    ? [
+        {
+          "@type": "BreadcrumbList",
+          itemListElement: trail.map((c, i) => ({
+            "@type": "ListItem",
+            position: i + 1,
+            name: c.label,
+            item: absolute(c.path),
+          })),
+        },
+      ]
+    : []),
+  ...jsonLd,
+];
 ---
 <!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
     <meta name="description" content={description} />
-    <link rel="icon" href={`${base}/favicon.svg`} type="image/svg+xml" />
-    <title>{title} — tman</title>
+    <link rel="canonical" href={canonical} />
+    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1" />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="theme-color" content="#0d1117" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="tman" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:image" content={ogImage} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="tman — runaway tests, meet the reaper" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={ogImage} />
+
+    <link rel="icon" href={href("/favicon.svg")} type="image/svg+xml" />
+    <link rel="alternate" type="application/rss+xml" title="tman releases" href={`${REPO}/releases.atom`} />
+    <script type="application/ld+json" set:html={JSON.stringify({ "@context": "https://schema.org", "@graph": graph })} is:inline />
     <style>
       :root {
         --bg: #0d1117;
@@ -42,6 +119,8 @@ const base = import.meta.env.BASE_URL;
         position: sticky;
         top: 0;
         background: var(--bg);
+        flex-wrap: wrap;
+        z-index: 10;
       }
       nav .brand { font-family: var(--mono); font-weight: 700; font-size: 1.25rem; color: var(--accent); text-decoration: none; }
       nav a { color: var(--fg-dim); text-decoration: none; }
@@ -67,11 +146,25 @@ const base = import.meta.env.BASE_URL;
         font-size: 0.88em;
       }
       h1, h2, h3 { line-height: 1.25; }
+      h1 { font-size: 2rem; }
       h2 { margin-top: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.3rem; }
+      h3 { margin-top: 1.75rem; color: var(--fg); }
       a { color: var(--accent); }
-      table { border-collapse: collapse; width: 100%; font-size: 0.92rem; }
-      th, td { text-align: left; padding: 0.45rem 0.75rem; border-bottom: 1px solid var(--border); }
-      th { color: var(--fg-dim); font-weight: 600; }
+      table { border-collapse: collapse; width: 100%; font-size: 0.92rem; display: block; overflow-x: auto; }
+      th, td { text-align: left; padding: 0.45rem 0.75rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+      th { color: var(--fg-dim); font-weight: 600; white-space: nowrap; }
+      blockquote {
+        margin: 1.5rem 0;
+        padding: 0.1rem 1.25rem;
+        border-left: 3px solid var(--accent-2);
+        background: var(--bg-alt);
+        border-radius: 0 8px 8px 0;
+        color: var(--fg-dim);
+      }
+      .crumbs { font-size: 0.85rem; color: var(--fg-dim); margin: 0 0 1rem; }
+      .crumbs a { color: var(--fg-dim); text-decoration: none; }
+      .crumbs a:hover { color: var(--accent); }
+      .crumbs span { margin: 0 0.4rem; }
       footer {
         border-top: 1px solid var(--border);
         color: var(--fg-dim);
@@ -79,18 +172,37 @@ const base = import.meta.env.BASE_URL;
         padding: 2rem;
         font-size: 0.85rem;
       }
+      footer a { color: var(--fg-dim); }
+      img { max-width: 100%; height: auto; }
     </style>
   </head>
   <body>
     <nav>
-      <a class="brand" href={`${base}/`}>tman</a>
-      <a href={`${base}/docs`}>docs</a>
+      <a class="brand" href={href("/")}>tman</a>
+      <a href={href("/docs")}>docs</a>
       <span class="spacer"></span>
-      <a href="https://github.com/standardbeagle/tman">github</a>
+      <a href={REPO}>github</a>
     </nav>
     <main>
+      {trail.length > 1 && (
+        <nav class="crumbs" aria-label="Breadcrumb">
+          {trail.map((c, i) =>
+            i === trail.length - 1 ? (
+              <span aria-current="page">{c.label}</span>
+            ) : (
+              <>
+                <a href={href(c.path)}>{c.label}</a>
+                <span aria-hidden="true">/</span>
+              </>
+            ),
+          )}
+        </nav>
+      )}
       <slot />
     </main>
-    <footer>tman — MIT licensed · built with .NET NativeAOT</footer>
+    <footer>
+      tman — MIT licensed · built with .NET NativeAOT ·
+      <a href={REPO}>source</a>
+    </footer>
   </body>
 </html>
