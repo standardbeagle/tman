@@ -1,0 +1,114 @@
+---
+import Base from "../../layouts/Base.astro";
+import Blocks from "../../components/Blocks.astro";
+import { AGENTS, TIERS } from "../../data/agents";
+import { faqJsonLd } from "../../lib/blocks";
+import { href, absolute } from "../../lib/site";
+
+export function getStaticPaths() {
+  return AGENTS.map((agent) => ({ params: { slug: agent.slug }, props: { agent } }));
+}
+
+const { agent } = Astro.props;
+const path = `/setup/${agent.slug}`;
+const tier = TIERS[agent.tier];
+
+const jsonLd = [
+  {
+    "@type": "TechArticle",
+    headline: agent.title,
+    description: agent.description,
+    url: absolute(path),
+    about: { "@type": "SoftwareApplication", name: agent.name },
+    proficiencyLevel: "Beginner",
+    isPartOf: { "@type": "WebPage", "@id": absolute("/setup") },
+  },
+  faqJsonLd(agent.faqs),
+];
+
+const others = AGENTS.filter((a) => a.slug !== agent.slug);
+---
+<Base
+  title={agent.title}
+  description={agent.description}
+  path={path}
+  crumbs={[{ label: "AI agent setup", path: "/setup" }, { label: agent.name, path }]}
+  jsonLd={jsonLd}
+>
+  <style>
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 1rem;
+      background: var(--bg-alt);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1.1rem 1.3rem;
+      margin: 1.5rem 0 2rem;
+    }
+    .summary dt { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--fg-dim); }
+    .summary dd { margin: 0.25rem 0 0; font-family: var(--mono); font-size: 0.9rem; }
+    .tier { color: var(--accent-2); }
+    .faq h3 { margin-bottom: 0.25rem; }
+    .faq p { margin-top: 0.25rem; color: var(--fg-dim); }
+    .more { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 1rem 0 0; padding: 0; list-style: none; }
+    .more a {
+      display: inline-block;
+      border: 1px solid var(--border);
+      background: var(--bg-alt);
+      border-radius: 999px;
+      padding: 0.3rem 0.8rem;
+      font-size: 0.85rem;
+      text-decoration: none;
+    }
+    .sources { font-size: 0.88rem; color: var(--fg-dim); }
+  </style>
+
+  <h1>{agent.name} + tman</h1>
+  <p set:html={tier.blurb} />
+
+  <dl class="summary">
+    <div>
+      <dt>vendor</dt>
+      <dd>{agent.vendor}</dd>
+    </div>
+    <div>
+      <dt>integration</dt>
+      <dd class="tier">{tier.label}</dd>
+    </div>
+    <div>
+      <dt>hook event</dt>
+      <dd>{agent.hookEvent ?? "none — shims"}</dd>
+    </div>
+    <div>
+      <dt>config</dt>
+      <dd>{agent.configPath}</dd>
+    </div>
+  </dl>
+
+  <Blocks blocks={agent.blocks} />
+
+  <h2 id="faq">Frequently asked</h2>
+  <div class="faq">
+    {agent.faqs.map((f) => (
+      <>
+        <h3>{f.q}</h3>
+        <p>{f.a}</p>
+      </>
+    ))}
+  </div>
+
+  <h2 id="other-agents">Other agents</h2>
+  <ul class="more">
+    {others.map((a) => <li><a href={href(`/setup/${a.slug}`)}>{a.name}</a></li>)}
+  </ul>
+
+  <h2 id="sources">Sources</h2>
+  <p class="sources">
+    Vendor documentation this guide is written against — hook surfaces move, so check yours if
+    something below does not match what you see.
+  </p>
+  <ul class="sources">
+    {agent.sources.map((s) => <li><a href={s.url} rel="noopener">{s.label}</a></li>)}
+  </ul>
+</Base>

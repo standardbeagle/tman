@@ -1,0 +1,129 @@
+---
+import Base from "../../layouts/Base.astro";
+import { AGENTS, TIERS, type Tier } from "../../data/agents";
+import { faqJsonLd } from "../../lib/blocks";
+import { href, absolute } from "../../lib/site";
+
+const path = "/setup";
+const order: Tier[] = ["rewrite", "gate", "shim"];
+
+const faqs = [
+  {
+    q: "Which AI coding agents can tman supervise?",
+    a: "All of them. Agents whose pre-tool hook can replace a command — Claude Code, Codex CLI, Gemini CLI, opencode — get automatic rewriting of bare test commands. Agents whose hook can only allow or deny — Cursor, Antigravity, Copilot CLI, Kimi — get a denial that names the supervised command. Everything else is covered by PATH shims, which sit below the agent entirely.",
+  },
+  {
+    q: "Do I need a hook at all?",
+    a: "No. `tman init --shims` writes supervised entry points at the repository root that any shell lookup resolves, which covers anything that shells out — an agent, a Makefile, a CI step, or you. Hooks close the remaining gap where an agent invokes a command directly rather than through a project script.",
+  },
+  {
+    q: "Can a tman hook break my build?",
+    a: "The shipped Claude Code hook cannot: every failure path leaves the command exactly as written, and it never returns the exit code that signals a block. The gate-tier adapters can deny a command by design, which is why they are scoped to what tman itself classifies as supervisable test or build work in an adopted project.",
+  },
+];
+
+const jsonLd = [
+  {
+    "@type": "CollectionPage",
+    name: "tman setup guides for AI coding agents",
+    description:
+      "Per-agent configuration guides for supervising AI-issued test and build commands with tman.",
+    url: absolute(path),
+    hasPart: AGENTS.map((a) => ({
+      "@type": "TechArticle",
+      headline: a.title,
+      url: absolute(`/setup/${a.slug}`),
+    })),
+  },
+  faqJsonLd(faqs),
+];
+---
+<Base
+  title="tman setup for AI coding agents"
+  description="Configure tman with Claude Code, Codex CLI, Gemini CLI, Antigravity, Cursor, Kimi, opencode, or Copilot CLI — hooks, PATH shims, and verification."
+  path={path}
+  crumbs={[{ label: "AI agent setup", path }]}
+  jsonLd={jsonLd}
+>
+  <style>
+    .lede { font-size: 1.1rem; color: var(--fg-dim); max-width: 44rem; }
+    .tiergroup { margin-top: 2.5rem; }
+    .tiergroup > p { color: var(--fg-dim); max-width: 44rem; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 1rem; margin: 1.25rem 0; }
+    .card {
+      background: var(--bg-alt);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1.1rem 1.3rem;
+      text-decoration: none;
+      color: inherit;
+      display: block;
+    }
+    .card:hover { border-color: var(--accent); }
+    .card h3 { margin: 0 0 0.35rem; color: var(--accent); font-family: var(--mono); font-size: 1rem; }
+    .card p { margin: 0; color: var(--fg-dim); font-size: 0.9rem; }
+    .card .vendor { display: block; margin-top: 0.6rem; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--fg-dim); }
+    .faq h3 { margin-bottom: 0.25rem; }
+    .faq p { margin-top: 0.25rem; color: var(--fg-dim); }
+  </style>
+
+  <h1>Configure tman with your AI coding agent</h1>
+  <p class="lede">
+    An agent that starts a test suite and then hangs, gets distracted, or survives a machine suspend
+    leaves processes draining your system for hours. tman wraps every run with hard limits and a
+    reaper. How you attach it depends on one thing: whether your agent's pre-tool hook can
+    <em>replace</em> a command, or only allow and deny it.
+  </p>
+
+  <h2 id="pick-your-agent">Pick your agent</h2>
+  <table>
+    <thead>
+      <tr><th>agent</th><th>integration</th><th>hook event</th><th>config</th></tr>
+    </thead>
+    <tbody>
+      {AGENTS.map((a) => (
+        <tr>
+          <td><a href={href(`/setup/${a.slug}`)}>{a.name}</a></td>
+          <td>{TIERS[a.tier].label}</td>
+          <td><code>{a.hookEvent ?? "—"}</code></td>
+          <td><code>{a.configPath}</code></td>
+        </tr>
+      ))}
+    </tbody>
+  </table>
+
+  {order.map((tier) => (
+    <section class="tiergroup">
+      <h2 id={tier}>{TIERS[tier].label}</h2>
+      <p set:html={TIERS[tier].blurb} />
+      <div class="cards">
+        {AGENTS.filter((a) => a.tier === tier).map((a) => (
+          <a class="card" href={href(`/setup/${a.slug}`)}>
+            <h3>{a.name}</h3>
+            <p>{a.tagline}</p>
+            <span class="vendor">{a.vendor}</span>
+          </a>
+        ))}
+      </div>
+    </section>
+  ))}
+
+  <h2 id="what-to-set">Then tune the caps</h2>
+  <p>
+    Attaching tman decides <em>that</em> a command is supervised. What the caps should be depends on
+    the command — a cold Rust build is silent for minutes, a Playwright suite leaks browsers, a dev
+    server must never get a wall-clock limit at all. The
+    <a href={href("/tuning")}>tuning guides</a> cover one test, lint, and build tool per page, with
+    the reasoning behind each number.
+  </p>
+
+  <h2 id="faq">Frequently asked</h2>
+  <div class="faq">
+    {faqs.map((f) => (
+      <>
+        <h3>{f.q}</h3>
+        <p>{f.a}</p>
+      </>
+    ))}
+  </div>
+</Base>
