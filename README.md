@@ -1,8 +1,27 @@
-# tman
+# tman — supervise runaway test processes from AI coding agents
 
 **Runaway tests, meet the reaper.** A single NativeAOT binary that supervises every process it launches — killing runs that have genuinely hung, capping time, memory, and CPU when you ask it to, and automatically reaping the orphans your LLM agents leave behind when they hang, get distracted, or your machine suspends.
 
+[![npm](https://img.shields.io/npm/v/@standardbeagle/tman?color=58d68d&label=npm)](https://www.npmjs.com/package/@standardbeagle/tman)
+[![license](https://img.shields.io/badge/license-MIT-58d68d)](LICENSE)
+[![docs](https://img.shields.io/badge/docs-standardbeagle.github.io%2Ftman-58d68d)](https://standardbeagle.github.io/tman/)
+
+Works with **[Claude Code](https://standardbeagle.github.io/tman/setup/claude-code/)**,
+**[Codex CLI](https://standardbeagle.github.io/tman/setup/codex-cli/)**,
+**[Gemini CLI](https://standardbeagle.github.io/tman/setup/gemini-cli/)**,
+**[Cursor](https://standardbeagle.github.io/tman/setup/cursor/)**,
+**[Antigravity](https://standardbeagle.github.io/tman/setup/antigravity/)**,
+**[Kimi](https://standardbeagle.github.io/tman/setup/kimi/)**,
+**[opencode](https://standardbeagle.github.io/tman/setup/opencode/)**,
+**[Copilot CLI](https://standardbeagle.github.io/tman/setup/copilot-cli/)**, and
+**[anything else that shells out](https://standardbeagle.github.io/tman/setup/other-agents/)**.
+
 ![demo](assets/demo.gif)
+
+**Contents** — [Why](#why) · [Install](#install) · [Quick start](#quick-start) ·
+[Commands](#commands) · [Run flags](#run-flags) · [Buckets](#buckets) ·
+[.tman.kdl](#tmankdl) · [AI agent setup](#ai-agent-setup) · [Housekeeping](#housekeeping) ·
+[Exit codes](#exit-codes) · [Scope](#scope)
 
 ## Why
 
@@ -187,7 +206,29 @@ alias "e2e" {
 }
 ```
 
-## Claude Code hook
+## AI agent setup
+
+Which mechanism you get depends on one property of your agent: whether its pre-tool hook can
+**replace** a shell command, or only allow and deny it. There is a guide per agent, each with the
+exact config, a runnable adapter where one is needed, and a smoke test:
+
+| agent | integration | hook event | guide |
+| --- | --- | --- | --- |
+| Claude Code | rewrites | `PreToolUse` | [setup/claude-code](https://standardbeagle.github.io/tman/setup/claude-code/) |
+| Codex CLI | rewrites | `PreToolUse` | [setup/codex-cli](https://standardbeagle.github.io/tman/setup/codex-cli/) |
+| Gemini CLI | rewrites | `BeforeTool` | [setup/gemini-cli](https://standardbeagle.github.io/tman/setup/gemini-cli/) |
+| opencode | rewrites | `tool.execute.before` | [setup/opencode](https://standardbeagle.github.io/tman/setup/opencode/) |
+| Cursor | gates | `beforeShellExecution` | [setup/cursor](https://standardbeagle.github.io/tman/setup/cursor/) |
+| Antigravity | gates | `PreToolUse` | [setup/antigravity](https://standardbeagle.github.io/tman/setup/antigravity/) |
+| Kimi Code CLI | gates | `PreToolUse` | [setup/kimi](https://standardbeagle.github.io/tman/setup/kimi/) |
+| GitHub Copilot CLI | gates | `preToolUse` | [setup/copilot-cli](https://standardbeagle.github.io/tman/setup/copilot-cli/) |
+| Aider, Amp, Windsurf, Zed, CI | shims only | — | [setup/other-agents](https://standardbeagle.github.io/tman/setup/other-agents/) |
+
+Per-command caps — what `--stall` should be for a cold Rust build, why a dev server must never get
+a `--max-time` — are in the [tuning guides](https://standardbeagle.github.io/tman/tuning/), one page
+per test, lint, and build tool.
+
+### Claude Code hook
 
 Shims only catch commands that go through a shell lookup, on a machine where `tman init --shims`
 ran. An agent calling a Bash tool with `npm test` walks straight past them. `tman hook pretooluse`
@@ -289,7 +330,12 @@ fine — but it will not be the thing keeping that fleet in order.
 
 ## Docs + demo
 
-Full docs: **https://standardbeagle.github.io/tman/** · release history: [CHANGELOG.md](CHANGELOG.md) · regenerate the demo gif with `vhs assets/demo.tape`
+- **Full docs** — https://standardbeagle.github.io/tman/docs/
+- **AI agent setup** — https://standardbeagle.github.io/tman/setup/ (Claude Code, Codex, Gemini CLI, Cursor, Antigravity, Kimi, opencode, Copilot CLI)
+- **Per-tool tuning** — https://standardbeagle.github.io/tman/tuning/ (Vitest, Jest, pytest, go test, dotnet test, cargo, Playwright, RSpec, Gradle, ESLint, Ruff, Biome, golangci-lint, tsc, Vite)
+- **Release history** — [CHANGELOG.md](CHANGELOG.md)
+
+Regenerate the demo gif with `vhs assets/demo.tape`.
 
 ## License
 
