@@ -1,8 +1,26 @@
 {
   "name": "@standardbeagle/tman",
   "version": "0.3.0",
-  "description": "Supervised process/test runner — caps, culls, and reaps runaway processes (native binary)",
+  "description": "Supervised process/test runner — caps, culls, and reaps runaway processes from AI coding agents (native binary)",
+  "keywords": [
+    "process-manager",
+    "test-runner",
+    "supervisor",
+    "timeout",
+    "watchdog",
+    "orphan-reaper",
+    "ai-agent",
+    "claude-code",
+    "codex",
+    "hooks",
+    "ci",
+    "devtools"
+  ],
   "license": "MIT",
+  "homepage": "https://standardbeagle.github.io/tman/",
+  "bugs": {
+    "url": "https://github.com/standardbeagle/tman/issues"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/standardbeagle/tman.git"
