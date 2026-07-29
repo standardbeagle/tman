@@ -89,6 +89,7 @@ const graph: Record<string, unknown>[] = [
     <meta name="twitter:image" content={ogImage} />
 
     <link rel="icon" href={href("/favicon.svg")} type="image/svg+xml" />
+    <link rel="sitemap" type="application/xml" href={href("/sitemap.xml")} />
     <link rel="alternate" type="application/rss+xml" title="tman releases" href={`${REPO}/releases.atom`} />
     <script type="application/ld+json" set:html={JSON.stringify({ "@context": "https://schema.org", "@graph": graph })} is:inline />
     <style>
@@ -180,6 +181,8 @@ const graph: Record<string, unknown>[] = [
     <nav>
       <a class="brand" href={href("/")}>tman</a>
       <a href={href("/docs")}>docs</a>
+      <a href={href("/setup")}>ai agents</a>
+      <a href={href("/tuning")}>tuning</a>
       <span class="spacer"></span>
       <a href={REPO}>github</a>
     </nav>
@@ -202,6 +205,8 @@ const graph: Record<string, unknown>[] = [
     </main>
     <footer>
       tman — MIT licensed · built with .NET NativeAOT ·
+      <a href={href("/setup")}>ai agent setup</a> ·
+      <a href={href("/tuning")}>tuning guides</a> ·
       <a href={REPO}>source</a>
     </footer>
   </body>

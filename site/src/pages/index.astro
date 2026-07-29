@@ -1,6 +1,8 @@
 ---
 import Base from "../layouts/Base.astro";
 import { href } from "../lib/site";
+import { AGENTS } from "../data/agents";
+import { TOOLS } from "../data/tools";
 ---
 <Base
   title="tman — supervise runaway AI agent test processes"
@@ -43,7 +45,10 @@ import { href } from "../lib/site";
       reaping the orphans your LLM agents leave behind when they hang, get distracted, or your
       machine suspends.
     </p>
-    <a class="cta" href={href("/docs")}>get started</a>
+    <div class="ctas">
+      <a class="cta" href={href("/docs")}>get started</a>
+      <a class="cta secondary" href={href("/setup")}>set up with your AI agent</a>
+    </div>
   </section>
 
   <img src="https://raw.githubusercontent.com/standardbeagle/tman/main/assets/demo.gif" alt="tman demo: init, supervised test run, hang kill, dedup refusal" style="width:100%;border-radius:10px;border:1px solid var(--border);" />
@@ -98,4 +103,30 @@ import { href } from "../lib/site";
 
   <p><span class="badge">~3.8 MB native binary · no dependencies · cross-platform</span></p>
 
+  <h2 id="ai-agents">wire it into your AI coding agent</h2>
+  <p>
+    Shims catch commands that go through a shell. An agent calling a Bash tool with
+    <code>npm test</code> walks straight past them — so each agent gets its own guide, because what
+    tman can do depends on whether that agent's pre-tool hook can <em>replace</em> a command or only
+    allow and deny it.
+  </p>
+  <div class="grid">
+    {AGENTS.map((a) => (
+      <a class="card" href={href(`/setup/${a.slug}`)} style="text-decoration:none;color:inherit;">
+        <h3>{a.name}</h3>
+        <p>{a.tagline}</p>
+      </a>
+    ))}
+  </div>
+
+  <h2 id="tuning">recommended caps, per tool</h2>
+  <p>
+    A cold Rust build is silent for minutes. A Playwright suite leaks browsers and binds a port. A
+    dev server is designed never to exit, so a wall-clock limit on it is guaranteed to fire and
+    guaranteed to mean nothing. One <a href={href("/tuning")}>tuning guide</a> per tool, with the
+    reasoning behind each number:
+  </p>
+  <p class="toolinks">
+    {TOOLS.map((t) => <a href={href(`/tuning/${t.slug}`)}>{t.name}</a>)}
+  </p>
 </Base>

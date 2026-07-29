@@ -1,5 +1,6 @@
 ---
 import Base from "../layouts/Base.astro";
+import { href } from "../lib/site";
 ---
 <Base
   title="tman docs: commands, flags, buckets, exit codes"
@@ -8,7 +9,11 @@ import Base from "../layouts/Base.astro";
   crumbs={[{ label: "Docs", path: "/docs" }]}
 >
   <h1>tman documentation</h1>
-  <p>Reference for every command, flag, and file.</p>
+  <p>
+    Reference for every command, flag, and file. For attaching tman to a specific AI coding agent see
+    the <a href={href("/setup")}>setup guides</a>; for recommended caps per test or lint tool see the
+    <a href={href("/tuning")}>tuning guides</a>.
+  </p>
 
   <h2>install</h2>
   <pre><span class="c"># npm</span>
