@@ -1,6 +1,6 @@
-# tman — supervise runaway test processes from AI coding agents
+# tman — supervise the test and build runs your AI coding agents launch
 
-**Runaway tests, meet the reaper.** A single NativeAOT binary that supervises every process it launches — killing runs that have genuinely hung, capping time, memory, and CPU when you ask it to, and automatically reaping the orphans your LLM agents leave behind when they hang, get distracted, or your machine suspends.
+**The same suite never runs twice at once, and every run leaves a record.** A single NativeAOT binary that names each run, refuses a duplicate of it, and queues the rest instead of letting them stampede your cores. Under that sits a backstop: it kills the rare run that hangs or leaks, and reaps the orphans an agent leaves behind.
 
 [![npm](https://img.shields.io/npm/v/@standardbeagle/tman?color=58d68d&label=npm)](https://www.npmjs.com/package/@standardbeagle/tman)
 [![license](https://img.shields.io/badge/license-MIT-58d68d)](LICENSE)
@@ -25,16 +25,27 @@ Works with **[Claude Code](https://standardbeagle.github.io/tman/setup/claude-co
 
 ## Why
 
-LLM agents start test suites and then hang, get distracted, or survive a machine suspend — leaving processes that drain your system for hours. `tman` wraps every run with hard limits and a reaper, so nothing outlives its welcome.
+Agents run tests constantly, from several sessions at once. Usually nothing has gone wrong — you simply have four `npm test` invocations racing in one checkout, no way to tell them apart, and no record of what any of them did. The everyday problem is not runaway processes. It is uncoordinated ones.
 
-- **wall-time + stall kills** — `--max-time 10m`, `--stall 30m` (on Linux: silent *and* idle = hung, so quiet-but-busy work like `go test` keeps running)
-- **resource culling** — opt-in `--max-mem 2g`, `--max-cpu 95` (sustained) kill the whole process tree
-- **orphan reaping** — every `tman` command kills children whose runner died and prunes expired records; a lock whose runner died is taken over in place by the next run of that name
+`tman` gives every run a name, a slot, and a record. Underneath that it keeps a backstop for the rarer case where something really does hang or leak.
+
+**On every run**
+
 - **dedup locks** — `--name test` refuses duplicates; `--replace` kills the old run and waits for it to hand the name back
 - **resource gating** — `--max-parallel 2` queues excess runs instead of stampeding cores
 - **per-project scoping** — locks and slots bucket by name (or command) *and* directory, so one repo's runs never block another's
 - **folder aliases** — `.tman.kdl` per project, with repo-root shims so `./test` is supervised transparently
-- **~3.8 MB native binary**, zero runtime deps, cross-platform (linux/mac/windows, x64/arm64)
+- **run records** — each run leaves one JSON record: command, cwd, exit code, peak memory, start and finish, and the caps it ran under. `tman list --all` and `tman status --json` read them back, so you can find out afterwards what your agents ran and how it went
+- **orphan reaping** — every `tman` command kills children whose runner died and prunes expired records; a lock whose runner died is taken over in place by the next run of that name
+
+**The backstop, for when one misbehaves**
+
+- **wall-time + stall kills** — `--max-time 10m`, `--stall 30m` (on Linux: silent *and* idle = hung, so quiet-but-busy work like `go test` keeps running)
+- **resource culling** — opt-in `--max-mem 2g`, `--max-cpu 95` (sustained) kill the whole process tree
+
+Both fire rarely, which is the point: a healthy week kills nothing. Size them as backstops, not budgets. A limit tight enough to fire often will mostly kill working runs — the `--stall` history below is a worked example of exactly that.
+
+**~3.8 MB native binary**, zero runtime deps, cross-platform (linux/mac/windows, x64/arm64).
 
 ## Install
 
@@ -61,13 +72,20 @@ Prebuilt binaries are attached to every [GitHub release](https://github.com/stan
 ## Quick start
 
 ```sh
-# supervise anything
-tman run --max-time 10m --max-mem 2g -- npm test
-
 # adopt in a project (auto-detects npm / pytest / go / make)
 cd your-project
 tman init --shims --gitignore
-./test        # now supervised: stall backstop, dedup + parallel gating
+./test        # now supervised: deduped, queued, recorded
+
+# supervise anything, named so a second one refuses to start
+tman run --name test -- npm test
+
+# what ran, and how did it go?
+tman list
+tman status --json
+
+# add backstop caps to a suite that has misbehaved
+tman run --max-time 10m --max-mem 2g -- npm test
 ```
 
 ## Commands

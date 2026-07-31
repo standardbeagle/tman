@@ -5,8 +5,8 @@ import { AGENTS } from "../data/agents";
 import { TOOLS } from "../data/tools";
 ---
 <Base
-  title="tman — supervise runaway AI agent test processes"
-  description="A NativeAOT binary that caps, culls, and reaps runaway test runs: wall-clock and stall kills, memory limits, orphan reaping, and dedup locks."
+  title="tman — supervise the test runs your AI agents launch"
+  description="A NativeAOT binary that keeps agent test runs coordinated: dedup locks, parallel slot gating, per-project scoping, and a record of every run — with wall-clock, stall, and memory kills as the backstop."
   path="/"
 >
   <style>
@@ -38,12 +38,12 @@ import { TOOLS } from "../data/tools";
   </style>
 
   <section class="hero">
-    <h1>your test agents <em>will</em> run away.<br />tman won't let them.</h1>
+    <h1>four agents. one checkout.<br />the suite runs <em>once</em>.</h1>
     <p>
-      A single NativeAOT binary that supervises every process it launches — killing runs that
-      have genuinely hung, capping time, memory, and CPU when you ask it to, and automatically
-      reaping the orphans your LLM agents leave behind when they hang, get distracted, or your
-      machine suspends.
+      A single NativeAOT binary that names every run it launches, refuses a duplicate of it, and
+      queues the rest instead of letting them stampede your cores. Every run leaves a record, so
+      you can find out afterwards what your agents ran. Under all that sits a backstop for the
+      rare run that hangs or leaks.
     </p>
     <div class="ctas">
       <a class="cta" href={href("/docs")}>get started</a>
@@ -53,10 +53,43 @@ import { TOOLS } from "../data/tools";
 
   <img src="https://raw.githubusercontent.com/standardbeagle/tman/main/assets/demo.gif" alt="tman demo: init, supervised test run, hang kill, dedup refusal" style="width:100%;border-radius:10px;border:1px solid var(--border);" />
 
-  <pre><span class="p">$</span> tman run --max-time 10m --max-mem 2g -- npm test
-<span class="c"># hangs? killed. leaks? culled. runner dies? orphan reaped next invocation.</span></pre>
+  <pre><span class="p">$</span> tman run --name test -- npm test
+<span class="c"># already running here? refused. cores busy? queued. either way, recorded.</span></pre>
 
-  <h2 id="what-it-does">what it does</h2>
+  <h2 id="what-it-does">what it does on every run</h2>
+
+  <div class="grid">
+    <div class="card">
+      <h3>--name dedup</h3>
+      <p>Duplicate processes never start. Same-name runs in the same directory refuse by default, or <code>--replace</code> kills the old one and waits for it to hand the name back.</p>
+    </div>
+    <div class="card">
+      <h3>--max-parallel</h3>
+      <p>Resource-gated multi-process runs, scoped per name-and-directory bucket. Each run holds a slot file exclusively, so excess runs queue instead of stampeding your cores even when they launch at the same instant — and one repo never starves another.</p>
+    </div>
+    <div class="card">
+      <h3>run records</h3>
+      <p>Every run leaves one JSON record: command, cwd, exit code, peak memory, start and finish, and the caps it ran under. <code>tman list --all</code> and <code>tman status --json</code> read them back, so you can find out afterwards what your agents ran and how it went.</p>
+    </div>
+    <div class="card">
+      <h3>.tman.kdl aliases</h3>
+      <p>Folder-level aliases with per-alias caps. Repo-root shims make <code>./test</code> route through supervision transparently.</p>
+    </div>
+    <div class="card">
+      <h3>orphan reaper</h3>
+      <p>Machine suspended? Agent crashed? Every tman command reaps children whose runner died and prunes expired records — and a bucket held by a dead runner is free the moment the kernel drops its lock. Nothing drains your system overnight.</p>
+    </div>
+    <div class="card">
+      <h3>Claude Code hook</h3>
+      <p>An agent that runs <code>npm test</code> directly bypasses your shims. Registered as a PreToolUse hook, tman rewrites those bare commands to run supervised — and never blocks one: anything uncertain passes through untouched.</p>
+    </div>
+  </div>
+
+  <h2 id="backstop">and underneath, a backstop</h2>
+  <p>
+    Both fire rarely, which is the point: a healthy week kills nothing. Size them as backstops,
+    not budgets — a limit tight enough to fire often will mostly kill working runs.
+  </p>
 
   <div class="grid">
     <div class="card">
@@ -65,27 +98,7 @@ import { TOOLS } from "../data/tools";
     </div>
     <div class="card">
       <h3>--max-mem / --max-cpu</h3>
-      <p>Opt-in resource culling. Breach the memory ceiling, measured across the whole process tree, or sustain high CPU, and the tree is killed — exit 126.</p>
-    </div>
-    <div class="card">
-      <h3>orphan reaper</h3>
-      <p>Machine suspended? Agent crashed? Every tman command reaps children whose runner died and prunes expired records — and a bucket held by a dead runner is free the moment the kernel drops its lock. Nothing drains your system overnight.</p>
-    </div>
-    <div class="card">
-      <h3>--max-parallel</h3>
-      <p>Resource-gated multi-process runs, scoped per name-and-directory bucket. Each run holds a slot file exclusively, so excess runs queue instead of stampeding your cores even when they launch at the same instant — and one repo never starves another.</p>
-    </div>
-    <div class="card">
-      <h3>--name dedup</h3>
-      <p>Duplicate processes never start. Same-name runs in the same directory refuse by default, or <code>--replace</code> kills the old one and waits for it to hand the name back.</p>
-    </div>
-    <div class="card">
-      <h3>.tman.kdl aliases</h3>
-      <p>Folder-level aliases with per-alias caps. Repo-root shims make <code>./test</code> route through supervision transparently.</p>
-    </div>
-    <div class="card">
-      <h3>Claude Code hook</h3>
-      <p>An agent that runs <code>npm test</code> directly bypasses your shims. Registered as a PreToolUse hook, tman rewrites those bare commands to run supervised — and never blocks one: anything uncertain passes through untouched.</p>
+      <p>Off unless you ask for it. Breach the memory ceiling, measured across the whole process tree, or sustain high CPU, and the tree is killed — exit 126.</p>
     </div>
   </div>
 
@@ -101,7 +114,7 @@ import { TOOLS } from "../data/tools";
   <h2>adopt in a project</h2>
   <pre><span class="p">$</span> cd your-project
 <span class="p">$</span> tman init --shims --gitignore   <span class="c"># auto-detects npm / pytest / go / make</span>
-<span class="p">$</span> ./test                          <span class="c"># now supervised: 30m stall backstop, dedup + parallel gating</span></pre>
+<span class="p">$</span> ./test                          <span class="c"># now supervised: deduped, queued, recorded, 30m stall backstop</span></pre>
 
   <p><span class="badge">~3.8 MB native binary · no dependencies · cross-platform</span></p>
 
