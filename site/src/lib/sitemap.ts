@@ -121,9 +121,19 @@ export function createCommitDater(root: string): (paths: string[]) => string | n
     return () => null;
   }
 
+  // Every route shares the four SHARED_SOURCES and its section's data module, so asking git per
+  // route meant 28 x 6 subprocesses to answer ten distinct questions — three seconds of the build,
+  // and enough to time out a test. The answer for a path cannot change mid-build.
+  const dateOf = new Map<string, string>();
+
   return (paths) => {
     try {
-      const dates = paths.map((p) => git(["log", "-1", "--format=%cI", "--", p])).filter((d) => d !== "");
+      const dates = paths
+        .map((p) => {
+          if (!dateOf.has(p)) dateOf.set(p, git(["log", "-1", "--format=%cI", "--", p]));
+          return dateOf.get(p)!;
+        })
+        .filter((d) => d !== "");
       return dates.length === 0 ? null : dates.sort().at(-1)!;
     } catch {
       return null;
