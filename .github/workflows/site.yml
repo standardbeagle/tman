@@ -33,6 +33,8 @@ jobs:
           cache-dependency-path: site/package-lock.json
       - run: npm ci
         working-directory: site
+      - run: npm test
+        working-directory: site
       - run: npm run build
         working-directory: site
       - uses: actions/configure-pages@v5
