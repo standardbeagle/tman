@@ -30,6 +30,16 @@ const {
 const canonical = absolute(path);
 const ogImage = absolute("/og.png");
 
+/**
+ * Read off the page's own structured data rather than taken as a prop.
+ *
+ * A page that calls itself a `TechArticle` in JSON-LD and a `website` in Open Graph is telling two
+ * crawlers two different things, and the drift is invisible until something re-reads both. Deriving
+ * one from the other means a page can only ever be described once. Hub pages pass a `CollectionPage`
+ * whose *nested* parts are articles, so this checks only the entities the page claims to be.
+ */
+const ogType = jsonLd.some((e) => e["@type"] === "TechArticle") ? "article" : "website";
+
 const trail = [{ label: "tman", path: "/" }, ...crumbs];
 
 const graph: Record<string, unknown>[] = [
@@ -74,7 +84,7 @@ const graph: Record<string, unknown>[] = [
     <meta name="color-scheme" content="dark light" />
     <meta name="theme-color" content="#0d1117" />
 
-    <meta property="og:type" content="website" />
+    <meta property="og:type" content={ogType} />
     <meta property="og:site_name" content="tman" />
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
