@@ -315,7 +315,10 @@ record written by a different tman version is discarded rather than half-read.
 | 125 | stalled (`--stall`) |
 | 126 | culled (`--max-mem` / `--max-cpu`) |
 | 127 | command / config not found |
-| 130 | killed (dedup refusal, queue timeout, `tman kill`) |
+| 130 | killed (dedup refusal, queue timeout, `tman kill`, Ctrl+C, exit status unknown) |
+
+tman never reports 0 for a run it did not see finish. A Ctrl+C interrupts the run as a whole, so a
+child that traps the signal and exits 0 on its way out is still reported as 130.
 
 ## Scope
 

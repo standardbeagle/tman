@@ -6,6 +6,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). While the version is
 below 1.0, behavior changes land in minor releases.
 
+## [Unreleased]
+
+### Fixed
+- **An interrupted run no longer reports 0.** Ctrl+C reaches the child through the terminal at the
+  same moment it reaches tman, and a test runner that traps SIGINT and shuts down cleanly exits 0 —
+  which tman then passed through as if the run had finished. An interrupt is now handled like any
+  other cancellation: the tree is killed, the record says `interrupted`, and the exit code is 130.
+  A child whose exit status tman cannot read is reported the same way instead of defaulting to 0.
+
 ## [0.3.0] - 2026-07-26
 
 ### Added
