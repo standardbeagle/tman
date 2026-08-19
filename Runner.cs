@@ -86,11 +86,19 @@ public static class Runner
         };
         Store.Save(record);
 
-        Console.CancelKeyPress += (_, e) =>
+        // Ctrl+C reaches the child through the terminal at the same moment it reaches tman. Killing
+        // the tree from here and letting the loop read whatever exit code the child chose would let
+        // a runner that traps SIGINT and shuts down cleanly report 0 for work that never finished.
+        // An interrupt is a cancellation: the loop ends on it and the run is reported killed.
+        using var interrupt = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var interrupted = false;
+        ConsoleCancelEventHandler onCancel = (_, e) =>
         {
             e.Cancel = true;
-            ProcUtil.KillTree(record.Pid);
+            interrupted = true;
+            interrupt.Cancel();
         };
+        Console.CancelKeyPress += onCancel;
 
         long outputBytes = 0;
         var outPump = PumpAsync(proc.StandardOutput, Console.Out, n => Interlocked.Add(ref outputBytes, n), ct);
@@ -114,8 +122,8 @@ public static class Runner
         {
             while (!proc.HasExited)
             {
-                try { await Task.Delay(MonitorTickMs, ct); }
-                catch (OperationCanceledException) { killReason = "cancelled"; killState = RunState.Killed; break; }
+                try { await Task.Delay(MonitorTickMs, interrupt.Token); }
+                catch (OperationCanceledException) { break; }
 
                 var now = DateTime.UtcNow;
                 record.HeartbeatUtc = now;
@@ -180,6 +188,16 @@ public static class Runner
         }
         finally
         {
+            Console.CancelKeyPress -= onCancel;
+
+            // checked here and not only where the delay was cut short: the loop can also end because
+            // the child exited on the same signal, and that exit is still not a finished run
+            if (killReason is null && interrupt.IsCancellationRequested)
+            {
+                killReason = interrupted ? "interrupted" : "cancelled";
+                killState = RunState.Killed;
+            }
+
             if (killReason is not null)
             {
                 Console.Error.WriteLine($"tman: killing pid {record.Pid}: {killReason}");
@@ -195,29 +213,37 @@ public static class Runner
                 record.State = killState;
                 record.KillReason = killReason;
             }
-            else if (proc.HasExited)
+            else if (TryReadExitCode(proc) is { } exitCode)
             {
                 record.State = RunState.Exited;
-                try { record.ExitCode = proc.ExitCode; } catch { }
+                record.ExitCode = exitCode;
             }
             else
             {
+                // the one outcome tman may never paper over with a 0: a child whose exit status it
+                // did not get is a run it cannot vouch for
                 record.State = RunState.Killed;
-                record.KillReason = "runner terminated";
+                record.KillReason = "child exit status unknown";
+                Console.Error.WriteLine($"tman: exit status of pid {record.Pid} is unknown; reporting {ExitKilled}");
             }
             Store.Save(record);
             proc.Dispose();
         }
 
-        if (killReason is not null)
-            return killState switch
-            {
-                RunState.TimedOut => ExitTimeout,
-                RunState.Stalled => ExitStalled,
-                RunState.Culled => ExitCulled,
-                _ => ExitKilled,
-            };
-        return record.ExitCode ?? 0;
+        return record.State switch
+        {
+            RunState.Exited => record.ExitCode!.Value,
+            RunState.TimedOut => ExitTimeout,
+            RunState.Stalled => ExitStalled,
+            RunState.Culled => ExitCulled,
+            _ => ExitKilled,
+        };
+    }
+
+    static int? TryReadExitCode(Process proc)
+    {
+        try { return proc.HasExited ? proc.ExitCode : null; }
+        catch (InvalidOperationException) { return null; }
     }
 
     static bool TrySample(Func<int, TreeSample?>? sampler, int pid, out TreeSample sample)
