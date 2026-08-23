@@ -37,6 +37,9 @@ public class InterruptTests : IDisposable
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
+            // Not the test assembly's own directory: that resolves tman's .tman.kdl upward and the
+            // run would write its log into this repo's working tree.
+            WorkingDirectory = _home.Path,
         };
         psi.Environment["TMAN_HOME"] = _home.Path;
         foreach (var a in new[] { "run", "--", "sh", "-c", "trap 'kill $!; exit 0' INT; sleep 30 & wait" })

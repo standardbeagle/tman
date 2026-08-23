@@ -1,6 +1,9 @@
 bin/
 obj/
 
+# tman run logs — last run's output + failure digest, rewritten every run
+/.tman/
+
 # tman shims
 /test
 /test.cmd
