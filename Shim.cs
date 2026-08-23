@@ -45,7 +45,10 @@ public static class Shim
     {
         var path = Path.Combine(dir, ".gitignore");
         var existing = File.Exists(path) ? File.ReadAllLines(path) : Array.Empty<string>();
-        var toAdd = new List<string> { "", "# tman shims" };
+        var toAdd = new List<string> { "", "# tman shims and run logs" };
+        // .tman/ holds the last run's output and failure digest per alias. Rewritten every run and
+        // meaningful only on the machine that produced it, so it is never a commit.
+        if (!existing.Contains("/" + RunLog.DirName + "/")) toAdd.Add("/" + RunLog.DirName + "/");
         foreach (var name in aliasNames)
         {
             var entry = "/" + name;
