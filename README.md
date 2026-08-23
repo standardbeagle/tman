@@ -20,7 +20,7 @@ Works with **[Claude Code](https://standardbeagle.github.io/tman/setup/claude-co
 
 **Contents** — [Why](#why) · [Install](#install) · [Quick start](#quick-start) ·
 [Commands](#commands) · [Run flags](#run-flags) · [Buckets](#buckets) ·
-[.tman.kdl](#tmankdl) · [AI agent setup](#ai-agent-setup) · [Housekeeping](#housekeeping) ·
+[.tman.kdl](#tmankdl) · [Run logs](#run-logs) · [AI agent setup](#ai-agent-setup) · [Housekeeping](#housekeeping) ·
 [Exit codes](#exit-codes) · [Scope](#scope)
 
 ## Why
@@ -32,6 +32,7 @@ LLM agents start test suites and then hang, get distracted, or survive a machine
 - **orphan reaping** — every `tman` command kills children whose runner died and prunes expired records; a lock whose runner died is taken over in place by the next run of that name
 - **dedup locks** — `--name test` refuses duplicates; `--replace` kills the old run and waits for it to hand the name back
 - **resource gating** — `--max-parallel 2` queues excess runs instead of stampeding cores
+- **failure logs** — every supervised run leaves `.tman/<alias>.log`, and a failed one leaves `.tman/<alias>.fail.log` with the failure lines extracted; both are cleared at the start of the next run
 - **per-project scoping** — locks and slots bucket by name (or command) *and* directory, so one repo's runs never block another's
 - **folder aliases** — `.tman.kdl` per project, with repo-root shims so `./test` is supervised transparently
 - **~3.8 MB native binary**, zero runtime deps, cross-platform (linux/mac/windows, x64/arm64)
@@ -205,6 +206,56 @@ alias "e2e" {
     max-mem 4096
 }
 ```
+
+## Run logs
+
+Every run governed by a `.tman.kdl` writes its combined stdout and stderr to `.tman/<alias>.log`
+next to that config, and a run that does **not pass** also writes `.tman/<alias>.fail.log` — a
+digest carrying the outcome, the command, and every failure line in the log with the lines that
+followed it, plus the tail. tman prints the digest path on stderr when it writes one.
+
+```
+$ ./test
+...
+tman: failures logged to /home/you/project/.tman/test.fail.log
+
+$ cat .tman/test.fail.log
+tman failure digest — test
+  outcome:  exit 1
+  command:  /usr/bin/python3 -m pytest -q
+  cwd:      /home/you/project
+  started:  2026-08-23 16:30:40Z  (2.1s)
+  full log: /home/you/project/.tman/test.log
+
+── 3 failure line(s) ──
+     7: E   AssertionError: widget count wrong
+     8: E   assert 1 == 2
+     9:
+    10: test_smoke.py:2: AssertionError
+    11: =========================== short test summary info ============================
+    12: FAILED test_smoke.py::test_fails - AssertionError: widget count wrong
+```
+
+The point is the clearing. **Both files are truncated at the start of every run, and the digest is
+deleted when a run passes**, so what is on disk always describes the last run of that alias. A
+digest that outlived the failure it reported would be worse than none, because it reads exactly
+like a real one — the presence of `.tman/*.fail.log` *is* the signal that something is broken now.
+
+That is what makes it useful to an agent: it can answer "which test failed" by reading a path it
+can name, without re-running the suite, and long after the console output it came from is gone.
+
+Failure lines are matched by **shape, not by runner** — `FAILED …`, `--- FAIL:`, `[FAIL]`,
+`Failed!`, `panic:`, `not ok`, `: error …`, `×`, `●`, and friends. A runner whose output nothing
+matches degrades to "no failure lines matched" plus the tail, never to an empty file that reads
+like a clean run.
+
+| | |
+| --- | --- |
+| location | `.tman/` beside the governing `.tman.kdl`; `tman init --gitignore` ignores it |
+| one pair per **alias**, not per run | so the path is nameable without looking a run id up first; two concurrent runs of one alias in one directory are what the dedup lock and slots already prevent |
+| no `.tman.kdl` | no log — an unconfigured `tman run` has no project to write into, and `.tman/` dirs scattered through arbitrary cwds is not a side effect a supervisor should have |
+| size | the full log is capped at 64 MB, after which the most recent 512 KB is kept and the cut is marked |
+| killed runs | get a digest too: the outcome line names the kill reason, and the tail is the last output before the silence |
 
 ## AI agent setup
 

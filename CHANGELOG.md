@@ -6,7 +6,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). While the version is
 below 1.0, behavior changes land in minor releases.
 
-## [Unreleased]
+## [0.4.0] - 2026-08-23
+
+### Added
+- **Run logs and failure digests.** A run governed by a `.tman.kdl` now writes its combined output
+  to `.tman/<alias>.log`, and a run that does not pass writes `.tman/<alias>.fail.log` — the
+  outcome, the command, every failure line in the log with its following context, and the tail.
+  The console was previously the only place a suite's output went, so an agent that ran the tests
+  and then compacted or handed off its context had no way back to *which* test failed except
+  re-running the whole suite. Both files are cleared at the start of every run and the digest is
+  deleted when a run passes, so a digest on disk always describes the most recent run of that
+  alias; a stale one would read exactly like a real one. Failure lines are matched by shape
+  (`FAILED`, `--- FAIL:`, `[FAIL]`, `Failed!`, `panic:`, `not ok`, `: error `, `×`, `●`), and a
+  runner nothing matches degrades to the tail rather than to an empty file. `tman init --gitignore`
+  now ignores `.tman/`.
 
 ### Fixed
 - **An interrupted run no longer reports 0.** Ctrl+C reaches the child through the terminal at the
@@ -222,6 +235,7 @@ reaping; dedup locks; parallel gating; `.tman.kdl` folder aliases with repo-root
 binaries for linux-x64, linux-arm64, win-x64, osx-arm64, and osx-x64, distributed via npm, PyPI,
 PSGallery, and a shell installer.
 
+[0.4.0]: https://github.com/standardbeagle/tman/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/standardbeagle/tman/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/standardbeagle/tman/compare/v0.1.4...v0.2.0
 [0.1.4]: https://github.com/standardbeagle/tman/compare/v0.1.3...v0.1.4
