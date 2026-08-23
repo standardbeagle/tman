@@ -71,7 +71,8 @@ public static partial class Program
         Reaper.Sweep(Retention());
         var args = alias.Args.Concat(extraArgs).ToArray();
         var caps = Config.EffectiveCaps(alias, new Caps(), config);
-        return await GatedRun(alias.Command, args, caps, alias.Name, alias.Name, replace: false, RunKey.ScopeDir(config));
+        return await GatedRun(alias.Command, args, caps, alias.Name, alias.Name, replace: false,
+            RunKey.ScopeDir(config), config.Dir);
     }
 
     static async Task<int> CmdRun(string[] argv, string? _)
@@ -127,7 +128,8 @@ public static partial class Program
             var args = alias.Args.Concat(cmdArgs).ToArray();
             var caps = Config.EffectiveCaps(alias, CliCaps(), config);
             return await GatedRun(
-                alias.Command, args, caps, name ?? alias.Name, alias.Name, replace, RunKey.ScopeDir(config));
+                alias.Command, args, caps, name ?? alias.Name, alias.Name, replace,
+                RunKey.ScopeDir(config), config.Dir);
         }
 
         if (cmdArgs.Count == 0) throw new FormatException("run requires a command");
@@ -135,12 +137,20 @@ public static partial class Program
             var config = Config.Load();
             var caps = Config.EffectiveCaps(null, CliCaps(), config);
             return await GatedRun(
-                cmdArgs[0], cmdArgs[1..].ToArray(), caps, name, null, replace, RunKey.ScopeDir(config));
+                cmdArgs[0], cmdArgs[1..].ToArray(), caps, name, null, replace,
+                RunKey.ScopeDir(config), config?.Dir);
         }
     }
 
+    /// <param name="logDir">
+    /// The .tman.kdl directory, or null when no config governs the run. Null means no run log: an
+    /// unconfigured `tman run` happens in whatever directory the caller is standing in, and
+    /// scattering .tman/ dirs through arbitrary cwds — $HOME included, where it would land beside
+    /// tman's own store — is not something a supervisor should do uninvited.
+    /// </param>
     internal static async Task<int> GatedRun(
-        string command, string[] args, Caps caps, string? name, string? alias, bool replace, string scopeDir)
+        string command, string[] args, Caps caps, string? name, string? alias, bool replace,
+        string scopeDir, string? logDir = null)
     {
         command = Canon.ResolveCommand(command);
         var group = RunKey.For(name, command, scopeDir);
@@ -223,7 +233,8 @@ public static partial class Program
                 }
             }
 
-            return await Runner.RunAsync(command, args, caps, name, alias, group);
+            using var log = logDir is null ? null : RunLog.Open(logDir, name, alias, command);
+            return await Runner.RunAsync(command, args, caps, name, alias, group, log: log);
         }
         finally
         {

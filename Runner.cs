@@ -24,8 +24,9 @@ public static class Runner
         string? name,
         string? alias,
         string? group = null,
-        CancellationToken ct = default)
-        => RunAsync(command, args, caps, name, alias, group, ct, sampler: null);
+        CancellationToken ct = default,
+        RunLog? log = null)
+        => RunAsync(command, args, caps, name, alias, group, ct, sampler: null, log: log);
 
     /// <summary>
     /// Test seam. <paramref name="sampler"/> stands in for the real <see cref="TreeStats.TrySample"/>
@@ -41,7 +42,8 @@ public static class Runner
         string? alias,
         string? group,
         CancellationToken ct,
-        Func<int, TreeSample?>? sampler)
+        Func<int, TreeSample?>? sampler,
+        RunLog? log = null)
     {
         var id = Guid.NewGuid().ToString("N")[..12];
 
@@ -63,6 +65,7 @@ public static class Runner
         catch (Exception e)
         {
             Console.Error.WriteLine($"tman: cannot start '{command}': {e.Message}");
+            log?.Dispose();
             return ExitNotFound;
         }
 
@@ -101,8 +104,8 @@ public static class Runner
         Console.CancelKeyPress += onCancel;
 
         long outputBytes = 0;
-        var outPump = PumpAsync(proc.StandardOutput, Console.Out, n => Interlocked.Add(ref outputBytes, n), ct);
-        var errPump = PumpAsync(proc.StandardError, Console.Error, n => Interlocked.Add(ref outputBytes, n), ct);
+        var outPump = PumpAsync(proc.StandardOutput, Console.Out, log, n => Interlocked.Add(ref outputBytes, n), ct);
+        var errPump = PumpAsync(proc.StandardError, Console.Error, log, n => Interlocked.Add(ref outputBytes, n), ct);
 
         string? killReason = null;
         RunState killState = RunState.Killed;
@@ -227,6 +230,9 @@ public static class Runner
                 Console.Error.WriteLine($"tman: exit status of pid {record.Pid} is unknown; reporting {ExitKilled}");
             }
             Store.Save(record);
+            // after the record is final: the digest reports the outcome, so it cannot be written
+            // until the outcome is decided, and a killed run needs a digest as much as a failed one
+            log?.Complete(record);
             proc.Dispose();
         }
 
@@ -254,7 +260,8 @@ public static class Runner
         return injected is not null;
     }
 
-    static async Task PumpAsync(StreamReader reader, TextWriter sink, Action<int> onData, CancellationToken ct)
+    static async Task PumpAsync(
+        StreamReader reader, TextWriter sink, RunLog? log, Action<int> onData, CancellationToken ct)
     {
         var buf = new char[4096];
         try
@@ -264,6 +271,7 @@ public static class Runner
             {
                 onData(n);
                 sink.Write(buf.AsSpan(0, n));
+                log?.Write(buf.AsSpan(0, n));
             }
         }
         catch (OperationCanceledException) { }
