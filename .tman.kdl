@@ -1,5 +1,9 @@
+// `stall` is deliberately unset. It is a hang backstop, not a runtime budget: the scaffolded 60s
+// fired 32 times across 959 supervised runs and caught no actual hang, killing healthy work like a
+// cold `go build ./...`. Omitting it takes tman's built-in 30m, and keeps taking whatever the
+// corrected built-in is — writing 60s here is exactly what stopped this file inheriting that fix.
+// Use `max-time` for a real deadline.
 defaults {
-    stall "60s"
     max-parallel 2
 }
 
