@@ -40,8 +40,9 @@ public static class Runner
         string? alias,
         string? group = null,
         CancellationToken ct = default,
-        RunLog? log = null)
-        => RunAsync(command, args, caps, name, alias, group, ct, sampler: null, log: log);
+        RunLog? log = null,
+        string? cwd = null)
+        => RunAsync(command, args, caps, name, alias, group, ct, sampler: null, log: log, cwd: cwd);
 
     /// <summary>
     /// Test seam. <paramref name="sampler"/> stands in for the real <see cref="TreeStats.TrySample"/>
@@ -49,6 +50,7 @@ public static class Runner
     /// the monitor sees — frozen counters plus a chosen process state. Reproducing a genuine
     /// uninterruptible io wait on demand is not possible; deciding on one is what needs pinning.
     /// </summary>
+    /// <param name="cwd">Directory the child runs in; null means where tman itself is standing.</param>
     internal static async Task<int> RunAsync(
         string command,
         string[] args,
@@ -58,13 +60,16 @@ public static class Runner
         string? group,
         CancellationToken ct,
         Func<int, TreeSample?>? sampler,
-        RunLog? log = null)
+        RunLog? log = null,
+        string? cwd = null)
     {
         var id = Guid.NewGuid().ToString("N")[..12];
+        cwd = Canon.Dir(cwd ?? Directory.GetCurrentDirectory());
 
         var psi = new ProcessStartInfo
         {
             FileName = command,
+            WorkingDirectory = cwd,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
@@ -111,7 +116,7 @@ public static class Runner
             RunnerStartUtc = ProcUtil.StartTimeUtc(Environment.ProcessId) ?? DateTime.UtcNow,
             Command = command,
             Args = args,
-            Cwd = Canon.Dir(Directory.GetCurrentDirectory()),
+            Cwd = cwd,
             Group = group,
             ParentId = Environment.GetEnvironmentVariable(ParentIdEnvVar),
             StartedUtc = DateTime.UtcNow,

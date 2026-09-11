@@ -72,7 +72,7 @@ public static partial class Program
         var args = alias.Args.Concat(extraArgs).ToArray();
         var caps = Config.EffectiveCaps(alias, new Caps(), config);
         return await GatedRun(alias.Command, args, caps, alias.Name, alias.Name, replace: false,
-            RunKey.ScopeDir(config), config.Dir);
+            RunKey.ScopeDir(config), config.Dir, cwd: config.Dir);
     }
 
     static async Task<int> CmdRun(string[] argv, string? _)
@@ -129,7 +129,7 @@ public static partial class Program
             var caps = Config.EffectiveCaps(alias, CliCaps(), config);
             return await GatedRun(
                 alias.Command, args, caps, name ?? alias.Name, alias.Name, replace,
-                RunKey.ScopeDir(config), config.Dir);
+                RunKey.ScopeDir(config), config.Dir, cwd: config.Dir);
         }
 
         if (cmdArgs.Count == 0) throw new FormatException("run requires a command");
@@ -148,9 +148,14 @@ public static partial class Program
     /// scattering .tman/ dirs through arbitrary cwds — $HOME included, where it would land beside
     /// tman's own store — is not something a supervisor should do uninvited.
     /// </param>
+    /// <param name="cwd">
+    /// Where the child runs. An alias runs in its .tman.kdl directory, because its args are written
+    /// relative to that file and mean nothing from a subdirectory; a bare `tman run -- cmd` keeps
+    /// the caller's directory (null), since the user is standing where they mean to run.
+    /// </param>
     internal static async Task<int> GatedRun(
         string command, string[] args, Caps caps, string? name, string? alias, bool replace,
-        string scopeDir, string? logDir = null)
+        string scopeDir, string? logDir = null, string? cwd = null)
     {
         command = Canon.ResolveCommand(command);
         var group = RunKey.For(name, command, scopeDir);
@@ -236,7 +241,7 @@ public static partial class Program
             // the same reasoning as the slot: a nested run is the parent's work, and the parent is
             // already capturing it — a second log would carry the same output under another name
             using var log = logDir is null || nested ? null : RunLog.Open(logDir, name, alias, command);
-            return await Runner.RunAsync(command, args, caps, name, alias, group, log: log);
+            return await Runner.RunAsync(command, args, caps, name, alias, group, log: log, cwd: cwd);
         }
         finally
         {
