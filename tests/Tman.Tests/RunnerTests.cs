@@ -94,6 +94,26 @@ public class RunnerTests : IDisposable
         Assert.Equal(Runner.ExitStalled, exit);
     }
 
+    [UnixFact("needs a real, idle sleep child as the root of the sampled tree")]
+    public async Task MaxCpu_CullsOnTreeCpu_WhenTheRootIsIdle()
+    {
+        // The root is `sleep`, which burns nothing; every jiffy the sampler reports belongs to
+        // descendants it never spawned. If the cull only consulted the root's own processor time
+        // this run would end 0 after the sleep. Ten thousand jiffies a tick is 100s of cpu per
+        // second, well over --max-cpu 10 on any core count this test will meet.
+        long jiffies = 0;
+        Func<int, TreeSample?> climbing = _ =>
+            new TreeSample(CpuJiffies: jiffies += 10_000, IoBytes: 0, RssMb: 1, Procs: 4, States: "SR");
+
+        var exit = await Runner.RunAsync("sleep", new[] { "15" }, new Caps { MaxCpuPct = 10 }, null, null,
+            null, default, climbing);
+
+        Assert.Equal(Runner.ExitCulled, exit);
+        var r = Assert.Single(Store.LoadAll());
+        Assert.Equal(RunState.Culled, r.State);
+        Assert.Contains("max-cpu", r.KillReason);
+    }
+
     [UnixFact("the trickle of output comes from an sh loop")]
     public async Task PartialLineOutput_CountsAsActivity()
     {

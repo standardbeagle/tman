@@ -17,6 +17,14 @@ public static class Runner
     const int CpuBreachLimit = 3;
     const int SampleFailLimit = 5;
 
+    /// <summary>
+    /// Clock ticks per second behind <see cref="TreeSample.CpuJiffies"/>. Linux /proc reports
+    /// utime+stime in USER_HZ, fixed at 100 on every supported arch; the root-only sampler off
+    /// Linux manufactures its jiffies from TotalProcessorTime at the same rate, so one constant
+    /// serves both.
+    /// </summary>
+    const double JiffiesPerSecond = 100;
+
     public static Task<int> RunAsync(
         string command,
         string[] args,
@@ -122,6 +130,7 @@ public static class Runner
         var lastProgress = record.StartedUtc;
         var prevOutputBytes = 0L;
         var haveSample = TrySample(sampler, record.Pid, out var prevSample);
+        var prevSampleTick = prevTick;
         var sampleFailures = 0;
         var treeDiag = "unknown";
 
@@ -142,14 +151,24 @@ public static class Runner
                 record.LastOutputUtc = lastOutput;
 
                 long memMb = 0;
+                double cpuPct = 0;
                 var sampleOk = TrySample(sampler, record.Pid, out var sample);
                 if (sampleOk)
                 {
                     memMb = sample.RssMb;
-                    if (haveSample && TreeStats.ShowsProgress(prevSample, sample))
-                        progressed = true;
+                    if (haveSample)
+                    {
+                        if (TreeStats.ShowsProgress(prevSample, sample)) progressed = true;
+                        // cpu of the whole tree, over the interval the two samples actually span —
+                        // a missed tick in between is spread over its true elapsed, not the last tick
+                        var sinceSample = (now - prevSampleTick).TotalSeconds;
+                        if (sinceSample > 0)
+                            cpuPct = (sample.CpuJiffies - prevSample.CpuJiffies)
+                                / (sinceSample * JiffiesPerSecond * Environment.ProcessorCount) * 100.0;
+                    }
                     treeDiag = $"{sample.Procs} proc [{sample.States}]";
                     prevSample = sample;
+                    prevSampleTick = now;
                     haveSample = true;
                     sampleFailures = 0;
                 }
@@ -163,12 +182,14 @@ public static class Runner
                     memMb = live.WorkingSet64 / (1024 * 1024);
                 if (memMb > record.PeakMemMb) record.PeakMemMb = memMb;
 
-                double cpuPct = 0;
+                // Only when there is no tree sample to read: the root's own processor time. Off Linux
+                // the sample is root-only too (see TreeStats.CoversTree), so there --max-cpu never
+                // sees a descendant on either path — the README's platform note carries that limit.
                 try
                 {
                     var curCpu = proc.TotalProcessorTime;
                     var elapsed = (now - prevTick).TotalSeconds;
-                    if (elapsed > 0)
+                    if (!sampleOk && elapsed > 0)
                         cpuPct = (curCpu - prevCpu).TotalSeconds / (elapsed * Environment.ProcessorCount) * 100.0;
                     prevCpu = curCpu;
                 }
