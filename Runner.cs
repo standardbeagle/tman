@@ -57,6 +57,23 @@ public static class Runner
         foreach (var a in args) psi.ArgumentList.Add(a);
         psi.Environment[ParentIdEnvVar] = id;
 
+        // Ctrl+C reaches the child through the terminal at the same moment it reaches tman. Killing
+        // the tree from here and letting the loop read whatever exit code the child chose would let
+        // a runner that traps SIGINT and shuts down cleanly report 0 for work that never finished.
+        // An interrupt is a cancellation: the loop ends on it and the run is reported killed.
+        // Subscribed before the child exists: once the record is saved anyone watching the store can
+        // signal, and a SIGINT that lands before the handler is installed takes the .NET default —
+        // tman dies on the signal with nothing on stderr and no final record.
+        using var interrupt = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var interrupted = false;
+        ConsoleCancelEventHandler onCancel = (_, e) =>
+        {
+            e.Cancel = true;
+            interrupted = true;
+            interrupt.Cancel();
+        };
+        Console.CancelKeyPress += onCancel;
+
         Process proc;
         try
         {
@@ -64,6 +81,7 @@ public static class Runner
         }
         catch (Exception e)
         {
+            Console.CancelKeyPress -= onCancel;
             Console.Error.WriteLine($"tman: cannot start '{command}': {e.Message}");
             log?.Dispose();
             return ExitNotFound;
@@ -88,20 +106,6 @@ public static class Runner
             Caps = caps,
         };
         Store.Save(record);
-
-        // Ctrl+C reaches the child through the terminal at the same moment it reaches tman. Killing
-        // the tree from here and letting the loop read whatever exit code the child chose would let
-        // a runner that traps SIGINT and shuts down cleanly report 0 for work that never finished.
-        // An interrupt is a cancellation: the loop ends on it and the run is reported killed.
-        using var interrupt = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        var interrupted = false;
-        ConsoleCancelEventHandler onCancel = (_, e) =>
-        {
-            e.Cancel = true;
-            interrupted = true;
-            interrupt.Cancel();
-        };
-        Console.CancelKeyPress += onCancel;
 
         long outputBytes = 0;
         var outPump = PumpAsync(proc.StandardOutput, Console.Out, log, n => Interlocked.Add(ref outputBytes, n), ct);
