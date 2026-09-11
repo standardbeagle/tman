@@ -28,7 +28,7 @@ Works with **[Claude Code](https://standardbeagle.github.io/tman/setup/claude-co
 LLM agents start test suites and then hang, get distracted, or survive a machine suspend — leaving processes that drain your system for hours. `tman` wraps every run with hard limits and a reaper, so nothing outlives its welcome.
 
 - **wall-time + stall kills** — `--max-time 10m`, `--stall 30m` (on Linux: silent *and* idle = hung, so quiet-but-busy work like `go test` keeps running)
-- **resource culling** — opt-in `--max-mem 2g`, `--max-cpu 95` (sustained) kill the whole process tree
+- **resource culling** — opt-in `--max-mem 2g`, `--max-cpu 95` (sustained) kill the whole process tree; both are measured across the tree on Linux, so a runner that forks its workers cannot hide behind an idle root
 - **orphan reaping** — every `tman` command kills children whose runner died and prunes expired records; a lock whose runner died is taken over in place by the next run of that name
 - **dedup locks** — `--name test` refuses duplicates; `--replace` kills the old run and waits for it to hand the name back
 - **resource gating** — `--max-parallel 2` queues excess runs instead of stampeding cores
@@ -78,10 +78,10 @@ tman init --shims --gitignore
 | `tman run [flags] -- <cmd> [args]` | run a process under supervision |
 | `tman run --alias <name> [args]` / `tman <alias>` | run a `.tman.kdl` alias |
 | `tman list [--all]` | list live runs (or all records) |
-| `tman kill <id\|name\|all> [--stale-only]` | kill run(s) |
+| `tman kill <id\|name\|all>` | kill run(s); an unknown flag refuses the command with exit 127 rather than being skipped |
 | `tman clean` | run the housekeeping sweep now and report what it did |
 | `tman status [id\|name\|id-prefix] [--json]` | summary counts, or one run's detail |
-| `tman init [--shims] [--gitignore]` | scaffold `.tman.kdl` + shims (aliases it cannot detect are left commented out, so `./test` fails loudly instead of faking a pass) |
+| `tman init [--shims] [--gitignore]` | scaffold `.tman.kdl` + shims (aliases it cannot detect are left commented out, so `./test` fails loudly instead of faking a pass); `--gitignore` ignores `.tman/` and the shims, and skips an alias whose name is already a directory, so `/test` never hides a `test/` tree |
 | `tman hook pretooluse` | [Claude Code hook](#claude-code-hook): routes bare test/build commands through tman, and never blocks |
 
 ## Run flags
@@ -93,11 +93,15 @@ tman init --shims --gitignore
 | `--max-time T` | — | wall-clock limit → kill, exit 124 |
 | `--stall T` | 30m | no output **and** no cpu/io/kernel-io-wait activity for T → kill, exit 125 |
 | `--max-mem M` | — | ceiling on the process tree's RSS (MB or `2g`) → cull, exit 126 |
-| `--max-cpu P` | — | sustained CPU% → cull, exit 126 |
-| `--max-parallel N` | 2 | queue until one of the bucket's N slots can be held |
+| `--max-cpu P` | — | process-tree CPU above P% for 3 consecutive 1s ticks → cull, exit 126 |
+| `--max-parallel N` | 2 | queue until one of the bucket's N slots can be held; a run that has to wait says so once on stderr (with the queue timeout) and once more, `slot acquired after Xs`, when it gets through |
 | `--queue-timeout T` | 5m | give up waiting for a slot |
 
 Cap precedence: CLI flags > alias block > `defaults` block > built-ins.
+
+A cap flag whose value cannot be read refuses the run with exit 127 and names the flag —
+`bad --max-cpu`, `bad --max-parallel` — nothing is clamped or defaulted. `--max-cpu` takes a
+non-negative number and `--max-parallel` a non-negative integer.
 
 > **`--stall` is a hang backstop, not a runtime budget.** It answers "is this process dead?",
 > not "is this taking too long?" — use `--max-time` for the latter. A cold `go build ./...`,
@@ -122,8 +126,8 @@ Cap precedence: CLI flags > alias block > `defaults` block > built-ins.
 > only, where `/proc` exposes parent pids and per-process io counters cheaply. On macOS and
 > Windows a sample sees the supervised process alone, so work done by a descendant is invisible
 > and `--stall` falls back to output-only detection. Give quiet-but-busy runs a longer `--stall`
-> on those platforms. `--max-mem` has the same limit: it sums the tree on Linux and measures the
-> root process elsewhere.
+> on those platforms. `--max-mem` and `--max-cpu` have the same limit: they sum the tree on Linux
+> and measure the root process elsewhere.
 
 #### Which waits `--stall` protects
 
@@ -182,7 +186,10 @@ supervised tree (`TMAN_RUN_ID` set) is the same work as its parent and claims no
 
 ## .tman.kdl
 
-Resolved from the current directory upward, like `.git`:
+Resolved from the current directory upward, like `.git`. An alias (`tman test`, `tman run --alias
+test`) runs in the directory holding that `.tman.kdl`, so its args can be written relative to the
+config and the record's cwd is the config's directory. A bare `tman run -- cmd` runs where you
+are standing.
 
 ```kdl
 defaults {
@@ -191,7 +198,7 @@ defaults {
     retain "24h"      // how long finished run records are kept
     // opt-in ceilings — a build is supposed to saturate cores and can want several GB
     // max-mem 8192      // MB, summed across the process tree
-    // max-cpu 95        // percent, sustained
+    // max-cpu 95        // percent, sustained, summed across the process tree
 }
 
 alias "test" {
@@ -206,6 +213,10 @@ alias "e2e" {
     max-mem 4096
 }
 ```
+
+The parser reads a subset of KDL: nodes with string and number arguments, `//` and `/* */`
+comments, and `/-` slashdash, which comments out the next node or value. Properties
+(`max-parallel=4`) are refused with a message naming the `max-parallel 4` form to write instead.
 
 ## Run logs
 
@@ -252,7 +263,8 @@ like a clean run.
 | | |
 | --- | --- |
 | location | `.tman/` beside the governing `.tman.kdl`; `tman init --gitignore` ignores it |
-| one pair per **alias**, not per run | so the path is nameable without looking a run id up first; two concurrent runs of one alias in one directory are what the dedup lock and slots already prevent |
+| three files per **alias**, not per run | `<alias>.log`, `<alias>.fail.log`, and `<alias>.lock`, so the path is nameable without looking a run id up first. The `.lock` is what keeps two runs from writing one log: a named run is already alone by its name lock, but `max-parallel 2` admits two unnamed `tman run -- npm test` at once, so each run claims the lock while it writes. The second claimant gets no log and says so — `tman: .tman/npm.log is held by a concurrent run; this run's output is not captured`. The lock file is never removed, for the same reason as the store's locks below |
+| nested runs | a run inside a supervised tree (`TMAN_RUN_ID` set) opens no log, as it claims no slot: its parent is already capturing the same output, and a second file under another name is the one an agent reads by mistake |
 | no `.tman.kdl` | no log — an unconfigured `tman run` has no project to write into, and `.tman/` dirs scattered through arbitrary cwds is not a side effect a supervisor should have |
 | size | the full log is capped at 64 MB, after which the most recent 512 KB is kept and the cut is marked |
 | killed runs | get a digest too: the outcome line names the kill reason, and the tail is the last output before the silence |
@@ -332,7 +344,8 @@ the build.
 There is no daemon and no cron entry. Every `tman` command — including `tman list` — performs the
 same sweep before it does anything else:
 
-- kills orphans (a live child whose runner died, e.g. after a machine suspend)
+- kills orphans (a live child whose runner died, e.g. after a machine suspend); a record whose
+  child had already gone is marked `killed: child exit status unknown`, never as a clean exit
 - deletes finished records older than `retain` (default 24h), along with unreadable or
   off-schema record files that nothing else would ever revisit
 

@@ -26,10 +26,10 @@ curl -fsSL https://raw.githubusercontent.com/standardbeagle/tman/main/install.sh
   <table>
     <tr><th>command</th><th>what it does</th></tr>
     <tr><td><code>tman run [flags] -- &lt;cmd&gt; [args]</code></td><td>run a process under supervision</td></tr>
-    <tr><td><code>tman run --alias &lt;name&gt; [args]</code></td><td>run an alias from <code>.tman.kdl</code></td></tr>
+    <tr><td><code>tman run --alias &lt;name&gt; [args]</code></td><td>run an alias from <code>.tman.kdl</code>, in that file's directory</td></tr>
     <tr><td><code>tman &lt;alias&gt; [args]</code></td><td>shorthand for an alias</td></tr>
     <tr><td><code>tman list [--all]</code></td><td>list live runs (or all records)</td></tr>
-    <tr><td><code>tman kill &lt;id|name|all&gt; [--stale-only]</code></td><td>kill run(s) by id, name, or everything</td></tr>
+    <tr><td><code>tman kill &lt;id|name|all&gt;</code></td><td>kill run(s) by id, name, or everything; an unknown flag refuses the command with exit 127 rather than being skipped</td></tr>
     <tr><td><code>tman clean</code></td><td>run the housekeeping sweep now and report what it did</td></tr>
     <tr><td><code>tman status [id|name|id-prefix] [--json]</code></td><td>summary counts, or one run's detail</td></tr>
     <tr><td><code>tman init [--shims] [--gitignore]</code></td><td>scaffold <code>.tman.kdl</code> (+ repo-root shims)</td></tr>
@@ -44,11 +44,11 @@ curl -fsSL https://raw.githubusercontent.com/standardbeagle/tman/main/install.sh
     <tr><td><code>--max-time T</code></td><td>—</td><td>wall-clock limit → kill, exit 124</td></tr>
     <tr><td><code>--stall T</code></td><td>30m</td><td>no output <strong>and</strong> no cpu/io/kernel-io-wait activity for T → kill, exit 125</td></tr>
     <tr><td><code>--max-mem M</code></td><td>—</td><td>RSS above M (MB, or <code>2g</code>) → cull, exit 126</td></tr>
-    <tr><td><code>--max-cpu P</code></td><td>—</td><td>CPU above P% for 3 consecutive seconds → cull, exit 126</td></tr>
-    <tr><td><code>--max-parallel N</code></td><td>2</td><td>queue until one of the bucket's N slots can be held</td></tr>
+    <tr><td><code>--max-cpu P</code></td><td>—</td><td>process-tree CPU above P% for 3 consecutive seconds → cull, exit 126</td></tr>
+    <tr><td><code>--max-parallel N</code></td><td>2</td><td>queue until one of the bucket's N slots can be held; a run that waits says so once on stderr, and once more when it gets a slot</td></tr>
     <tr><td><code>--queue-timeout T</code></td><td>5m</td><td>give up waiting for a parallel slot</td></tr>
   </table>
-  <p>Durations accept <code>ms</code>, <code>s</code>, <code>m</code>, <code>h</code> (e.g. <code>90s</code>, <code>10m</code>). Cap precedence: CLI flags &gt; alias block &gt; <code>defaults</code> block &gt; built-ins.</p>
+  <p>Durations accept <code>ms</code>, <code>s</code>, <code>m</code>, <code>h</code> (e.g. <code>90s</code>, <code>10m</code>). Cap precedence: CLI flags &gt; alias block &gt; <code>defaults</code> block &gt; built-ins. A flag whose value cannot be read refuses the run with exit 127 and names the flag (<code>bad --max-cpu</code>); nothing is clamped or defaulted.</p>
   <p>
     <code>--max-time</code>, <code>--max-mem</code>, and <code>--max-cpu</code> have no built-in
     default. A build is supposed to saturate cores and can legitimately want several GB, so culling
@@ -61,8 +61,8 @@ curl -fsSL https://raw.githubusercontent.com/standardbeagle/tman/main/install.sh
     <code>/proc</code> exposes parent pids and per-process io counters cheaply. On macOS and Windows a
     sample sees the supervised process alone, so work done by a descendant is invisible and
     <code>--stall</code> falls back to output-only detection — give quiet-but-busy runs a longer
-    <code>--stall</code> there. <code>--max-mem</code> has the same limit: it sums the tree on Linux and
-    measures the root process elsewhere.
+    <code>--stall</code> there. <code>--max-mem</code> and <code>--max-cpu</code> have the same limit: they
+    sum the tree on Linux and measure the root process elsewhere.
   </p>
 
   <h2>buckets</h2>
@@ -133,7 +133,7 @@ curl -fsSL https://raw.githubusercontent.com/standardbeagle/tman/main/install.sh
   </p>
 
   <h2>.tman.kdl</h2>
-  <p>Resolved from the current directory upward (like <code>.git</code>). <code>tman init</code> auto-detects npm (<code>test</code>, <code>e2e</code>, <code>lint</code>, <code>integration</code>, <code>build</code>, <code>typecheck</code>), pytest, go, and make projects.</p>
+  <p>Resolved from the current directory upward (like <code>.git</code>). An alias runs in the directory holding that <code>.tman.kdl</code>, so its args can be written relative to the config; a bare <code>tman run -- cmd</code> runs where you are standing. <code>tman init</code> auto-detects npm (<code>test</code>, <code>e2e</code>, <code>lint</code>, <code>integration</code>, <code>build</code>, <code>typecheck</code>), pytest, go, and make projects.</p>
   <pre>defaults &#123;
     stall "30m"
     max-parallel 2
@@ -155,13 +155,20 @@ alias "e2e" &#123;
     max-time "30m"
     max-mem 4096
 &#125;</pre>
+  <p>
+    The parser reads a subset of KDL: nodes with string and number arguments, <code>//</code> and
+    <code>/* */</code> comments, and <code>/-</code> slashdash, which comments out the next node or value.
+    Properties (<code>max-parallel=4</code>) are refused with a message naming the
+    <code>max-parallel 4</code> form to write instead.
+  </p>
 
   <h2>shims</h2>
   <p>
     <code>tman init --shims</code> writes an executable per alias at the repo root (<code>./test</code>,
     <code>./e2e</code>, plus <code>.ps1</code> and <code>.cmd</code> on Windows — the extensionless script covers bash/zsh/fish/sh everywhere including Git Bash) that simply <code>exec tman run --alias …</code>.
     Existing muscle memory and agent habits keep working; supervision is transparent.
-    <code>--gitignore</code> appends the shims to <code>.gitignore</code>.
+    <code>--gitignore</code> appends the shims and <code>/.tman/</code> to <code>.gitignore</code>, skipping
+    any alias whose name is already a directory so <code>/test</code> never hides a <code>test/</code> tree.
     If PowerShell refuses to run the <code>.ps1</code> shims, allow local scripts once:
     <code>Set-ExecutionPolicy RemoteSigned -Scope CurrentUser</code>.
   </p>
