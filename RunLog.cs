@@ -183,19 +183,28 @@ public sealed class RunLog : IDisposable
             }
             catch (IOException) { }
             try { _writer.Dispose(); } catch (IOException) { }
-            _hold.Dispose();
         }
 
-        var passed = record.State == RunState.Exited && record.ExitCode == 0;
-        if (passed) return;
-
+        // the lock outlives the digest write: released first, a run claiming the slug in between
+        // would clear the digest and open its log, and then this one's digest would land beside a
+        // log it does not describe
         try
         {
-            File.WriteAllLines(DigestPath, Header(record).Concat(Failures.Digest(LogPath)));
-            Console.Error.WriteLine($"tman: failures logged to {DigestPath}");
+            var passed = record.State == RunState.Exited && record.ExitCode == 0;
+            if (passed) return;
+
+            try
+            {
+                File.WriteAllLines(DigestPath, Header(record).Concat(Failures.Digest(LogPath)));
+                Console.Error.WriteLine($"tman: failures logged to {DigestPath}");
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
         }
-        catch (IOException) { }
-        catch (UnauthorizedAccessException) { }
+        finally
+        {
+            _hold.Dispose();
+        }
     }
 
     IEnumerable<string> Header(RunRecord record)
