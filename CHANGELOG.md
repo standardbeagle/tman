@@ -44,6 +44,8 @@ below 1.0, behavior changes land in minor releases.
   on stderr: `tman: .tman/npm.log is held by a concurrent run; this run's output is not captured`.
   The log file itself could not be the claim: .NET maps every share mode except `FileShare.None`
   to a shared lock on Unix, and `FileShare.None` would shut out the agent tailing the log.
+  The lock is held until the digest is written, so a run claiming the slug as another finishes
+  cannot end up with that run's digest beside its own fresh log.
 - **A nested run opens no log.** A supervised process that re-enters tman already claims no slot
   because it is the same work as its parent, but it still opened its own log, so `tman test`
   running `dotnet test` through a machine-level PATH shim left `.tman/dotnet.log` beside
