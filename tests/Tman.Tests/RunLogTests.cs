@@ -14,12 +14,19 @@ public class RunLogTests : IDisposable
     readonly TempDir _home = new();
     readonly TempDir _repo = new();
     readonly string? _prevHome = Environment.GetEnvironmentVariable("TMAN_HOME");
+    readonly string? _prevParent = Environment.GetEnvironmentVariable(Runner.ParentIdEnvVar);
 
-    public RunLogTests() => Environment.SetEnvironmentVariable("TMAN_HOME", _home.Path);
+    public RunLogTests()
+    {
+        Environment.SetEnvironmentVariable("TMAN_HOME", _home.Path);
+        // the suite itself runs under tman, so without this every test here would be a nested run
+        Environment.SetEnvironmentVariable(Runner.ParentIdEnvVar, null);
+    }
 
     public void Dispose()
     {
         Environment.SetEnvironmentVariable("TMAN_HOME", _prevHome);
+        Environment.SetEnvironmentVariable(Runner.ParentIdEnvVar, _prevParent);
         _home.Dispose();
         _repo.Dispose();
     }
@@ -137,6 +144,31 @@ public class RunLogTests : IDisposable
         }
 
         Assert.False(Directory.Exists(Path.Combine(_repo.Path, RunLog.DirName)));
+    }
+
+    [UnixFact("drives a real child through sh -c")]
+    public async Task NestedRun_WritesNoLog()
+    {
+        // A supervised process that re-enters tman is the same work as its parent: it takes no
+        // slot, and it must not open a log of its own either. Observed: `tman test` runs
+        // `dotnet test`, a machine-level PATH shim re-issues that as `tman run -- dotnet ...`, and
+        // the inner run wrote .tman/dotnet.log beside the outer run's .tman/test.log — one suite,
+        // two logs, and the second one is the one an agent reads by mistake.
+        _repo.WriteFile(Config.FileName, "");
+        var logDir = Path.Combine(_repo.Path, RunLog.DirName);
+
+        // precondition: the same call, not nested, does capture — otherwise "no log" is vacuous
+        Assert.Equal(1, await Gated());
+        Assert.True(File.Exists(Path.Combine(logDir, "sh" + RunLog.LogSuffix)));
+        Directory.Delete(logDir, recursive: true);
+
+        Environment.SetEnvironmentVariable(Runner.ParentIdEnvVar, "parent-run-id");
+        Assert.Equal(1, await Gated());
+
+        Assert.False(Directory.Exists(logDir), "a nested run opened its own log");
+
+        Task<int> Gated() => Program.GatedRun("sh", new[] { "-c", "exit 1" }, new Caps(),
+            null, null, replace: false, _repo.Path, logDir: _repo.Path);
     }
 
     [Fact]

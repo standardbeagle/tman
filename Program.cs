@@ -233,7 +233,9 @@ public static partial class Program
                 }
             }
 
-            using var log = logDir is null ? null : RunLog.Open(logDir, name, alias, command);
+            // the same reasoning as the slot: a nested run is the parent's work, and the parent is
+            // already capturing it — a second log would carry the same output under another name
+            using var log = logDir is null || nested ? null : RunLog.Open(logDir, name, alias, command);
             return await Runner.RunAsync(command, args, caps, name, alias, group, log: log);
         }
         finally
