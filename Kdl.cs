@@ -76,6 +76,12 @@ public static class Kdl
                     _i++;
                     return nodes;
                 }
+                if (Cur == '/' && Peek == '-')
+                {
+                    _i += 2;
+                    ParseNode();
+                    continue;
+                }
                 nodes.Add(ParseNode());
             }
             return nodes;
@@ -107,6 +113,12 @@ public static class Kdl
                     if (Cur == '\n') _i++;
                     continue;
                 }
+                if (Cur == '/' && Peek == '-')
+                {
+                    _i += 2;
+                    ParseValue();
+                    continue;
+                }
                 node.Args.Add(ParseValue());
             }
         }
@@ -121,8 +133,12 @@ public static class Kdl
         {
             SkipInlineWsAndComments();
             if (Cur == '"') return new KdlValue(ParseString());
+            var start = _i;
             var tok = ParseBare();
             if (tok.Length == 0) throw Error("expected value");
+            var eq = tok.IndexOf('=');
+            if (eq > 0 && IsIdentifier(tok.AsSpan(0, eq)))
+                throw Error(start, $"properties (key=value) are not supported; write `{tok[..eq]} {tok[(eq + 1)..]}`");
             if (tok == "true") return new KdlValue(true);
             if (tok == "false") return new KdlValue(false);
             if (tok == "null") return new KdlValue(null);
@@ -134,6 +150,14 @@ public static class Kdl
                     System.Globalization.CultureInfo.InvariantCulture, out var d))
                 return new KdlValue(d);
             return new KdlValue(tok);
+        }
+
+        static bool IsIdentifier(ReadOnlySpan<char> s)
+        {
+            if (char.IsAsciiDigit(s[0])) return false;
+            foreach (var c in s)
+                if (!(char.IsAsciiLetterOrDigit(c) || c == '_' || c == '-')) return false;
+            return true;
         }
 
         string ParseString()
@@ -221,7 +245,9 @@ public static class Kdl
             }
         }
 
-        Exception Error(string msg) =>
-            new FormatException($"KDL parse error at offset {_i}: {msg}");
+        Exception Error(string msg) => Error(_i, msg);
+
+        static Exception Error(int offset, string msg) =>
+            new FormatException($"KDL parse error at offset {offset}: {msg}");
     }
 }

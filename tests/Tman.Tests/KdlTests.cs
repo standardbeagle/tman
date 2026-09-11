@@ -80,4 +80,49 @@ public class KdlTests
     {
         Assert.Throws<FormatException>(() => Kdl.Parse("n \"oops"));
     }
+
+    [Fact]
+    public void SlashdashNode_IsDiscardedWithItsChildren()
+    {
+        var nodes = Kdl.Parse("""
+            /-alias "x" { command "y" }
+            """);
+        Assert.Empty(nodes);
+    }
+
+    [Fact]
+    public void SlashdashNode_BetweenNodes_LeavesNeighboursIntact()
+    {
+        var nodes = Kdl.Parse("""
+            a 1
+            /-alias "x" {
+                command "y"
+            }
+            b 2
+            """);
+        Assert.Equal(new[] { "a", "b" }, nodes.Select(n => n.Name));
+    }
+
+    [Fact]
+    public void SlashdashArg_DiscardsExactlyOneValue()
+    {
+        var nodes = Kdl.Parse("n 1 /-2 3");
+        var n = Assert.Single(nodes);
+        Assert.Equal(new[] { "1", "3" }, n.Args.Select(a => a.AsString()));
+    }
+
+    [Fact]
+    public void Property_Throws_NamingProperties()
+    {
+        var ex = Assert.Throws<FormatException>(() => Kdl.Parse("caps max-parallel=4"));
+        Assert.Contains("properties", ex.Message);
+        Assert.Contains("max-parallel 4", ex.Message);
+    }
+
+    [Fact]
+    public void QuotedStringContainingEquals_IsAPlainString()
+    {
+        var nodes = Kdl.Parse("n \"a=b\"");
+        Assert.Equal("a=b", nodes[0].Arg(0));
+    }
 }
