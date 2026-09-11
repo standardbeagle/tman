@@ -51,6 +51,9 @@ public static class Shim
         if (!existing.Contains("/" + RunLog.DirName + "/")) toAdd.Add("/" + RunLog.DirName + "/");
         foreach (var name in aliasNames)
         {
+            // Generate skips a shim whose name is already a directory, so ignoring "/name" here
+            // would hide that directory's contents instead of a shim that never existed.
+            if (Directory.Exists(Path.Combine(dir, name))) continue;
             var entry = "/" + name;
             if (!existing.Contains(entry)) toAdd.Add(entry);
             var ps1Entry = "/" + name + ".ps1";

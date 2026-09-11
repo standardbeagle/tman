@@ -95,4 +95,20 @@ public class ShimGitignoreTests
         Assert.Contains("/test", text);
         Assert.Contains("/lint", text);
     }
+
+    [Fact]
+    public void AliasNamedLikeAnExistingDirectory_IsNotIgnored()
+    {
+        using var dir = new TempDir();
+        dir.Mkdir("test");
+
+        Assert.True(Shim.AppendGitignore(dir.Path, new[] { "test", "lint" }));
+
+        var lines = File.ReadAllLines(System.IO.Path.Combine(dir.Path, ".gitignore"));
+        Assert.DoesNotContain("/test", lines);
+        Assert.DoesNotContain("/test.ps1", lines);
+        Assert.DoesNotContain("/test.cmd", lines);
+        Assert.Contains("/.tman/", lines);
+        Assert.Contains("/lint", lines);
+    }
 }
