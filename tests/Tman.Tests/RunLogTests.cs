@@ -171,6 +171,48 @@ public class RunLogTests : IDisposable
             null, null, replace: false, _repo.Path, logDir: _repo.Path);
     }
 
+    /// <summary>
+    /// Named runs cannot share a log because the name lock admits one of them. Unnamed runs have
+    /// no such lock: `max-parallel 2` admits two `tman run -- npm test` at once, both keyed to
+    /// npm.log, and the second one truncated the first one's capture mid-run. The log itself has
+    /// to be the claim — the second opener gets no log and says so, rather than a file two runs
+    /// are interleaving into.
+    /// </summary>
+    [Fact]
+    public void ASecondOpenOfTheSameLog_GetsNullAndSaysSo_WhileReadersStillRead()
+    {
+        using var held = RunLog.Open(_repo.Path, null, null, "npm");
+        Assert.NotNull(held);
+        held.Write("captured by the first run");
+
+        var err = new StringWriter();
+        var prevErr = Console.Error;
+        Console.SetError(err);
+        RunLog? second;
+        try
+        {
+            second = RunLog.Open(_repo.Path, null, null, "npm");
+        }
+        finally
+        {
+            Console.SetError(prevErr);
+        }
+
+        Assert.Null(second);
+        Assert.Contains("npm.log is held by a concurrent run", err.ToString());
+        Assert.Contains("not captured", err.ToString());
+        // a held log is still a readable one: an agent tailing the run must not be locked out.
+        // What it sees is whatever the writer has flushed so far — the hold is the point here
+        var readWhileHeld = File.ReadAllText(held.LogPath);
+        Assert.NotNull(readWhileHeld);
+
+        held.Dispose();
+        Assert.Contains("captured by the first run", File.ReadAllText(held.LogPath));
+        // and the hold ends with the run: the next run of the key opens it again
+        using var next = RunLog.Open(_repo.Path, null, null, "npm");
+        Assert.NotNull(next);
+    }
+
     [Fact]
     public void OpenOnAnUnwritableParent_ReturnsNullRatherThanThrowing()
     {

@@ -9,9 +9,10 @@ namespace Tman;
 /// the tests, then compacted or handed off its context, had no way back to WHICH test failed
 /// except re-running the whole suite — the single most repeated waste in a supervised loop.
 ///
-/// Two files per alias:
+/// Three files per alias:
 ///   <c>&lt;slug&gt;.log</c>       full combined stdout+stderr of the last run
 ///   <c>&lt;slug&gt;.fail.log</c>  the failure digest, present only when that run failed
+///   <c>&lt;slug&gt;.lock</c>      held while the log is open; stamped with the holder's pid
 ///
 /// Both are cleared at the START of every run, and the digest is deleted when a run passes. That
 /// is the load-bearing property: a digest on disk always describes the most recent run of that
@@ -19,15 +20,24 @@ namespace Tman;
 /// because it reads exactly like a real one.
 ///
 /// Named per alias, not per run id: an agent must be able to name the path without first looking
-/// up which run it wants. Two concurrent runs of the SAME alias in the same directory would
-/// otherwise share a file, which is why they cannot happen — that is the bucket the dedup name lock
-/// and the parallel slots are keyed on.
+/// up which run it wants. Two concurrent runs of the same key in the same directory would then
+/// share a file, so they are excluded: a named run by the dedup name lock, and an unnamed run —
+/// which has no name lock, and which `max-parallel` admits beside another of the same command —
+/// by the lock file held here for as long as the log is open. The second opener gets no log and
+/// says so on stderr; the alternative was a run that truncated the other's capture mid-run.
+///
+/// The log itself cannot be that claim. On Unix .NET maps every share mode but
+/// <see cref="FileShare.None"/> to a shared flock, so <see cref="FileShare.Read"/> excludes
+/// nothing, and <see cref="FileShare.None"/> also turns away every .NET reader for the life of
+/// the run — the agent tailing the log is exactly who that would lock out.
 /// </summary>
 public sealed class RunLog : IDisposable
 {
     public const string DirName = ".tman";
     public const string LogSuffix = ".log";
     public const string DigestSuffix = ".fail.log";
+    /// <summary>Held exclusively for the life of the log; never unlinked, see <see cref="Store"/>.</summary>
+    public const string LockSuffix = ".lock";
 
     /// <summary>Ceiling on the full log. Past it output goes to a tail ring, flushed at close.</summary>
     public const long MaxBytes = 64L * 1024 * 1024;
@@ -35,6 +45,7 @@ public sealed class RunLog : IDisposable
 
     readonly object _gate = new();
     readonly StreamWriter _writer;
+    readonly FileStream _hold;
     readonly char[] _tail = new char[TailChars];
     int _tailStart, _tailLen;
     long _written;
@@ -44,17 +55,20 @@ public sealed class RunLog : IDisposable
     public string LogPath { get; }
     public string DigestPath { get; }
 
-    RunLog(StreamWriter writer, string logPath, string digestPath)
+    RunLog(StreamWriter writer, FileStream hold, string logPath, string digestPath)
     {
         _writer = writer;
+        _hold = hold;
         LogPath = logPath;
         DigestPath = digestPath;
     }
 
     /// <summary>
     /// Opens the log pair for a run, truncating both. Returns null when the directory cannot be
-    /// written — a read-only checkout, a permission-denied mount. Capturing output is a
-    /// convenience; failing a run because the convenience is unavailable is not acceptable.
+    /// written — a read-only checkout, a permission-denied mount — or when another run of the same
+    /// key holds the log, which is reported on stderr. Capturing output is a convenience; failing a
+    /// run because the convenience is unavailable is not acceptable, and neither is two runs
+    /// writing one file.
     /// </summary>
     public static RunLog? Open(string scopeDir, string? name, string? alias, string command)
     {
@@ -66,13 +80,29 @@ public sealed class RunLog : IDisposable
             var logPath = Path.Combine(dir, slug + LogSuffix);
             var digestPath = Path.Combine(dir, slug + DigestSuffix);
 
-            // Deleted, not left to be overwritten: between here and the run finishing, the honest
-            // state is "this run has produced no verdict yet", not the previous run's verdict.
-            try { File.Delete(digestPath); } catch (IOException) { }
+            var hold = Store.TryClaimLock(Path.Combine(dir, slug + LockSuffix));
+            if (hold is null)
+            {
+                Console.Error.WriteLine(
+                    $"tman: {Path.Combine(DirName, slug + LogSuffix)} is held by a concurrent run; this run's output is not captured");
+                return null;
+            }
 
-            var writer = new StreamWriter(
-                new FileStream(logPath, FileMode.Create, FileAccess.Write, FileShare.ReadWrite));
-            return new RunLog(writer, logPath, digestPath);
+            try
+            {
+                // Deleted, not left to be overwritten: between here and the run finishing, the
+                // honest state is "this run has produced no verdict yet", not the previous run's.
+                try { File.Delete(digestPath); } catch (IOException) { }
+
+                var writer = new StreamWriter(
+                    new FileStream(logPath, FileMode.Create, FileAccess.Write, FileShare.ReadWrite));
+                return new RunLog(writer, hold, logPath, digestPath);
+            }
+            catch
+            {
+                hold.Dispose();
+                throw;
+            }
         }
         catch (IOException) { return null; }
         catch (UnauthorizedAccessException) { return null; }
@@ -153,6 +183,7 @@ public sealed class RunLog : IDisposable
             }
             catch (IOException) { }
             try { _writer.Dispose(); } catch (IOException) { }
+            _hold.Dispose();
         }
 
         var passed = record.State == RunState.Exited && record.ExitCode == 0;
@@ -189,6 +220,7 @@ public sealed class RunLog : IDisposable
             if (_closed) return;
             _closed = true;
             try { _writer.Dispose(); } catch (IOException) { }
+            _hold.Dispose();
         }
     }
 }

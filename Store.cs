@@ -297,9 +297,10 @@ public static class Store
     /// <summary>
     /// Takes a lock file exclusively, creating it when absent and taking it over in place when its
     /// previous holder is gone. The single claim both the dedup name and the parallel slots are
-    /// taken with — see the ownership invariant above.
+    /// taken with, and the one a <see cref="RunLog"/> holds its file with — see the ownership
+    /// invariant above.
     /// </summary>
-    static FileStream? TryClaimLock(string path)
+    internal static FileStream? TryClaimLock(string path)
     {
         FileStream file;
         // tman never removes a lock file, but a user or another tool can, and a claim that raced
