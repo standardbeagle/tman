@@ -13,6 +13,13 @@ public static class Runner
     /// <summary>Set on supervised children so a nested tman knows which run launched it.</summary>
     public const string ParentIdEnvVar = "TMAN_RUN_ID";
 
+    /// <summary>
+    /// KillReason for a child that is gone without anyone reading its exit status. The one outcome
+    /// tman may never paper over with a 0: a run it cannot vouch for is reported killed, whether the
+    /// Runner lost the status or the Reaper found the child dead after the fact.
+    /// </summary>
+    public const string ExitStatusUnknownReason = "child exit status unknown";
+
     const int MonitorTickMs = 1000;
     const int CpuBreachLimit = 3;
     const int SampleFailLimit = 5;
@@ -248,10 +255,8 @@ public static class Runner
             }
             else
             {
-                // the one outcome tman may never paper over with a 0: a child whose exit status it
-                // did not get is a run it cannot vouch for
                 record.State = RunState.Killed;
-                record.KillReason = "child exit status unknown";
+                record.KillReason = ExitStatusUnknownReason;
                 Console.Error.WriteLine($"tman: exit status of pid {record.Pid} is unknown; reporting {ExitKilled}");
             }
             Store.Save(record);

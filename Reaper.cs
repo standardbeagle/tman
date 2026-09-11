@@ -30,7 +30,10 @@ public static class Reaper
 
             if (!childAlive)
             {
-                r.State = RunState.Exited;
+                // the child is gone and its runner never wrote the outcome: nobody read the exit
+                // status, so this is the same unknown the Runner reports, not a finished run
+                r.State = RunState.Killed;
+                r.KillReason = Runner.ExitStatusUnknownReason;
                 r.HeartbeatUtc = DateTime.UtcNow;
                 Store.Save(r);
                 continue;

@@ -72,6 +72,29 @@ public class ReaperTests : IDisposable
     }
 
     [Fact]
+    public void ReapOrphans_RecordsADeadChildAsKilled_NotAsAZeroExit()
+    {
+        // A Running record whose child is gone but whose runner never wrote the outcome. Nobody
+        // saw that child's exit status, so the record may not read as a finished run: Exited with
+        // no code is what the digest and `tman show` print as a pass. The Runner names this case
+        // "child exit status unknown"; the Reaper must say the same thing.
+        var r = Finished("deadchild001", TimeSpan.FromMinutes(1));
+        r.State = RunState.Running;
+        r.Pid = 2147483646;
+        r.ChildStartUtc = DateTime.UtcNow;
+        r.RunnerPid = Environment.ProcessId;
+        Store.Save(r);
+
+        var reaped = Reaper.ReapOrphans(quiet: true);
+
+        Assert.Empty(reaped);
+        var saved = Store.Load("deadchild001")!;
+        Assert.Equal(RunState.Killed, saved.State);
+        Assert.Equal(Runner.ExitStatusUnknownReason, saved.KillReason);
+        Assert.Null(saved.ExitCode);
+    }
+
+    [Fact]
     public void Resolve_FindsFinishedRunsByName()
     {
         var r = Finished("aaaabbbbcccc", TimeSpan.FromMinutes(1));
