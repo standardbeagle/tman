@@ -294,8 +294,11 @@ public static partial class Program
     static int CmdKill(string[] argv)
     {
         Reaper.Sweep(Retention(), quiet: true);
-        var staleOnly = argv.Contains("--stale-only");
-        var targets = argv.Where(a => !a.StartsWith("--")).ToList();
+        // a flag that is not understood is refused, not skipped: `kill all --<something>` read as
+        // `kill all` kills the runs the caller was trying to exclude
+        var unknown = argv.FirstOrDefault(a => a.StartsWith("--"));
+        if (unknown is not null) throw new FormatException($"unknown flag {unknown}");
+        var targets = argv.ToList();
         if (targets.Count == 0) throw new FormatException("kill requires <id|name|all>");
 
         var killed = 0;
@@ -307,8 +310,6 @@ public static partial class Program
 
             foreach (var r in matches)
             {
-                if (staleOnly && r.RunnerPid > 0 && ProcUtil.IsAlive(r.RunnerPid))
-                    continue;
                 Console.WriteLine($"tman: killing {r.Name ?? r.Id} (pid {r.Pid})");
                 ProcUtil.KillTree(r.Pid);
                 r.State = RunState.Killed;
@@ -464,7 +465,7 @@ public static partial class Program
           tman run --alias <name> [args...]       run a .tman.kdl alias
           tman <alias> [args...]                  shorthand for an alias
           tman list|ls [--all]                    list live (or all) runs
-          tman kill <id|name|all> [--stale-only]  kill run(s)
+          tman kill <id|name|all>                 kill run(s)
           tman clean                              reap orphans, prune old records
           tman status [id|name] [--json]          summary or run detail
           tman init [--shims] [--gitignore]       scaffold .tman.kdl (+ shim scripts)
