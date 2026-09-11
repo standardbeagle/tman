@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tman"
-version = "0.3.0"
+version = "0.4.0"
 description = "Supervised process/test runner — caps, culls, and reaps runaway processes from AI coding agents (native binary)"
 readme = "README.md"
 license = { text = "MIT" }
