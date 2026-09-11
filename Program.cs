@@ -109,8 +109,16 @@ public static partial class Program
                     case "--max-time": capMaxTime = Caps.ParseDuration(Next()) ?? throw new FormatException("bad --max-time"); break;
                     case "--stall": capStall = Caps.ParseDuration(Next()) ?? throw new FormatException("bad --stall"); break;
                     case "--max-mem": capMaxMemMb = Caps.ParseMemMb(Next()) ?? throw new FormatException("bad --max-mem"); break;
-                    case "--max-cpu": capMaxCpuPct = double.Parse(Next(), System.Globalization.CultureInfo.InvariantCulture); break;
-                    case "--max-parallel": capMaxParallel = int.Parse(Next()); break;
+                    case "--max-cpu":
+                        capMaxCpuPct = double.TryParse(Next(), System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture, out var cpu) && cpu >= 0
+                            ? cpu : throw new FormatException("bad --max-cpu");
+                        break;
+                    case "--max-parallel":
+                        capMaxParallel = int.TryParse(Next(), System.Globalization.NumberStyles.None,
+                            System.Globalization.CultureInfo.InvariantCulture, out var par)
+                            ? par : throw new FormatException("bad --max-parallel");
+                        break;
                     case "--queue-timeout": capQueueTimeout = Caps.ParseDuration(Next()) ?? throw new FormatException("bad --queue-timeout"); break;
                     default: throw new FormatException($"unknown flag {a}");
                 }

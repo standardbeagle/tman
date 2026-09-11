@@ -60,6 +60,43 @@ public class ProgramCapsTests : IDisposable
         return Assert.Single(Store.LoadAll()).Caps;
     }
 
+    /// <summary>
+    /// A bad flag value is reported the way every other bad flag value is: "bad --flag" on stderr
+    /// and exit 127. --max-cpu and --max-parallel went through bare double.Parse / int.Parse, so
+    /// a typo got the framework's message and an oversized number got a stack trace.
+    /// </summary>
+    static async Task<(int Exit, string Err)> RunWithFlag(string flag, string value)
+    {
+        var err = new StringWriter();
+        var prevErr = Console.Error;
+        Console.SetError(err);
+        try
+        {
+            var exit = await Program.Main(new[] { "run", flag, value, "--", "true" });
+            return (exit, err.ToString());
+        }
+        finally
+        {
+            Console.SetError(prevErr);
+        }
+    }
+
+    [Theory]
+    [InlineData("--max-cpu", "abc")]
+    [InlineData("--max-cpu", "")]
+    [InlineData("--max-parallel", "abc")]
+    [InlineData("--max-parallel", "1.5")]
+    [InlineData("--max-parallel", "-1")]
+    [InlineData("--max-parallel", "99999999999")]
+    public async Task ABadCapValue_IsRefusedByName(string flag, string value)
+    {
+        var (exit, err) = await RunWithFlag(flag, value);
+
+        Assert.Equal(Runner.ExitNotFound, exit);
+        Assert.Contains($"bad {flag}", err);
+        Assert.Empty(Store.LoadAll());
+    }
+
     [UnixFact("drives `tman run -- sleep 0`, and there is no sleep binary to supervise off Unix")]
     public async Task StallFlag_OverridesTheDefaultsBlock()
     {
