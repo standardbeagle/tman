@@ -187,6 +187,40 @@ public class SlotGateTests : IDisposable
         Store.ReleaseLock(held);
     }
 
+    /// <summary>
+    /// A queued run says once that it is waiting and once that it got through. It used to say
+    /// "slots busy, waiting..." on every poll — 150 lines over a full five-minute queue, drowning
+    /// the one line that mattered, the child's own output, once the run started.
+    /// </summary>
+    [UnixFact("gates real runs of the sleep binary")]
+    public async Task AQueuedRun_ReportsTheWaitOnceAndTheAdmissionOnce()
+    {
+        var held = Store.TryAcquireSlot(Group("sleep"), 1);
+        Assert.NotNull(held);
+        var caps = new Caps { MaxParallel = 1, QueueTimeout = TimeSpan.FromSeconds(30) };
+        var err = new StringWriter();
+        var prevErr = Console.Error;
+        Console.SetError(err);
+        try
+        {
+            // released after the run has polled more than once: a message printed per poll would
+            // then appear twice, and one printed on the first wait only appears once
+            var release = Task.Delay(3500).ContinueWith(_ => Store.ReleaseLock(held));
+            Assert.Equal(0, await Sleep("0", caps));
+            await release;
+        }
+        finally
+        {
+            Console.SetError(prevErr);
+        }
+
+        var lines = err.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        var waiting = lines.Where(l => l.Contains("slot", StringComparison.Ordinal) && l.Contains("busy", StringComparison.Ordinal)).ToList();
+        Assert.Single(waiting);
+        Assert.Contains("queue-timeout 30s", waiting[0]);
+        Assert.Single(lines.Where(l => l.Contains("slot acquired after", StringComparison.Ordinal)));
+    }
+
     [UnixFact("races real runs of the sleep binary")]
     public async Task RunsStartedAtTheSameInstant_NeverExceedMaxParallel()
     {

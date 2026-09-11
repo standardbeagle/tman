@@ -229,7 +229,9 @@ public static partial class Program
         {
             if (!nested && caps.MaxParallel is { } maxPar && maxPar > 0)
             {
-                var deadline = DateTime.UtcNow + queueTimeout;
+                var queuedAt = DateTime.UtcNow;
+                var deadline = queuedAt + queueTimeout;
+                var waited = false;
                 // holding the slot file, rather than counting live runs, is what admits this run:
                 // every racer would read the same count, but only one can create the same file
                 while ((slotFile = Store.TryAcquireSlot(group, maxPar)) is null)
@@ -241,9 +243,16 @@ public static partial class Program
                         Console.Error.WriteLine($"tman: queue timeout waiting for a '{group}' slot (all {maxPar} busy)");
                         return Runner.ExitKilled;
                     }
-                    Console.Error.WriteLine($"tman: all {maxPar} '{group}' slots busy, waiting...");
+                    // said once: a line per poll was 150 lines over a full queue, burying the child's
+                    // own output once it started
+                    if (!waited)
+                        Console.Error.WriteLine(
+                            $"tman: all {maxPar} '{group}' slots busy, waiting (queue-timeout {Canon.Duration(queueTimeout)})...");
+                    waited = true;
                     await Task.Delay(2000);
                 }
+                if (waited)
+                    Console.Error.WriteLine($"tman: slot acquired after {Canon.Duration(DateTime.UtcNow - queuedAt)}");
             }
 
             // the same reasoning as the slot: a nested run is the parent's work, and the parent is
