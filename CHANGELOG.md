@@ -6,6 +6,73 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). While the version is
 below 1.0, behavior changes land in minor releases.
 
+## [Unreleased]
+
+### Changed
+- **`--max-cpu` meters the whole process tree on Linux.** The cull read the root process's own
+  CPU time, so a test runner that forks workers, or a shell wrapping the real job, could pin every
+  core while the root slept at 0% and the cap never fired. It now uses the same tree sample the
+  stall check already takes, over the interval the two samples span. Off Linux the sample is
+  root-only, as the platform note states, so nothing changes there.
+- **An alias runs in its `.tman.kdl` directory.** `tman test` from a subdirectory found the root
+  config by walking up and then ran the alias where the caller stood, so an alias written relative
+  to the config — `dotnet test tests/X.csproj` — failed with a path error from anywhere but the
+  root. `tman <alias>` and `tman run --alias` now set the child's working directory to the config's
+  directory and record it as the run's cwd. A bare `tman run -- cmd` keeps the caller's directory.
+- **`tman kill --stale-only` is removed, and `kill` refuses a flag it does not know.** The flag
+  could never match: every command sweeps before it acts, so a run whose runner is dead is reaped
+  before `kill` sees the live set. Removing it alone was not safe, because `kill` skipped any `--`
+  argument it did not understand — `kill all --stale-only` read as `kill all` and killed the runs
+  the caller was trying to keep. An unknown flag now refuses the command with exit 127, as `run`
+  already does.
+- **A queued run says once that it is waiting, and once when it got through.** It printed
+  `slots busy, waiting...` on every 2s poll — 150 identical lines over a full five-minute queue,
+  burying the child's own output once it started. It now prints one line when it first has to wait,
+  carrying the queue timeout, and `slot acquired after Xs` when a slot is taken. A run that never
+  waits prints nothing.
+- **The reaper records a vanished child as killed, not exited.** A `running` record whose child was
+  gone by the time the sweep found it was marked `exited` with no exit code, which the digest and
+  `tman status` read as a normal finish. It is now `killed` with `child exit status unknown`, the
+  same state and reason the runner writes for a child it cannot vouch for.
+
+### Fixed
+- **Two unnamed runs of one command no longer write one log.** A named run is alone by its name
+  lock, but `max-parallel 2` admits two `tman run -- npm test` at once, both keyed to
+  `.tman/npm.log`, and the second open truncated the first run's capture while it was still being
+  written. The log is now claimed through a sidecar `.tman/<alias>.lock`, held the same way as the
+  store's locks and never removed for the same reason. The second claimant gets no log and says so
+  on stderr: `tman: .tman/npm.log is held by a concurrent run; this run's output is not captured`.
+  The log file itself could not be the claim: .NET maps every share mode except `FileShare.None`
+  to a shared lock on Unix, and `FileShare.None` would shut out the agent tailing the log.
+- **A nested run opens no log.** A supervised process that re-enters tman already claims no slot
+  because it is the same work as its parent, but it still opened its own log, so `tman test`
+  running `dotnet test` through a machine-level PATH shim left `.tman/dotnet.log` beside
+  `.tman/test.log` — the same output twice, and the second file is the one an agent reads by
+  mistake.
+- **The interrupt handler is installed before the child exists.** The run record was saved before
+  `Ctrl+C` was subscribed, so a signal landing in that window took the .NET default: tman died with
+  exit 130, an empty stderr, and a record left `running`. The 0.4.0 fix for interrupted runs
+  covered every moment after that window; this closes the window itself.
+- **A bad `--max-cpu` or `--max-parallel` is reported by name.** Every other cap flag answered a bad
+  value with `bad --flag` and exit 127; these two went through bare parsing, so a typo got the
+  framework's generic message and an oversized `--max-parallel` got an unhandled overflow with a
+  stack trace. Both now say `bad --max-cpu` / `bad --max-parallel` and exit 127. `--max-cpu` must be
+  a non-negative number and `--max-parallel` a non-negative integer; a negative count of slots is
+  not a count of slots.
+- **`tman init --gitignore` no longer ignores a directory that shares an alias name.** The shim
+  generator already skips a shim when a directory of that name exists, but the gitignore step still
+  wrote `/name` for every alias, so any repo with a `test/` or `build/` directory had that whole
+  tree silently dropped from git. The entry (and its `.ps1` / `.cmd` companions) is now skipped
+  whenever the alias name is an existing directory; `/.tman/` is unaffected.
+- **The KDL parser honours `/-` slashdash and refuses `key=value` properties.** `/-node ...`
+  became a node literally named `/-node`, so a slashdash-commented alias stayed live, and
+  `max-parallel=4` became a bare string argument nothing read, so a cap in property form was
+  ignored without a signal. Slashdash now discards the next node or value as the spec intends, and
+  a bare `ident=value` token fails with a message naming the `key value` form to write instead.
+- **The npm, PyPI, and PSGallery manifests say 0.4.0.** They still said 0.3.0 after the tag moved;
+  the publish workflow overwrites the field at release time, so nothing shipped wrong, but the
+  checked-in files should state the version actually released.
+
 ## [0.4.0] - 2026-08-23
 
 ### Added
@@ -235,6 +302,7 @@ reaping; dedup locks; parallel gating; `.tman.kdl` folder aliases with repo-root
 binaries for linux-x64, linux-arm64, win-x64, osx-arm64, and osx-x64, distributed via npm, PyPI,
 PSGallery, and a shell installer.
 
+[Unreleased]: https://github.com/standardbeagle/tman/compare/v0.4.0...HEAD
 [0.4.0]: https://github.com/standardbeagle/tman/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/standardbeagle/tman/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/standardbeagle/tman/compare/v0.1.4...v0.2.0
