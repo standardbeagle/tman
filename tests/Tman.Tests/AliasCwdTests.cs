@@ -69,7 +69,7 @@ public class AliasCwdTests : IDisposable
         var (printed, recorded) = await RanIn("where");
 
         Assert.Equal(Canon.Dir(RealPath(_repo.Path)), printed);
-        Assert.Equal(Canon.Dir(_repo.Path), recorded);
+        Assert.Equal(Canon.Dir(RealPath(_repo.Path)), recorded);
     }
 
     [UnixFact("drives a real child through sh -c")]
@@ -78,7 +78,7 @@ public class AliasCwdTests : IDisposable
         var (printed, recorded) = await RanIn("run", "--alias", "where");
 
         Assert.Equal(Canon.Dir(RealPath(_repo.Path)), printed);
-        Assert.Equal(Canon.Dir(_repo.Path), recorded);
+        Assert.Equal(Canon.Dir(RealPath(_repo.Path)), recorded);
     }
 
     [UnixFact("drives a real child through sh -c")]
@@ -87,10 +87,13 @@ public class AliasCwdTests : IDisposable
         var (printed, recorded) = await RanIn("run", "--", "sh", "-c", "pwd -P");
 
         Assert.Equal(Canon.Dir(RealPath(_sub)), printed);
-        Assert.Equal(Canon.Dir(_sub), recorded);
+        Assert.Equal(Canon.Dir(RealPath(_sub)), recorded);
     }
 
-    /// <summary>`pwd -P` resolves symlinks; the temp root may be one.</summary>
+    /// <summary>
+    /// The physical path. `pwd -P` resolves symlinks, and so does getcwd, which the recorded cwd comes
+    /// from; the temp root may be one — macOS's /var is a link to /private/var.
+    /// </summary>
     static string RealPath(string path)
     {
         var dir = new DirectoryInfo(path);
