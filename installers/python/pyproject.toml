@@ -22,8 +22,8 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://standardbeagle.github.io/tman/"
-Documentation = "https://standardbeagle.github.io/tman/docs/"
+Homepage = "https://dev.standardbeagle.com/tman/"
+Documentation = "https://dev.standardbeagle.com/tman/docs/"
 Source = "https://github.com/standardbeagle/tman"
 Changelog = "https://github.com/standardbeagle/tman/blob/main/CHANGELOG.md"
 Issues = "https://github.com/standardbeagle/tman/issues"

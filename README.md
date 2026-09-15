@@ -4,17 +4,17 @@
 
 [![npm](https://img.shields.io/npm/v/@standardbeagle/tman?color=58d68d&label=npm)](https://www.npmjs.com/package/@standardbeagle/tman)
 [![license](https://img.shields.io/badge/license-MIT-58d68d)](LICENSE)
-[![docs](https://img.shields.io/badge/docs-standardbeagle.github.io%2Ftman-58d68d)](https://standardbeagle.github.io/tman/)
+[![docs](https://img.shields.io/badge/docs-dev.standardbeagle.com%2Ftman-58d68d)](https://dev.standardbeagle.com/tman/)
 
-Works with **[Claude Code](https://standardbeagle.github.io/tman/setup/claude-code/)**,
-**[Codex CLI](https://standardbeagle.github.io/tman/setup/codex-cli/)**,
-**[Gemini CLI](https://standardbeagle.github.io/tman/setup/gemini-cli/)**,
-**[Cursor](https://standardbeagle.github.io/tman/setup/cursor/)**,
-**[Antigravity](https://standardbeagle.github.io/tman/setup/antigravity/)**,
-**[Kimi](https://standardbeagle.github.io/tman/setup/kimi/)**,
-**[opencode](https://standardbeagle.github.io/tman/setup/opencode/)**,
-**[Copilot CLI](https://standardbeagle.github.io/tman/setup/copilot-cli/)**, and
-**[anything else that shells out](https://standardbeagle.github.io/tman/setup/other-agents/)**.
+Works with **[Claude Code](https://dev.standardbeagle.com/tman/setup/claude-code/)**,
+**[Codex CLI](https://dev.standardbeagle.com/tman/setup/codex-cli/)**,
+**[Gemini CLI](https://dev.standardbeagle.com/tman/setup/gemini-cli/)**,
+**[Cursor](https://dev.standardbeagle.com/tman/setup/cursor/)**,
+**[Antigravity](https://dev.standardbeagle.com/tman/setup/antigravity/)**,
+**[Kimi](https://dev.standardbeagle.com/tman/setup/kimi/)**,
+**[opencode](https://dev.standardbeagle.com/tman/setup/opencode/)**,
+**[Copilot CLI](https://dev.standardbeagle.com/tman/setup/copilot-cli/)**, and
+**[anything else that shells out](https://dev.standardbeagle.com/tman/setup/other-agents/)**.
 
 ![demo](assets/demo.gif)
 
@@ -277,18 +277,18 @@ exact config, a runnable adapter where one is needed, and a smoke test:
 
 | agent | integration | hook event | guide |
 | --- | --- | --- | --- |
-| Claude Code | rewrites | `PreToolUse` | [setup/claude-code](https://standardbeagle.github.io/tman/setup/claude-code/) |
-| Codex CLI | rewrites | `PreToolUse` | [setup/codex-cli](https://standardbeagle.github.io/tman/setup/codex-cli/) |
-| Gemini CLI | rewrites | `BeforeTool` | [setup/gemini-cli](https://standardbeagle.github.io/tman/setup/gemini-cli/) |
-| opencode | rewrites | `tool.execute.before` | [setup/opencode](https://standardbeagle.github.io/tman/setup/opencode/) |
-| Cursor | gates | `beforeShellExecution` | [setup/cursor](https://standardbeagle.github.io/tman/setup/cursor/) |
-| Antigravity | gates | `PreToolUse` | [setup/antigravity](https://standardbeagle.github.io/tman/setup/antigravity/) |
-| Kimi Code CLI | gates | `PreToolUse` | [setup/kimi](https://standardbeagle.github.io/tman/setup/kimi/) |
-| GitHub Copilot CLI | gates | `preToolUse` | [setup/copilot-cli](https://standardbeagle.github.io/tman/setup/copilot-cli/) |
-| Aider, Amp, Windsurf, Zed, CI | shims only | — | [setup/other-agents](https://standardbeagle.github.io/tman/setup/other-agents/) |
+| Claude Code | rewrites | `PreToolUse` | [setup/claude-code](https://dev.standardbeagle.com/tman/setup/claude-code/) |
+| Codex CLI | rewrites | `PreToolUse` | [setup/codex-cli](https://dev.standardbeagle.com/tman/setup/codex-cli/) |
+| Gemini CLI | rewrites | `BeforeTool` | [setup/gemini-cli](https://dev.standardbeagle.com/tman/setup/gemini-cli/) |
+| opencode | rewrites | `tool.execute.before` | [setup/opencode](https://dev.standardbeagle.com/tman/setup/opencode/) |
+| Cursor | gates | `beforeShellExecution` | [setup/cursor](https://dev.standardbeagle.com/tman/setup/cursor/) |
+| Antigravity | gates | `PreToolUse` | [setup/antigravity](https://dev.standardbeagle.com/tman/setup/antigravity/) |
+| Kimi Code CLI | gates | `PreToolUse` | [setup/kimi](https://dev.standardbeagle.com/tman/setup/kimi/) |
+| GitHub Copilot CLI | gates | `preToolUse` | [setup/copilot-cli](https://dev.standardbeagle.com/tman/setup/copilot-cli/) |
+| Aider, Amp, Windsurf, Zed, CI | shims only | — | [setup/other-agents](https://dev.standardbeagle.com/tman/setup/other-agents/) |
 
 Per-command caps — what `--stall` should be for a cold Rust build, why a dev server must never get
-a `--max-time` — are in the [tuning guides](https://standardbeagle.github.io/tman/tuning/), one page
+a `--max-time` — are in the [tuning guides](https://dev.standardbeagle.com/tman/tuning/), one page
 per test, lint, and build tool.
 
 ### Claude Code hook
@@ -397,9 +397,9 @@ fine — but it will not be the thing keeping that fleet in order.
 
 ## Docs + demo
 
-- **Full docs** — https://standardbeagle.github.io/tman/docs/
-- **AI agent setup** — https://standardbeagle.github.io/tman/setup/ (Claude Code, Codex, Gemini CLI, Cursor, Antigravity, Kimi, opencode, Copilot CLI)
-- **Per-tool tuning** — https://standardbeagle.github.io/tman/tuning/ (Vitest, Jest, pytest, go test, dotnet test, cargo, Playwright, RSpec, Gradle, ESLint, Ruff, Biome, golangci-lint, tsc, Vite)
+- **Full docs** — https://dev.standardbeagle.com/tman/docs/
+- **AI agent setup** — https://dev.standardbeagle.com/tman/setup/ (Claude Code, Codex, Gemini CLI, Cursor, Antigravity, Kimi, opencode, Copilot CLI)
+- **Per-tool tuning** — https://dev.standardbeagle.com/tman/tuning/ (Vitest, Jest, pytest, go test, dotnet test, cargo, Playwright, RSpec, Gradle, ESLint, Ruff, Biome, golangci-lint, tsc, Vite)
 - **Release history** — [CHANGELOG.md](CHANGELOG.md)
 
 Regenerate the demo gif with `vhs assets/demo.tape`.
