@@ -7,8 +7,8 @@
  * a site ends up shipping `//` in its canonical tags and losing the page from the index.
  */
 
-/** Origin the site is served from, without a trailing slash. Must match `site` in astro.config. */
-export const ORIGIN = "https://standardbeagle.github.io";
+/** Origin the site is served from, without a trailing slash — `site` in astro.config. */
+export const ORIGIN = import.meta.env.SITE.replace(/\/+$/, "");
 
 /** Deploy base path, normalised to no trailing slash (`/tman`, or `""` at a domain root). */
 export const BASE = import.meta.env.BASE_URL.replace(/\/+$/, "");

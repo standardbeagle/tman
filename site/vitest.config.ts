@@ -15,8 +15,8 @@ export default getViteConfig({
   test: {
     include: ["tests/**/*.test.ts"],
     // vitest assembles its own import.meta.env and defaults BASE_URL to "/", ignoring both `base`
-    // above and a `define`. `env` is the hook it does read — the value still comes from the Astro
-    // config, so there is no second place to update.
-    env: { BASE_URL: astroConfig.base },
+    // above and a `define`, and leaves SITE unset. `env` is the hook it does read — both values
+    // still come from the Astro config, so there is no second place to update.
+    env: { BASE_URL: astroConfig.base, SITE: astroConfig.site },
   },
 });

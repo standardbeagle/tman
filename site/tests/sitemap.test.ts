@@ -54,10 +54,10 @@ describe("renderSitemap", () => {
     const urls = urlsOf(xml);
     expect(urls).toHaveLength(2);
     expect(urls[0]).toEqual({
-      loc: "https://standardbeagle.github.io/tman/",
+      loc: "https://dev.standardbeagle.com/tman/",
       lastmod: "2026-07-31T10:01:16-05:00",
     });
-    expect(urls[1].loc).toBe("https://standardbeagle.github.io/tman/docs/");
+    expect(urls[1].loc).toBe("https://dev.standardbeagle.com/tman/docs/");
   });
 
   it("omits lastmod entirely when a date is unknown, keeping the URL", () => {
@@ -67,7 +67,7 @@ describe("renderSitemap", () => {
     expect(xml).not.toContain("lastmod");
     const urls = urlsOf(xml);
     expect(urls).toHaveLength(1);
-    expect(urls[0].loc).toBe("https://standardbeagle.github.io/tman/docs/");
+    expect(urls[0].loc).toBe("https://dev.standardbeagle.com/tman/docs/");
   });
 
   it("stays valid XML when some entries are dated and others are not", () => {
