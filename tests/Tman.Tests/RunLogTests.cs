@@ -202,9 +202,11 @@ public class RunLogTests : IDisposable
         Assert.Contains("npm.log is held by a concurrent run", err.ToString());
         Assert.Contains("not captured", err.ToString());
         // a held log is still a readable one: an agent tailing the run must not be locked out.
-        // What it sees is whatever the writer has flushed so far — the hold is the point here
-        var readWhileHeld = File.ReadAllText(held.LogPath);
-        Assert.NotNull(readWhileHeld);
+        // What it sees is whatever the writer has flushed so far — the hold is the point here. The
+        // reader shares write access, as a tail must: File.ReadAllText shares only Read, which
+        // Windows refuses while the run's writer has the file open
+        using (var tailer = new StreamReader(new FileStream(held.LogPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite)))
+            Assert.NotNull(tailer.ReadToEnd());
 
         held.Dispose();
         Assert.Contains("captured by the first run", File.ReadAllText(held.LogPath));
