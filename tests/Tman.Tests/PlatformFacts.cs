@@ -24,6 +24,15 @@ public sealed class UnixFactAttribute : FactAttribute
     }
 }
 
+/// <summary>A fact whose subject only exists on Windows. The mirror of <see cref="UnixFactAttribute"/>.</summary>
+public sealed class WindowsFactAttribute : FactAttribute
+{
+    public WindowsFactAttribute(string because)
+    {
+        if (!OperatingSystem.IsWindows()) Skip = because;
+    }
+}
+
 /// <summary>
 /// A fact that needs tman to see the whole process tree, which is <see cref="TreeStats.CoversTree"/>
 /// — the same predicate production consults, so the gate cannot drift from what it guards. That

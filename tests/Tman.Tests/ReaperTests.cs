@@ -94,6 +94,28 @@ public class ReaperTests : IDisposable
         Assert.Null(saved.ExitCode);
     }
 
+    [WindowsFact("pid 4 is the Windows System process")]
+    public void ReapOrphans_SurvivesARecycledPidItCannotOpen()
+    {
+        // A recorded pid recycled by a process we may not open (pid 4, System, denies an
+        // unelevated caller). HasExited threw Win32Exception out of IsAlive, and since every tman
+        // command sweeps first, every command crashed until the record expired. It must read as
+        // alive-but-not-ours: never reaped, never killed, and the record settled.
+        var r = Finished("deniedpid001", TimeSpan.FromMinutes(1));
+        r.State = RunState.Running;
+        r.Pid = 4;
+        r.ChildStartUtc = DateTime.UtcNow;
+        r.RunnerPid = 4;
+        r.RunnerStartUtc = DateTime.UtcNow;
+        Store.Save(r);
+
+        Assert.True(ProcUtil.IsAlive(4));
+        var reaped = Reaper.ReapOrphans(quiet: true);
+
+        Assert.Empty(reaped);
+        Assert.Equal(RunState.Killed, Store.Load("deniedpid001")!.State);
+    }
+
     [Fact]
     public void Resolve_FindsFinishedRunsByName()
     {
