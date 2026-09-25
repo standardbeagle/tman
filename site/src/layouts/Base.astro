@@ -81,6 +81,9 @@ const graph: Record<string, unknown>[] = [
     <meta name="description" content={description} />
     <link rel="canonical" href={canonical} />
     <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1" />
+    <!-- Google-only removal (2026-09-25): the whole dev host is disowned from
+         Google; Bingbot ignores the googlebot name and indexes normally. -->
+    <meta name="googlebot" content="noindex, follow" />
     <meta name="color-scheme" content="dark light" />
     <meta name="theme-color" content="#0d1117" />
 
