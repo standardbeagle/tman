@@ -31,6 +31,7 @@ curl -fsSL https://raw.githubusercontent.com/standardbeagle/tman/main/install.sh
     <tr><td><code>tman list [--all]</code></td><td>list live runs (or all records)</td></tr>
     <tr><td><code>tman kill &lt;id|name|all&gt;</code></td><td>kill run(s) by id, name, or everything; an unknown flag refuses the command with exit 127 rather than being skipped</td></tr>
     <tr><td><code>tman clean</code></td><td>run the housekeeping sweep now and report what it did</td></tr>
+    <tr><td><code>tman probe --pid &lt;pid&gt; [--start-ticks &lt;ticks&gt;]</code></td><td>is a pid you recorded earlier still that process? exit 0 mine, 1 gone, 3 not mine (pid reused); read-only, <code>--start-ticks</code> is Linux only</td></tr>
     <tr><td><code>tman status [id|name|id-prefix] [--json]</code></td><td>summary counts, or one run's detail</td></tr>
     <tr><td><code>tman init [--shims] [--gitignore]</code></td><td>scaffold <code>.tman.kdl</code> (+ repo-root shims)</td></tr>
     <tr><td><code>tman hook pretooluse</code></td><td>Claude Code PreToolUse hook: route bare test/build commands through tman</td></tr>

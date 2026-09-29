@@ -82,6 +82,7 @@ tman init --shims --gitignore
 | `tman clean` | run the housekeeping sweep now and report what it did |
 | `tman status [id\|name\|id-prefix] [--json]` | summary counts, or one run's detail |
 | `tman init [--shims] [--gitignore]` | scaffold `.tman.kdl` + shims (aliases it cannot detect are left commented out, so `./test` fails loudly instead of faking a pass); `--gitignore` ignores `.tman/` and the shims, and skips an alias whose name is already a directory, so `/test` never hides a `test/` tree |
+| `tman probe --pid <pid> [--start-ticks <ticks>]` | is a pid you recorded earlier still that process? Exit 0 mine, 1 gone, 3 not mine (the OS reused the pid); the verdict is also printed. `--start-ticks` is Linux only, read from field 22 of `/proc/<pid>/stat` when you record the pid; without it a live pid counts as yours. Read-only: it never signals or kills, and does not run the housekeeping sweep |
 | `tman hook pretooluse` | [Claude Code hook](#claude-code-hook): routes bare test/build commands through tman, and never blocks |
 
 ## Run flags

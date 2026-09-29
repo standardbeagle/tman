@@ -46,6 +46,27 @@ public static class ProcUtil
     }
 
     /// <summary>
+    /// The identity question for a caller that recorded a pid of its own, not a tman run record: it
+    /// has no wall-clock start to offer, so liveness is read straight from the process. With
+    /// <paramref name="startTicks"/> (Linux only) a pid the OS reused reads as
+    /// <see cref="ProcessIdentity.NotMine"/>; without them a live pid is taken to be the caller's.
+    /// Read-only — it never signals or kills.
+    /// </summary>
+    public static ProcessIdentity Probe(int pid, long? startTicks)
+    {
+        if (pid <= 0) return ProcessIdentity.Gone;
+        try
+        {
+            if (OperatingSystem.IsLinux())
+                return VerdictFromStat(ReadStat(pid), startTicks) ?? ProcessIdentity.Mine;
+            using var p = Process.GetProcessById(pid);
+            if (OperatingSystem.IsWindows() && !Pin(p)) return ProcessIdentity.Gone;
+            return p.HasExited ? ProcessIdentity.Gone : ProcessIdentity.Mine;
+        }
+        catch (Exception e) when (VerdictFor(e) is { } verdict) { return verdict; }
+    }
+
+    /// <summary>
     /// Opens the pid and identifies it through that same object, which is returned only when it is
     /// <see cref="ProcessIdentity.Mine"/>, for the caller to act on and dispose. On Windows the object
     /// holds a handle taken before the check, and Windows never hands a pid out again while a handle

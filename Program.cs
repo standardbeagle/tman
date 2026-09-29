@@ -36,6 +36,7 @@ public static partial class Program
                 case "status": return CmdStatus(rest);
                 case "init": return CmdInit(rest);
                 case "hook": return CmdHook(rest);
+                case "probe": return CmdProbe(rest);
                 case "--help" or "-h" or "help": PrintUsage(); return 0;
                 case "--version" or "-v": Console.WriteLine($"tman {Version}"); return 0;
                 default:
@@ -317,6 +318,39 @@ public static partial class Program
         return 0;
     }
 
+    /// <summary>
+    /// `tman probe`: the verdict is the exit code (0 mine, 1 gone, 3 not mine) and is also printed,
+    /// so a caller can branch on either. It does not sweep — it is a read-only question and must not
+    /// change what it is asked about.
+    /// </summary>
+    static int CmdProbe(string[] argv)
+    {
+        const string usage = "usage: tman probe --pid <pid> [--start-ticks <ticks>]";
+        int? pid = null;
+        long? ticks = null;
+        for (var i = 0; i < argv.Length; i++)
+        {
+            string Next() => ++i < argv.Length ? argv[i] : throw new FormatException(usage);
+            switch (argv[i])
+            {
+                case "--pid": pid = int.TryParse(Next(), out var p) ? p : throw new FormatException(usage); break;
+                case "--start-ticks": ticks = long.TryParse(Next(), out var t) ? t : throw new FormatException(usage); break;
+                default: throw new FormatException(usage);
+            }
+        }
+        if (pid is null) throw new FormatException(usage);
+        if (ticks is not null && !OperatingSystem.IsLinux())
+            throw new FormatException("--start-ticks is recorded on Linux only; probe by --pid alone here");
+
+        var verdict = ProcUtil.Probe(pid.Value, ticks);
+        switch (verdict)
+        {
+            case ProcessIdentity.Mine: Console.WriteLine("mine"); return 0;
+            case ProcessIdentity.Gone: Console.WriteLine("gone"); return 1;
+            default: Console.WriteLine("not-mine"); return 3;
+        }
+    }
+
     static int CmdKill(string[] argv)
     {
         Reaper.Sweep(Retention(), quiet: true);
@@ -501,6 +535,9 @@ public static partial class Program
           tman clean                              reap orphans, prune old records
           tman status [id|name] [--json]          summary or run detail
           tman init [--shims] [--gitignore]       scaffold .tman.kdl (+ shim scripts)
+          tman probe --pid <pid> [--start-ticks <ticks>]
+                                                  is a recorded pid still that process? exit 0
+                                                  mine, 1 gone, 3 not mine (pid reused); read-only
           tman hook pretooluse                    Claude Code PreToolUse hook: reads the tool call
                                                   on stdin, re-issues bare test/build commands
                                                   through tman, never blocks
