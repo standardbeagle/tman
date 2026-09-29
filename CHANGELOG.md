@@ -8,6 +8,18 @@ below 1.0, behavior changes land in minor releases.
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-09-28
+
+### Added
+- **`tman probe --pid <pid> [--start-ticks <ticks>]`.** Answers, for a caller that recorded a pid of
+  its own, whether that pid is still the process it recorded. It uses the identity check the
+  reaper applies to run records: on Linux a zombie is gone and a start-tick mismatch means the OS
+  reused the pid. The verdict is the exit code — 0 mine, 1 gone, 3 not mine, 127 bad arguments —
+  and is printed too. A caller that keeps step records can now discount a dead or pid-reused step
+  instead of blocking a restart on it. Read-only: no signal, no kill, no housekeeping sweep. Without
+  `--start-ticks` a live pid counts as yours, and off Linux `--start-ticks` is refused because no
+  ticks are recorded there.
+
 ## [0.5.0] - 2026-09-24
 
 ### Changed
@@ -327,7 +339,8 @@ reaping; dedup locks; parallel gating; `.tman.kdl` folder aliases with repo-root
 binaries for linux-x64, linux-arm64, win-x64, osx-arm64, and osx-x64, distributed via npm, PyPI,
 PSGallery, and a shell installer.
 
-[Unreleased]: https://github.com/standardbeagle/tman/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/standardbeagle/tman/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/standardbeagle/tman/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/standardbeagle/tman/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/standardbeagle/tman/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/standardbeagle/tman/compare/v0.2.0...v0.3.0
