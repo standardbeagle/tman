@@ -90,7 +90,37 @@ public static class Store
 
     static string RunsDir => Path.Combine(Root, "runs");
 
-    public static void EnsureDirs() => Directory.CreateDirectory(RunsDir);
+    public static void EnsureDirs() => Writing(() => Directory.CreateDirectory(RunsDir));
+
+    /// <summary>
+    /// A write to the store, with a refusal from the filesystem — read-only mount, permissions, no
+    /// space, a home that is not a directory — reported as <see cref="Unwritable"/>. Only IO faults
+    /// map; anything else is a defect and propagates as it is.
+    /// </summary>
+    static T Writing<T>(Func<T> write)
+    {
+        try { return write(); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { throw Unwritable(e); }
+    }
+
+    static void Writing(Action write) => Writing(() => { write(); return 0; });
+
+    /// <summary>
+    /// tman does not run a command it cannot record: an unrecorded run is one nothing can list,
+    /// reap, or cap across processes. The everyday cause is an agent sandbox that mounts $HOME
+    /// read-only, so that is the first thing the instructions name.
+    /// </summary>
+    internal static KnownError Unwritable(Exception cause) => new(
+        $"cannot write its run store {RunsDir}: {cause.Message}",
+        [
+            "tman records every run there to enforce caps and reap orphans, and will not run a command it cannot record.",
+            $"Inside an agent sandbox, make {Root} writable. For Codex, use a permissions profile that",
+            $"extends \":workspace\" and adds \"{Root}\" = \"write\" under its filesystem table.",
+            "Otherwise check the directory's owner, permissions, and free space, or set TMAN_HOME to a",
+            "writable directory that every tman on this machine shares.",
+        ],
+        Runner.ExitStoreUnwritable,
+        cause);
 
     static string PathFor(string id) => Path.Combine(RunsDir, id + ".json");
 
@@ -137,7 +167,7 @@ public static class Store
     /// the same destination at that instant — is a thing rename(2) never reports and MoveFileEx
     /// always might, so on any POSIX host it can only be driven from here.
     /// </summary>
-    internal static void Save(RunRecord r, Action<string, string> rename)
+    internal static void Save(RunRecord r, Action<string, string> rename) => Writing(() =>
     {
         EnsureDirs();
         // one record has two writers — its own runner, and the housekeeping sweep any other tman
@@ -159,7 +189,7 @@ public static class Store
                 Thread.Sleep(attempt);
             }
         }
-    }
+    });
 
     /// <summary>
     /// True when the only thing left that can have refused the rename is another writer holding the
@@ -284,7 +314,7 @@ public static class Store
     public static FileStream? TryAcquireNameLock(string runKey)
     {
         EnsureDirs();
-        return TryClaimLock(LockPathFor(runKey));
+        return Writing(() => TryClaimLock(LockPathFor(runKey)));
     }
 
     /// <summary>
@@ -298,7 +328,7 @@ public static class Store
         EnsureDirs();
         for (var slot = 0; slot < maxParallel; slot++)
         {
-            var claimed = TryClaimLock(SlotPathFor(runKey, slot));
+            var claimed = Writing(() => TryClaimLock(SlotPathFor(runKey, slot)));
             if (claimed is not null) return claimed;
         }
         return null;

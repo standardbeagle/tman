@@ -19,14 +19,13 @@ public static partial class Program
 
     public static async Task<int> Main(string[] argv)
     {
-        Store.EnsureDirs();
-        if (argv.Length == 0) { PrintUsage(); return 0; }
-
-        var cmd = argv[0];
-        var rest = argv[1..];
-
         try
         {
+            Store.EnsureDirs();
+            if (argv.Length == 0) { PrintUsage(); return 0; }
+
+            var cmd = argv[0];
+            var rest = argv[1..];
             switch (cmd)
             {
                 case "run": return await CmdRun(rest, null);
@@ -54,6 +53,12 @@ public static partial class Program
         {
             Console.Error.WriteLine($"tman: {e.Message}");
             return Runner.ExitNotFound;
+        }
+        catch (KnownError e)
+        {
+            Console.Error.WriteLine($"tman: {e.Message}");
+            foreach (var line in e.Instructions) Console.Error.WriteLine($"  {line}");
+            return e.ExitCode;
         }
     }
 

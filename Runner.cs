@@ -10,6 +10,8 @@ public static class Runner
     public const int ExitCulled = 126;
     public const int ExitNotFound = 127;
     public const int ExitKilled = 130;
+    /// <summary>sysexits EX_IOERR: tman's run store cannot be written, so no run can be recorded.</summary>
+    public const int ExitStoreUnwritable = 74;
 
     // How long a failed start-stamp read waits to confirm the child really exited. A zombie reaps
     // at once; the bound only matters for a child that is somehow still running, which re-throws.
@@ -145,7 +147,18 @@ public static class Runner
             LastOutputUtc = DateTime.UtcNow,
             Caps = caps,
         };
-        Store.Save(record);
+        try { Store.Save(record); }
+        // a run tman cannot record is one nothing can list, reap, or kill by name, so it is not left
+        // running behind the error that reports it
+        catch (KnownError)
+        {
+            Console.CancelKeyPress -= onCancel;
+            ProcUtil.KillTree(proc);
+            proc.WaitForExit();
+            proc.Dispose();
+            log?.Dispose();
+            throw;
+        }
 
         long outputBytes = 0;
         var outPump = PumpAsync(proc.StandardOutput, Console.Out, log, n => Interlocked.Add(ref outputBytes, n), ct);
@@ -166,6 +179,7 @@ public static class Runner
         var prevSampleTick = prevTick;
         var sampleFailures = 0;
         var treeDiag = "unknown";
+        KnownError? unrecorded = null;
 
         try
         {
@@ -252,7 +266,13 @@ public static class Runner
                 }
 
                 if (killReason is not null) break;
-                Store.Save(record);
+                try { Store.Save(record); }
+                catch (KnownError e)
+                {
+                    unrecorded = e;
+                    killReason = "tman can no longer record this run";
+                    break;
+                }
             }
         }
         finally
@@ -300,6 +320,7 @@ public static class Runner
             log?.Complete(record);
             proc.Dispose();
         }
+        if (unrecorded is not null) throw unrecorded;
 
         return record.State switch
         {

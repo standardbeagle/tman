@@ -152,7 +152,8 @@ public class SlotGateTests : IDisposable
         Store.EnsureDirs();
         File.CreateSymbolicLink(Store.SlotPathFor(group, 0), Path.Combine(_home.Path, "gone", "slot"));
 
-        Assert.Throws<FileNotFoundException>(() => Store.TryAcquireSlot(group, 1));
+        var e = Assert.Throws<KnownError>(() => Store.TryAcquireSlot(group, 1));
+        Assert.IsType<FileNotFoundException>(e.InnerException);
     }
 
     [Fact]

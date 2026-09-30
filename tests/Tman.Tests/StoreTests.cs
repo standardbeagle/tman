@@ -183,11 +183,12 @@ public class StoreTests : IDisposable
         var r = NewRecord("contended002");
         var renames = 0;
 
-        Assert.Throws<IOException>(() => Store.Save(r, (_, _) =>
+        var e = Assert.Throws<KnownError>(() => Store.Save(r, (_, _) =>
         {
             renames++;
             throw TheDestinationIsHeldByAnotherWriter();
         }));
+        Assert.IsAssignableFrom<IOException>(e.InnerException);
 
         // bounded on both sides: a transient that is never waited out is the win-x64 defect, and a
         // wait with no end is a run that hangs instead of reporting a fault it cannot recover from
@@ -202,12 +203,13 @@ public class StoreTests : IDisposable
         var renames = 0;
 
         // nothing about this settles by waiting — only a destination held by another writer does
-        Assert.Throws<FileNotFoundException>(() => Store.Save(r, (from, _) =>
+        var e = Assert.Throws<KnownError>(() => Store.Save(r, (from, _) =>
         {
             renames++;
             File.Delete(from);
             throw new FileNotFoundException("gone", from);
         }));
+        Assert.IsType<FileNotFoundException>(e.InnerException);
 
         Assert.Equal(1, renames);
     }
