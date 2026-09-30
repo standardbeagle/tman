@@ -87,11 +87,14 @@ public class ProbeTests : IDisposable
     [Fact]
     public async Task Command_ExitedChildAtItsRecordedStart_IsGone()
     {
+        // alive until its start is read: a child that exits on its own can be reaped, and its /proc
+        // entry gone, before StartStamp gets there
         using var child = Process.Start(OperatingSystem.IsWindows()
             ? new ProcessStartInfo("cmd", "/c exit 0") { CreateNoWindow = true }
-            : new ProcessStartInfo("true"))!;
+            : new ProcessStartInfo("sleep", "30"))!;
         var ticks = OperatingSystem.IsLinux() ? ProcUtil.StartStamp(child).Ticks : null;
         var pid = child.Id;
+        if (!OperatingSystem.IsWindows()) child.Kill();
         child.WaitForExit();
         var argv = ticks is { } t
             ? new[] { "probe", "--pid", pid.ToString(), "--start-ticks", t.ToString() }
