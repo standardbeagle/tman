@@ -376,6 +376,7 @@ record written by a different tman version is discarded rather than half-read.
 | code | meaning |
 | --- | --- |
 | 0–n | child's own exit code |
+| 74 | the run store (`~/.tman`, or `TMAN_HOME`) cannot be written; the message says how to fix it |
 | 124 | timed out (`--max-time`) |
 | 125 | stalled (`--stall`) |
 | 126 | culled (`--max-mem` / `--max-cpu`) |

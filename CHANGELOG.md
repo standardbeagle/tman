@@ -8,6 +8,16 @@ below 1.0, behavior changes land in minor releases.
 
 ## [Unreleased]
 
+### Fixed
+- **A run store tman cannot write is explained, not a crash.** When `~/.tman` (or `TMAN_HOME`) was
+  read-only, full, or not a directory — the everyday case is an agent sandbox such as Codex's
+  workspace sandbox, which mounts `$HOME` read-only — every supervised command aborted with an
+  unhandled-exception stack trace and exit 134 before the command ran. tman now prints what it
+  could not write, why it needs to, and how to fix it (make the directory writable in the sandbox,
+  or point `TMAN_HOME` at a shared writable directory), and exits 74. A child already started when
+  its record could not be written, or whose store went away mid-run, is killed rather than left
+  running where nothing can list, reap, or cap it.
+
 ## [0.5.1] - 2026-09-28
 
 ### Added
