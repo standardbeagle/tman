@@ -8,6 +8,16 @@ below 1.0, behavior changes land in minor releases.
 
 ## [Unreleased]
 
+### Added
+- **A run waiting for a slot is visible and cancellable.** A run queued behind `max-parallel` had
+  no record while it waited: `tman list` could not show it, `tman kill` could not reach it, and
+  Ctrl+C ended it with no trace. A waiter whose first claim fails is now recorded as `queued`,
+  under the id it will run with. `tman list` shows it with pid `-`, and `tman status` shows how
+  long it has waited. `tman kill` and Ctrl+C end it as `killed` with exit 130, and its child is
+  never started. A queue timeout is recorded the same way, with the reason. A waiter whose tman
+  died is closed out by the next sweep. A run admitted at once writes no queued record, so the
+  uncontended path costs nothing extra.
+
 ### Fixed
 - **A run store tman cannot write is explained, not a crash.** When `~/.tman` (or `TMAN_HOME`) was
   read-only, full, or not a directory — the everyday case is an agent sandbox such as Codex's

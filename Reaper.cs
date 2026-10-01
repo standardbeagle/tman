@@ -22,10 +22,20 @@ public static class Reaper
         var reaped = new List<RunRecord>();
         foreach (var r in Store.LoadAll())
         {
-            if (r.State != RunState.Running) continue;
+            if (r.IsFinished) continue;
             // a live runner owns its record, outcome included: it saves the copy it holds every
             // tick, so an outcome written here would be lost to its next save
             if (RunnerAlive(r)) continue;
+
+            if (r.State == RunState.Queued)
+            {
+                // a waiter has no child: nothing to kill, only an outcome nobody else will write
+                r.State = RunState.Killed;
+                r.KillReason = Store.ReadKillRequest(r.Id) ?? "runner died while queued";
+                r.HeartbeatUtc = DateTime.UtcNow;
+                Store.Save(r);
+                continue;
+            }
 
             if (ProcUtil.Identify(r.Pid, r.ChildStartUtc, r.ChildStartTicks) != ProcessIdentity.Mine)
             {
@@ -53,7 +63,7 @@ public static class Reaper
         return reaped;
     }
 
-    static bool RunnerAlive(RunRecord r) =>
+    internal static bool RunnerAlive(RunRecord r) =>
         r.RunnerPid == Environment.ProcessId
         || ProcUtil.Identify(r.RunnerPid, r.RunnerStartUtc, r.RunnerStartTicks) == ProcessIdentity.Mine;
 
@@ -75,14 +85,19 @@ public static class Reaper
         return true;
     }
 
+    /// <summary>Runs that are under way: a running child that is still the one recorded, or a waiter still waiting.</summary>
     public static List<RunRecord> LiveRuns()
     {
         var live = new List<RunRecord>();
         foreach (var r in Store.LoadAll())
         {
-            if (r.State != RunState.Running) continue;
-            if (ProcUtil.Identify(r.Pid, r.ChildStartUtc, r.ChildStartTicks) == ProcessIdentity.Mine)
-                live.Add(r);
+            var alive = r.State switch
+            {
+                RunState.Running => ProcUtil.Identify(r.Pid, r.ChildStartUtc, r.ChildStartTicks) == ProcessIdentity.Mine,
+                RunState.Queued => RunnerAlive(r),
+                _ => false,
+            };
+            if (alive) live.Add(r);
         }
         return live;
     }
@@ -98,7 +113,7 @@ public static class Reaper
     public static RunRecord? Resolve(string nameOrId) =>
         Store.LoadAll()
             .Where(r => r.Matches(nameOrId))
-            .OrderByDescending(r => r.State == RunState.Running)
+            .OrderByDescending(r => !r.IsFinished)
             .ThenByDescending(r => r.StartedUtc)
             .FirstOrDefault();
 

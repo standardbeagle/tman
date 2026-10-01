@@ -82,7 +82,8 @@ public class InterruptTests : IDisposable
         while (DateTime.UtcNow < deadline)
         {
             Assert.False(tman.HasExited, "tman exited before it recorded a child run");
-            var live = Store.LoadAll().FirstOrDefault(r => !r.IsFinished);
+            // a running child only: a queued run has pid 0, and `kill -INT 0` is the whole process group
+            var live = Store.LoadAll().FirstOrDefault(r => r is { State: RunState.Running, Pid: > 0 });
             if (live is not null) return live.Pid;
             await Task.Delay(50);
         }

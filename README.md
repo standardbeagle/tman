@@ -77,8 +77,8 @@ tman init --shims --gitignore
 | --- | --- |
 | `tman run [flags] -- <cmd> [args]` | run a process under supervision |
 | `tman run --alias <name> [args]` / `tman <alias>` | run a `.tman.kdl` alias |
-| `tman list [--all]` | list live runs (or all records) |
-| `tman kill <id\|name\|all>` | kill run(s); the killed run ends `killed: killed via tman kill` and its `tman` exits 130. `kill` leaves the reason in `~/.tman/runs/<id>.kill` before killing, and the run's own runner writes the outcome from it, so the two never race to save the record. An unknown flag refuses the command with exit 127 rather than being skipped; exits 1 when part of a run's tree could not be killed |
+| `tman list [--all]` | list live runs — running, and queued for a slot (pid `-`) — or all records |
+| `tman kill <id\|name\|all>` | kill run(s), queued ones included — a queued run ends without ever starting its child; the killed run ends `killed: killed via tman kill` and its `tman` exits 130. `kill` leaves the reason in `~/.tman/runs/<id>.kill` before killing, and the run's own runner writes the outcome from it, so the two never race to save the record. An unknown flag refuses the command with exit 127 rather than being skipped; exits 1 when part of a run's tree could not be killed |
 | `tman clean` | run the housekeeping sweep now and report what it did |
 | `tman status [id\|name\|id-prefix] [--json]` | summary counts, or one run's detail |
 | `tman init [--shims] [--gitignore]` | scaffold `.tman.kdl` + shims (aliases it cannot detect are left commented out, so `./test` fails loudly instead of faking a pass); shims are named after the aliases in the config on disk, so re-running it in a project that already has one shims that file's aliases; `--gitignore` ignores `.tman/` and the shims, and skips an alias whose name is already a directory, so `/test` never hides a `test/` tree |
@@ -95,8 +95,8 @@ tman init --shims --gitignore
 | `--stall T` | 30m | no output **and** no cpu/io/kernel-io-wait activity for T → kill, exit 125 |
 | `--max-mem M` | — | ceiling on the process tree's RSS (MB or `2g`) → cull, exit 126 |
 | `--max-cpu P` | — | process-tree CPU above P% for 3 consecutive 1s ticks → cull, exit 126 |
-| `--max-parallel N` | 2 | queue until one of the bucket's N slots can be held; a run that has to wait says so once on stderr (with the queue timeout) and once more, `slot acquired after Xs`, when it gets through |
-| `--queue-timeout T` | 5m | give up waiting for a slot |
+| `--max-parallel N` | 2 | queue until one of the bucket's N slots can be held; a run that has to wait says so once on stderr (with the queue timeout) and once more, `slot acquired after Xs`, when it gets through. While it waits it is a `queued` run: `tman list` shows it, `tman kill` ends it, and Ctrl+C ends it as `killed: cancelled while queued` with exit 130 — none of which starts its child |
+| `--queue-timeout T` | 5m | give up waiting for a slot; the run is recorded `killed: queue timeout …` and exits 130 |
 
 Cap precedence: CLI flags > alias block > `defaults` block > built-ins.
 

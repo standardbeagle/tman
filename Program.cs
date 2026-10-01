@@ -214,44 +214,35 @@ public static partial class Program
             }
         }
 
+        // Ctrl+C while queued ends the run as cancelled, with a record saying so, instead of killing
+        // tman where it stands. Held through the run too, so there is no instant between admission
+        // and the runner's own handler where the signal takes the .NET default.
+        using var interrupt = new CancellationTokenSource();
+        ConsoleCancelEventHandler onCancel = (_, e) =>
+        {
+            e.Cancel = true;
+            interrupt.Cancel();
+        };
+        Console.CancelKeyPress += onCancel;
+
+        var record = Runner.NewRecord(command, args, caps, name, alias, group, cwd);
         FileStream? slotFile = null;
         try
         {
             if (!nested && caps.MaxParallel is { } maxPar && maxPar > 0)
             {
-                // monotonic, as every deadline is: a wall clock stepped mid-wait ends it early or never
-                var queuedAt = Stopwatch.GetTimestamp();
-                var waited = false;
-                // holding the slot file, rather than counting live runs, is what admits this run:
-                // every racer would read the same count, but only one can create the same file
-                while ((slotFile = Store.TryAcquireSlot(group, maxPar)) is null)
-                {
-                    // a slot may be held by a live child whose runner died; free it before waiting on it
-                    Reaper.ReapOrphans(quiet: true);
-                    if (Stopwatch.GetElapsedTime(queuedAt) >= queueTimeout)
-                    {
-                        Console.Error.WriteLine($"tman: queue timeout waiting for a '{group}' slot (all {maxPar} busy)");
-                        return Runner.ExitKilled;
-                    }
-                    // said once: a line per poll was 150 lines over a full queue, burying the child's
-                    // own output once it started
-                    if (!waited)
-                        Console.Error.WriteLine(
-                            $"tman: all {maxPar} '{group}' slots busy, waiting (queue-timeout {Canon.Duration(queueTimeout)})...");
-                    waited = true;
-                    await Task.Delay(2000);
-                }
-                if (waited)
-                    Console.Error.WriteLine($"tman: slot acquired after {Canon.Duration(Stopwatch.GetElapsedTime(queuedAt))}");
+                slotFile = await Admission.ClaimBucketSlot(record, maxPar, queueTimeout, interrupt.Token);
+                if (slotFile is null) return Runner.ExitKilled;
             }
 
             // the same reasoning as the slot: a nested run is the parent's work, and the parent is
             // already capturing it — a second log would carry the same output under another name
             using var log = logDir is null || nested ? null : RunLog.Open(logDir, name, alias, command);
-            return await Runner.Supervise(Runner.NewRecord(command, args, caps, name, alias, group, cwd), log: log);
+            return await Runner.Supervise(record, interrupt.Token, log: log);
         }
         finally
         {
+            Console.CancelKeyPress -= onCancel;
             if (slotFile is not null) Store.ReleaseLock(slotFile);
             if (lockFile is not null) Store.ReleaseLock(lockFile);
         }
@@ -279,20 +270,20 @@ public static partial class Program
         Reaper.Sweep(Retention(), quiet: true);
         var all = argv.Contains("--all");
         var runs = Store.LoadAll()
-            .Where(r => all || r.State == RunState.Running)
+            .Where(r => all || !r.IsFinished)
             .OrderByDescending(r => r.StartedUtc)
             .ToList();
         if (runs.Count == 0) { Console.WriteLine("no runs"); return 0; }
 
         var now = DateTime.UtcNow;
-        Console.WriteLine($"{"ID",-14}{"NAME",-16}{"PID",-8}{"STATE",-9}{"AGE",-8}{"PEAKMEM",-9}COMMAND");
+        Console.WriteLine($"{"ID",-14}{"NAME",-16}{"PID",-8}{"STATE",-12}{"AGE",-8}{"PEAKMEM",-9}COMMAND");
         foreach (var r in runs)
         {
             // a nested run is the same work as its parent, marked so the list is not read as two runs
             var name = r.IsNested ? "└ " + (r.Name ?? "-") : r.Name ?? "-";
             Console.WriteLine(
-                $"{r.Id,-14}{Canon.Ellipsize(name, 15),-16}{r.Pid,-8}" +
-                $"{StateLabel(r.State),-9}{Canon.Duration(now - r.StartedUtc),-8}" +
+                $"{r.Id,-14}{Canon.Ellipsize(name, 15),-16}{PidLabel(r),-8}" +
+                $"{StateLabel(r.State),-12}{Canon.Duration(now - r.StartedUtc),-8}" +
                 $"{Canon.Mem(r.PeakMemMb),-9}{Canon.CommandLine(r.Command, r.Args)}");
         }
         return 0;
@@ -399,6 +390,9 @@ public static partial class Program
 
     static string StateLabel(RunState state) => state.ToString().ToLowerInvariant();
 
+    /// <summary>A run that never had a child — queued, or unable to start — has no pid to show.</summary>
+    static string PidLabel(RunRecord r) => r.Pid == 0 ? "-" : r.Pid.ToString();
+
     static void PrintRunDetail(RunRecord r)
     {
         var now = DateTime.UtcNow;
@@ -414,8 +408,8 @@ public static partial class Program
         Row("cwd", r.Cwd);
         Row("bucket", r.Group);
         Row("parent", r.ParentId);
-        Row("pid", $"{r.Pid} (runner {r.RunnerPid})");
-        Row("started", $"{r.StartedUtc:u} ({Canon.Duration(now - r.StartedUtc)} ago)");
+        Row("pid", $"{PidLabel(r)} (runner {r.RunnerPid})");
+        Row(r.State == RunState.Queued ? "waiting" : "started", $"{r.StartedUtc:u} ({Canon.Duration(now - r.StartedUtc)} ago)");
         Row("heartbeat", $"{r.HeartbeatUtc:u} ({Canon.Duration(now - r.HeartbeatUtc)} ago)");
         Row("peak mem", Canon.Mem(r.PeakMemMb));
         Row("caps", DescribeCaps(r.Caps));

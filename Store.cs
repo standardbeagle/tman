@@ -12,6 +12,8 @@ public enum RunState
     Running, Exited, Killed, Reaped, TimedOut, Stalled, Culled,
     /// <summary>The program could not be started; the reason is in KillReason, and Pid is 0.</summary>
     StartFailed,
+    /// <summary>Waiting for a slot. No child exists yet, so Pid is 0; the runner is the waiter.</summary>
+    Queued,
 }
 
 public sealed class RunRecord
@@ -38,6 +40,7 @@ public sealed class RunRecord
     public string? Group { get; set; }
     /// <summary>Id of the tman run that launched this one, when a supervised process re-enters tman.</summary>
     public string? ParentId { get; set; }
+    /// <summary>When the child started; while <see cref="RunState.Queued"/>, when the wait began.</summary>
     public DateTime StartedUtc { get; set; }
     /// <summary>Null when the child had already exited before tman could read its start.</summary>
     public DateTime? ChildStartUtc { get; set; }
@@ -60,7 +63,7 @@ public sealed class RunRecord
     public bool IsNested => ParentId is not null;
 
     /// <summary>True once the run reached a terminal state and can be pruned.</summary>
-    public bool IsFinished => State != RunState.Running;
+    public bool IsFinished => State is not (RunState.Running or RunState.Queued);
 
     /// <summary>Minimum id characters accepted as a prefix, short enough to type and long enough to be unique.</summary>
     public const int MinIdPrefix = 4;
