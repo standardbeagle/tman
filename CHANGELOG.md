@@ -9,6 +9,11 @@ below 1.0, behavior changes land in minor releases.
 ## [Unreleased]
 
 ### Added
+- **Per-command help.** `tman <command> --help`, `-h`, and `tman help <command>` print that
+  command's usage, flags, and exit codes. `tman help <alias>` shows what an alias runs, from which
+  `.tman.kdl`, and under which caps. The overview is built from the same table, so the two cannot
+  disagree. Help is answered before anything else runs: it creates no `~/.tman`, runs no sweep, and
+  works with a read-only store.
 - **Named queues: one line shared by every project on the machine.** Buckets are per project, so
   three checkouts each running `cargo build` never saw each other. Declare a queue once in
   `~/.tman/tman.kdl` (`queue "compile" { max-parallel 1 }`) and join it from any project with
@@ -27,6 +32,11 @@ below 1.0, behavior changes land in minor releases.
   uncontended path costs nothing extra.
 
 ### Fixed
+- **`tman init --help` no longer scaffolds a project.** `init`, `clean`, `list`, and `status`
+  skipped any argument they did not know and then did their job. `init --help` wrote `.tman.kdl`
+  (and shims with `--shims`), `clean --help` ran the sweep, and `clean --dry-run` would have too.
+  An argument a command does not take is now refused with exit 127, pointing at that command's
+  help, as `run` and `kill` already did.
 - **A run store tman cannot write is explained, not a crash.** When `~/.tman` (or `TMAN_HOME`) was
   read-only, full, or not a directory — the everyday case is an agent sandbox such as Codex's
   workspace sandbox, which mounts `$HOME` read-only — every supervised command aborted with an

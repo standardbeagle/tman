@@ -22,8 +22,9 @@ public static partial class Program
     {
         try
         {
+            // before the store is touched: help must neither create ~/.tman nor need it writable
+            if (Help.Requested(argv) is { } topic) return PrintHelp(topic);
             Store.EnsureDirs();
-            if (argv.Length == 0) { PrintUsage(); return 0; }
 
             var cmd = argv[0];
             var rest = argv[1..];
@@ -32,12 +33,11 @@ public static partial class Program
                 case "run": return await CmdRun(rest, null);
                 case "list" or "ls": return CmdList(rest);
                 case "kill": return CmdKill(rest);
-                case "clean": return CmdClean();
+                case "clean": return CmdClean(rest);
                 case "status": return CmdStatus(rest);
                 case "init": return CmdInit(rest);
                 case "hook": return CmdHook(rest);
                 case "probe": return CmdProbe(rest);
-                case "--help" or "-h" or "help": PrintUsage(); return 0;
                 case "--version" or "-v": Console.WriteLine($"tman {Version}"); return 0;
                 default:
                     {
@@ -45,7 +45,7 @@ public static partial class Program
                         if (config is not null && config.Aliases.TryGetValue(cmd, out var alias))
                             return await RunAlias(alias, config, rest);
                         Console.Error.WriteLine($"tman: unknown command or alias '{cmd}'");
-                        PrintUsage();
+                        Console.WriteLine(Help.Overview());
                         return Runner.ExitNotFound;
                     }
             }
@@ -290,6 +290,7 @@ public static partial class Program
 
     static int CmdList(string[] argv)
     {
+        TakesOnly("list", argv, ["--all"]);
         Reaper.Sweep(Retention(), quiet: true);
         var all = argv.Contains("--all");
         var runs = Store.LoadAll()
@@ -376,8 +377,9 @@ public static partial class Program
         return failed == 0 ? 0 : 1;
     }
 
-    static int CmdClean()
+    static int CmdClean(string[] argv)
     {
+        TakesOnly("clean", argv, []);
         var retain = Retention();
         var (reaped, pruned) = Reaper.Sweep(retain);
         Console.WriteLine(
@@ -388,6 +390,7 @@ public static partial class Program
 
     static int CmdStatus(string[] argv)
     {
+        TakesOnly("status", argv, ["--json"], positionals: 1);
         Reaper.Sweep(Retention(), quiet: true);
         var target = argv.FirstOrDefault(a => !a.StartsWith("--"));
         var live = Reaper.LiveRuns();
@@ -446,7 +449,7 @@ public static partial class Program
         Row("killed", r.KillReason);
     }
 
-    static string DescribeCaps(Caps c)
+    internal static string DescribeCaps(Caps c)
     {
         var parts = new List<string>();
         if (c.MaxTime is { } mt) parts.Add($"max-time {Canon.Duration(mt)}");
@@ -459,6 +462,7 @@ public static partial class Program
 
     internal static int CmdInit(string[] argv)
     {
+        TakesOnly("init", argv, ["--shims", "--gitignore"]);
         var dir = Directory.GetCurrentDirectory();
         var path = Path.Combine(dir, Config.FileName);
         var withShims = argv.Contains("--shims");
@@ -520,42 +524,38 @@ public static partial class Program
 
     internal sealed record DetectedAlias(string Name, string Command, string[] Args);
 
-    static void PrintUsage() => Console.WriteLine("""
-        tman - AOT process/test runner manager
+    /// <summary>
+    /// Prints the help <paramref name="topic"/> names: "" for the overview, a built-in command, or
+    /// an alias of the nearest .tman.kdl. A name that is none of these is refused like any unknown
+    /// command, so a typo is not answered with the overview as though it were a request for it.
+    /// </summary>
+    static int PrintHelp(string topic)
+    {
+        if (topic.Length == 0) { Console.WriteLine(Help.Overview()); return 0; }
+        if (Help.Find(topic) is { } command) { Console.WriteLine(Help.For(command)); return 0; }
+        var config = Config.Load();
+        if (config is not null && config.Aliases.TryGetValue(topic, out var alias))
+        {
+            Console.WriteLine(Help.ForAlias(alias, config));
+            return 0;
+        }
+        throw new FormatException($"no command or alias '{topic}' to describe (tman help lists the commands)");
+    }
 
-        usage:
-          tman run [flags] -- <cmd> [args...]     run a process under tman supervision
-          tman run --alias <name> [args...]       run a .tman.kdl alias
-          tman <alias> [args...]                  shorthand for an alias
-          tman list|ls [--all]                    list live (or all) runs
-          tman kill <id|name|all>                 kill run(s)
-          tman clean                              reap orphans, prune old records
-          tman status [id|name] [--json]          summary or run detail
-          tman init [--shims] [--gitignore]       scaffold .tman.kdl (+ shim scripts)
-          tman probe --pid <pid> [--start-ticks <ticks>]
-                                                  is a recorded pid still that process? exit 0
-                                                  mine, 1 gone, 3 not mine (pid reused); read-only
-          tman hook pretooluse                    Claude Code PreToolUse hook: reads the tool call
-                                                  on stdin, re-issues bare test/build commands
-                                                  through tman, never blocks
-
-        run flags:
-          --name N            dedup lock name (per directory; fail if already running)
-          --replace           kill the run holding the name, then wait for its runner to release
-                              the name (up to --queue-timeout; refuses to start if still held)
-          --max-time T        wall-clock limit (30s, 10m, 2h)
-          --stall T           kill if no output or cpu/io/io-wait activity for T
-          --max-mem M         kill above process-tree memory (4096, 2g)
-          --max-cpu P         kill above P% sustained CPU
-          --max-parallel N    queue until one of this bucket's N slot files can be held
-                              (bucket: name-or-command @ dir)
-          --queue-timeout T   give up queueing after T
-          --queue Q           also wait in named queue Q, shared by every project on this machine
-                              and declared in ~/.tman/tman.kdl; admitted in arrival order
-
-        every command sweeps: orphans (dead runner, live child) are killed, and finished records
-        past the retention window are pruned. Set the window with `retain` in .tman.kdl defaults
-        (24h by default). Lock files are not part of it — a bucket whose holder died is taken over
-        in place by the next run that claims it.
-        """);
+    /// <summary>
+    /// Refuses any argument <paramref name="command"/> does not take. A flag that is skipped rather
+    /// than refused is a request silently ignored — `tman init --help` scaffolded a project, and
+    /// `tman clean --dry-run` would sweep — so every command reads its arguments whole or not at all.
+    /// </summary>
+    static void TakesOnly(string command, string[] argv, string[] flags, int positionals = 0)
+    {
+        var seen = 0;
+        foreach (var a in argv)
+        {
+            if (flags.Contains(a)) continue;
+            if (a.StartsWith('-')) throw new FormatException($"unknown flag {a} for '{command}' (see tman {command} --help)");
+            if (++seen > positionals)
+                throw new FormatException($"unexpected argument '{a}' for '{command}' (see tman {command} --help)");
+        }
+    }
 }

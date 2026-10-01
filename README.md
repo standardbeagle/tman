@@ -83,6 +83,7 @@ tman init --shims --gitignore
 | `tman status [id\|name\|id-prefix] [--json]` | summary counts, or one run's detail |
 | `tman init [--shims] [--gitignore]` | scaffold `.tman.kdl` + shims (aliases it cannot detect are left commented out, so `./test` fails loudly instead of faking a pass); shims are named after the aliases in the config on disk, so re-running it in a project that already has one shims that file's aliases; `--gitignore` ignores `.tman/` and the shims, and skips an alias whose name is already a directory, so `/test` never hides a `test/` tree |
 | `tman probe --pid <pid> [--start-ticks <ticks>]` | is a pid you recorded earlier still that process? Exit 0 mine, 1 gone, 3 not mine (the OS reused the pid); the verdict is also printed. `--start-ticks` is Linux only, read from field 22 of `/proc/<pid>/stat` when you record the pid; without it a live pid counts as yours. Read-only: it never signals or kills, and does not run the housekeeping sweep |
+| `tman help [<command>\|<alias>]`, `tman <command> --help` | the overview, one command's usage, flags and exit codes, or what an alias runs and where (`-h` works too). Help changes nothing — it creates no files and runs no sweep — and every command refuses an argument it does not take with exit 127, rather than skipping it and doing its job. `tman <alias> --help` is not tman's: an alias passes every arg to its command, so that asks the alias's own tool |
 | `tman hook pretooluse` | [Claude Code hook](#claude-code-hook): routes bare test/build commands through tman, and never blocks |
 
 ## Run flags
