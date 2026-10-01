@@ -8,12 +8,20 @@ public class RunnerTests : IDisposable
 {
     readonly TempDir _home = new();
     readonly string? _prevHome = Environment.GetEnvironmentVariable("TMAN_HOME");
+    readonly string? _prevParent = Environment.GetEnvironmentVariable(Runner.ParentIdEnvVar);
 
-    public RunnerTests() => Environment.SetEnvironmentVariable("TMAN_HOME", _home.Path);
+    // The suite itself runs under tman, so the host inherits a TMAN_RUN_ID; left in place it makes
+    // every run here nested, and the record's parent is the suite's own run.
+    public RunnerTests()
+    {
+        Environment.SetEnvironmentVariable("TMAN_HOME", _home.Path);
+        Environment.SetEnvironmentVariable(Runner.ParentIdEnvVar, null);
+    }
 
     public void Dispose()
     {
         Environment.SetEnvironmentVariable("TMAN_HOME", _prevHome);
+        Environment.SetEnvironmentVariable(Runner.ParentIdEnvVar, _prevParent);
         _home.Dispose();
     }
 
