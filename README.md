@@ -78,7 +78,7 @@ tman init --shims --gitignore
 | `tman run [flags] -- <cmd> [args]` | run a process under supervision |
 | `tman run --alias <name> [args]` / `tman <alias>` | run a `.tman.kdl` alias |
 | `tman list [--all]` | list live runs (or all records) |
-| `tman kill <id\|name\|all>` | kill run(s); an unknown flag refuses the command with exit 127 rather than being skipped; exits 1 when part of a run's tree could not be killed |
+| `tman kill <id\|name\|all>` | kill run(s); the killed run ends `killed: killed via tman kill` and its `tman` exits 130. `kill` leaves the reason in `~/.tman/runs/<id>.kill` before killing, and the run's own runner writes the outcome from it, so the two never race to save the record. An unknown flag refuses the command with exit 127 rather than being skipped; exits 1 when part of a run's tree could not be killed |
 | `tman clean` | run the housekeeping sweep now and report what it did |
 | `tman status [id\|name\|id-prefix] [--json]` | summary counts, or one run's detail |
 | `tman init [--shims] [--gitignore]` | scaffold `.tman.kdl` + shims (aliases it cannot detect are left commented out, so `./test` fails loudly instead of faking a pass); shims are named after the aliases in the config on disk, so re-running it in a project that already has one shims that file's aliases; `--gitignore` ignores `.tman/` and the shims, and skips an alias whose name is already a directory, so `/test` never hides a `test/` tree |
@@ -354,7 +354,9 @@ There is no daemon and no cron entry. Every `tman` command — including `tman l
 same sweep before it does anything else:
 
 - kills orphans (a live child whose runner died, e.g. after a machine suspend); a record whose
-  child had already gone is marked `killed: child exit status unknown`, never as a clean exit
+  child had already gone is marked `killed: child exit status unknown`, never as a clean exit. A
+  run whose runner is still alive is left alone: the runner is the one writer of its record
+- deletes kill requests (`<id>.kill`, see `tman kill` below) once they pass the same window
 - deletes finished records older than `retain` (default 24h), along with unreadable or
   off-schema record files that nothing else would ever revisit
 

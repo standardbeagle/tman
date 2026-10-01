@@ -148,6 +148,8 @@ public static partial class Program
     /// relative to that file and mean nothing from a subdirectory; a bare `tman run -- cmd` keeps
     /// the caller's directory (null), since the user is standing where they mean to run.
     /// </param>
+    const string ReplacedReason = "replaced by newer run";
+
     internal static async Task<int> GatedRun(
         string command, string[] args, Caps caps, string? name, string? alias, bool replace,
         string scopeDir, string? logDir = null, string? cwd = null)
@@ -175,16 +177,10 @@ public static partial class Program
                     return Runner.ExitKilled;
                 }
                 Console.Error.WriteLine($"tman: replacing run '{name}'{who}");
-                if (holder is not null)
+                if (holder is not null && !Reaper.KillRun(holder, ReplacedReason))
                 {
-                    if (!ProcUtil.KillTree(holder.Pid, holder.ChildStartUtc, holder.ChildStartTicks))
-                    {
-                        Console.Error.WriteLine($"tman: run '{name}' could not be killed; not replacing it");
-                        return Runner.ExitKilled;
-                    }
-                    holder.State = RunState.Killed;
-                    holder.KillReason = "replaced by newer run";
-                    Store.Save(holder);
+                    Console.Error.WriteLine($"tman: run '{name}' could not be killed; not replacing it");
+                    return Runner.ExitKilled;
                 }
                 // killing the child does not release the name — the runner that holds it does, as
                 // it winds up. Waiting for that is what replaces the old run instead of joining it.
@@ -208,15 +204,12 @@ public static partial class Program
                     return Runner.ExitKilled;
                 }
                 Console.Error.WriteLine($"tman: replacing run '{name}' (pid {existing.Pid})");
-                if (!ProcUtil.KillTree(existing.Pid, existing.ChildStartUtc, existing.ChildStartTicks))
+                if (!Reaper.KillRun(existing, ReplacedReason))
                 {
                     Console.Error.WriteLine($"tman: run '{name}' could not be killed; not replacing it");
                     Store.ReleaseLock(lockFile);
                     return Runner.ExitKilled;
                 }
-                existing.State = RunState.Killed;
-                existing.KillReason = "replaced by newer run";
-                Store.Save(existing);
             }
         }
 
@@ -358,16 +351,8 @@ public static partial class Program
             foreach (var r in matches)
             {
                 Console.WriteLine($"tman: killing {r.Name ?? r.Id} (pid {r.Pid})");
-                if (!ProcUtil.KillTree(r.Pid, r.ChildStartUtc, r.ChildStartTicks))
-                {
-                    failed++;
-                    continue;
-                }
-                r.State = RunState.Killed;
-                r.KillReason = "killed via tman kill";
-                r.HeartbeatUtc = DateTime.UtcNow;
-                Store.Save(r);
-                killed++;
+                if (Reaper.KillRun(r, "killed via tman kill")) killed++;
+                else failed++;
             }
         }
         if (killed == 0 && failed == 0) Console.WriteLine("no matching live runs");

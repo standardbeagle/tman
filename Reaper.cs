@@ -23,37 +23,56 @@ public static class Reaper
         foreach (var r in Store.LoadAll())
         {
             if (r.State != RunState.Running) continue;
+            // a live runner owns its record, outcome included: it saves the copy it holds every
+            // tick, so an outcome written here would be lost to its next save
+            if (RunnerAlive(r)) continue;
 
-            var childAlive = ProcUtil.Identify(r.Pid, r.ChildStartUtc, r.ChildStartTicks) == ProcessIdentity.Mine;
-            var runnerAlive = r.RunnerPid == Environment.ProcessId
-                || ProcUtil.Identify(r.RunnerPid, r.RunnerStartUtc, r.RunnerStartTicks) == ProcessIdentity.Mine;
-
-            if (!childAlive)
+            if (ProcUtil.Identify(r.Pid, r.ChildStartUtc, r.ChildStartTicks) != ProcessIdentity.Mine)
             {
                 // the child is gone and its runner never wrote the outcome: nobody read the exit
-                // status, so this is the same unknown the Runner reports, not a finished run
+                // status, so this is the same unknown the Runner reports, not a finished run —
+                // unless someone killed it on purpose and said why
                 r.State = RunState.Killed;
-                r.KillReason = Runner.ExitStatusUnknownReason;
+                r.KillReason = Store.ReadKillRequest(r.Id) ?? Runner.ExitStatusUnknownReason;
                 r.HeartbeatUtc = DateTime.UtcNow;
                 Store.Save(r);
                 continue;
             }
 
-            if (!runnerAlive)
-            {
-                if (!quiet)
-                    Console.Error.WriteLine($"tman: reaping orphan pid {r.Pid} ({r.Command}, id {r.Id})");
-                // part of the tree survived and said why on stderr: the record stays running, so the
-                // next sweep finds whatever is left rather than a run marked reaped that is not
-                if (!ProcUtil.KillTree(r.Pid, r.ChildStartUtc, r.ChildStartTicks)) continue;
-                r.State = RunState.Reaped;
-                r.KillReason = "runner died; orphan reaped";
-                r.HeartbeatUtc = DateTime.UtcNow;
-                Store.Save(r);
-                reaped.Add(r);
-            }
+            if (!quiet)
+                Console.Error.WriteLine($"tman: reaping orphan pid {r.Pid} ({r.Command}, id {r.Id})");
+            // part of the tree survived and said why on stderr: the record stays running, so the
+            // next sweep finds whatever is left rather than a run marked reaped that is not
+            if (!ProcUtil.KillTree(r.Pid, r.ChildStartUtc, r.ChildStartTicks)) continue;
+            r.State = RunState.Reaped;
+            r.KillReason = "runner died; orphan reaped";
+            r.HeartbeatUtc = DateTime.UtcNow;
+            Store.Save(r);
+            reaped.Add(r);
         }
         return reaped;
+    }
+
+    static bool RunnerAlive(RunRecord r) =>
+        r.RunnerPid == Environment.ProcessId
+        || ProcUtil.Identify(r.RunnerPid, r.RunnerStartUtc, r.RunnerStartTicks) == ProcessIdentity.Mine;
+
+    /// <summary>
+    /// Kills a run's tree and has it recorded as killed for <paramref name="reason"/>. The request is
+    /// left before the kill, so a live runner that sees its child die already knows why and writes
+    /// the outcome itself; only a run whose runner is gone is finished here. False when part of the
+    /// tree could not be killed, which is said on stderr.
+    /// </summary>
+    public static bool KillRun(RunRecord r, string reason)
+    {
+        Store.RequestKill(r.Id, reason);
+        if (!ProcUtil.KillTree(r.Pid, r.ChildStartUtc, r.ChildStartTicks)) return false;
+        if (RunnerAlive(r)) return true;
+        r.State = RunState.Killed;
+        r.KillReason = reason;
+        r.HeartbeatUtc = DateTime.UtcNow;
+        Store.Save(r);
+        return true;
     }
 
     public static List<RunRecord> LiveRuns()

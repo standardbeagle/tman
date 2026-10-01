@@ -250,7 +250,9 @@ public static class Runner
                 catch (Exception e) when (ExitedMeanwhile(e, proc)) { }
                 prevTick = now;
 
-                if (caps.MaxTime is { } mt && now - record.StartedUtc > mt)
+                if (Store.ReadKillRequest(record.Id) is { } requested)
+                { killReason = requested; killState = RunState.Killed; }
+                else if (caps.MaxTime is { } mt && now - record.StartedUtc > mt)
                 { killReason = $"exceeded max-time {mt}"; killState = RunState.TimedOut; }
                 else if (caps.Stall is { } st && now - lastProgress > st &&
                          (sampleOk || sampleFailures >= SampleFailLimit))
@@ -283,6 +285,14 @@ public static class Runner
             if (killReason is null && interrupt.IsCancellationRequested)
             {
                 killReason = interrupted ? "interrupted" : "cancelled";
+                killState = RunState.Killed;
+            }
+            // and here, after the loop, because the usual way a requested kill shows up is the child
+            // dying of it between two ticks: the request was left before the kill, so it is on disk
+            // by the time the exit is
+            if (killReason is null && Store.ReadKillRequest(record.Id) is { } requested)
+            {
+                killReason = requested;
                 killState = RunState.Killed;
             }
 

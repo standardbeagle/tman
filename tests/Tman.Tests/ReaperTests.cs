@@ -78,11 +78,7 @@ public class ReaperTests : IDisposable
         // saw that child's exit status, so the record may not read as a finished run: Exited with
         // no code is what the digest and `tman show` print as a pass. The Runner names this case
         // "child exit status unknown"; the Reaper must say the same thing.
-        var r = Finished("deadchild001", TimeSpan.FromMinutes(1));
-        r.State = RunState.Running;
-        r.Pid = 2147483646;
-        r.ChildStartUtc = DateTime.UtcNow;
-        r.RunnerPid = Environment.ProcessId;
+        var r = DeadChildOfADeadRunner("deadchild001");
         Store.Save(r);
 
         var reaped = Reaper.ReapOrphans(quiet: true);
@@ -92,6 +88,45 @@ public class ReaperTests : IDisposable
         Assert.Equal(RunState.Killed, saved.State);
         Assert.Equal(Runner.ExitStatusUnknownReason, saved.KillReason);
         Assert.Null(saved.ExitCode);
+    }
+
+    /// <summary>A Running record whose child and runner are both gone: no one is left to finish it.</summary>
+    RunRecord DeadChildOfADeadRunner(string id)
+    {
+        var r = Finished(id, TimeSpan.FromMinutes(1));
+        r.State = RunState.Running;
+        r.Pid = 2147483646;
+        r.ChildStartUtc = DateTime.UtcNow;
+        r.RunnerPid = 2147483645;
+        r.RunnerStartUtc = DateTime.UtcNow;
+        return r;
+    }
+
+    [Fact]
+    public void ReapOrphans_ADeadChildSomeoneKilled_IsRecordedWithTheirReason()
+    {
+        // `tman kill` leaves its reason before it kills; if the runner died before writing the
+        // outcome, the sweep that finishes the record says what actually happened
+        Store.Save(DeadChildOfADeadRunner("killedchild1"));
+        Store.RequestKill("killedchild1", "killed via tman kill");
+
+        Reaper.ReapOrphans(quiet: true);
+
+        Assert.Equal("killed via tman kill", Store.Load("killedchild1")!.KillReason);
+    }
+
+    [Fact]
+    public void ReapOrphans_LeavesALiveRunnersRecordToItsRunner()
+    {
+        // the runner saves the copy it holds every tick; an outcome written beside it here is
+        // overwritten by that save, which is how a killed run came to read as exited
+        var r = DeadChildOfADeadRunner("liverunner01");
+        r.RunnerPid = Environment.ProcessId;
+        Store.Save(r);
+
+        Reaper.ReapOrphans(quiet: true);
+
+        Assert.Equal(RunState.Running, Store.Load("liverunner01")!.State);
     }
 
     /// <summary>

@@ -211,6 +211,30 @@ public static class Store
 
     public static RunRecord? Load(string id) => ReadFile(PathFor(id));
 
+    static string KillRequestPathFor(string id) => Path.Combine(RunsDir, id + ".kill");
+
+    /// <summary>
+    /// Asks a run to end as killed, for <paramref name="reason"/>. A live runner is the only writer
+    /// of its record — a second writer saving the outcome loses it to the runner's next save of the
+    /// copy it holds — so whoever kills a run leaves this beside the record first and lets the
+    /// runner write the outcome from it. Written whole by a rename, like the record.
+    /// </summary>
+    public static void RequestKill(string id, string reason) => Writing(() =>
+    {
+        EnsureDirs();
+        var tmp = $"{KillRequestPathFor(id)}.{Environment.ProcessId}-{Environment.CurrentManagedThreadId}.tmp";
+        File.WriteAllText(tmp, reason);
+        File.Move(tmp, KillRequestPathFor(id), overwrite: true);
+    });
+
+    /// <summary>The reason a kill was requested for, or null when none was.</summary>
+    public static string? ReadKillRequest(string id)
+    {
+        try { return File.ReadAllText(KillRequestPathFor(id)); }
+        catch (FileNotFoundException) { return null; }
+        catch (DirectoryNotFoundException) { return null; }
+    }
+
     public static List<RunRecord> LoadAll()
     {
         EnsureDirs();
@@ -238,7 +262,11 @@ public static class Store
         catch (IOException) { return null; }
     }
 
-    public static void Remove(string id) => Delete(PathFor(id));
+    public static void Remove(string id)
+    {
+        Delete(PathFor(id));
+        Delete(KillRequestPathFor(id));
+    }
 
     /// <summary>
     /// Removes a file if it is there, and says whether it went. Callers count what they removed, so
@@ -274,7 +302,8 @@ public static class Store
             }
             if (r.IsFinished && r.HeartbeatUtc < cutoff && Delete(f)) removed++;
         }
-        foreach (var f in Directory.EnumerateFiles(RunsDir, "*.tmp"))
+        // a kill request outlives its record by at most the retention window, like a temp file
+        foreach (var f in Directory.EnumerateFiles(RunsDir, "*.tmp").Concat(Directory.EnumerateFiles(RunsDir, "*.kill")))
             if (File.GetLastWriteTimeUtc(f) < cutoff && Delete(f)) removed++;
         return removed;
     }

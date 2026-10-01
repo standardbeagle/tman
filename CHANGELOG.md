@@ -17,6 +17,13 @@ below 1.0, behavior changes land in minor releases.
   or point `TMAN_HOME` at a shared writable directory), and exits 74. A child already started when
   its record could not be written, or whose store went away mid-run, is killed rather than left
   running where nothing can list, reap, or cap it.
+- **`tman kill` and `--replace` no longer lose the killed outcome.** Both saved the record as
+  killed while its runner was still alive, and the runner then saved its own stale copy over it, so
+  the killed run returned 137 and read as `exited` with no reason instead of `killed` and 130. A
+  live runner is now the only writer of its record: the killer leaves the reason in
+  `~/.tman/runs/<id>.kill` before it kills, and the runner finishes the run from it. The reaper
+  follows the same rule and leaves a live runner's record alone. A run whose runner is already
+  dead is still finished by whoever finds it, using the requested reason.
 - **A program that cannot be started leaves a digest and a record.** Opening the run log clears the
   previous digest, and a start that failed after that only closed the log. A run that exited 127
   therefore left no `.fail.log`, which is how a pass looks, and no record for `tman status` to show.
