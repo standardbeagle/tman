@@ -322,8 +322,6 @@ public static class Runner
         }
         finally
         {
-            Console.CancelKeyPress -= onCancel;
-
             // checked here and not only where the delay was cut short: the loop can also end because
             // the child exited on the same signal, and that exit is still not a finished run
             if (killReason is null && interrupt.IsCancellationRequested)
@@ -349,6 +347,15 @@ public static class Runner
 
             await proc.WaitForExitAsync();
             await DrainOutput(Task.WhenAll(outPump, errPump), outputPipes);
+            // and once more now the child is reaped and drained: the same Ctrl+C reaches the child
+            // and tman together, and a child that handles it at once can exit before tman's own
+            // handler has run — an interrupted run, whichever of the two noticed first
+            if (killReason is null && interrupt.IsCancellationRequested)
+            {
+                killReason = interrupted ? "interrupted" : "cancelled";
+                killState = RunState.Killed;
+            }
+            Console.CancelKeyPress -= onCancel;
 
             record.HeartbeatUtc = Utc();
             if (killReason is not null)
