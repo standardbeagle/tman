@@ -170,9 +170,13 @@ public class TreeStatsTests
         using var shell = ShellWithBusyChild();
         try
         {
-            var before = SampleOnceTheTreeHas(shell.Id, procs: 2);
+            SampleOnceTheTreeHas(shell.Id, procs: 2);
+            // measured once the loop is running, not while the descendant is still starting up:
+            // powershell spends its first second loading, not spinning
+            Thread.Sleep(2000);
+            Assert.True(TreeStats.TrySample(shell.Id, out var before), "the root vanished while warming up");
             var clock = System.Diagnostics.Stopwatch.StartNew();
-            Thread.Sleep(1500);
+            Thread.Sleep(2000);
             Assert.True(TreeStats.TrySample(shell.Id, out var after),
                 $"the root vanished between samples (exited: {shell.HasExited})");
             var seconds = clock.Elapsed.TotalSeconds;
