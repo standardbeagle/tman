@@ -56,19 +56,3 @@ public sealed class WindowsFactAttribute : FactAttribute
         if (!OperatingSystem.IsWindows()) Skip = because;
     }
 }
-
-/// <summary>
-/// A fact that needs tman to see the whole process tree, which is <see cref="TreeStats.CoversTree"/>
-/// — the same predicate production consults, so the gate cannot drift from what it guards. That
-/// predicate is pinned to Linux by <c>TreeStatsTests.CoversTree_OnlyWhereParentPidsAreCheaplyAvailable</c>,
-/// so naming tree coverage also carries the platform rather than restating it as a second conjunct.
-/// </summary>
-public sealed class TreeSamplingFactAttribute : FactAttribute
-{
-    public TreeSamplingFactAttribute(string because) : this(because, TreeStats.CoversTree) { }
-
-    internal TreeSamplingFactAttribute(string because, bool coversTree)
-    {
-        if (!coversTree) Skip = because;
-    }
-}

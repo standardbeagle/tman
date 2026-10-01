@@ -210,20 +210,6 @@ public static class ProcUtil
             ? stat
             : throw new InvalidDataException($"/proc/{pid}/stat is not a stat line");
 
-    public static bool TryRefresh(int pid, out Process? proc)
-    {
-        proc = null;
-        try
-        {
-            var p = Process.GetProcessById(pid);
-            if (p.HasExited) { p.Dispose(); return false; }
-            p.Refresh();
-            proc = p;
-            return true;
-        }
-        catch (Exception e) when (VerdictFor(e) is not null) { return false; }
-    }
-
     /// <summary>
     /// Linux: the kernel's name for the pipe behind each stream, `pipe:[inode]` — the link text
     /// /proc/&lt;pid&gt;/fd shows in every process holding either end of it.

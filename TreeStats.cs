@@ -10,15 +10,14 @@ public readonly record struct TreeSample(long CpuJiffies, long IoBytes, long Rss
 /// </param>
 internal readonly record struct ProcStat(int Ppid, char State, long CpuJiffies, long RssPages, long? StartTicks);
 
-public static class TreeStats
+/// <summary>
+/// One sample of a run's whole process tree — the root and every descendant still parented under
+/// it — on each supported platform: /proc on Linux, libproc on macOS, a Toolhelp snapshot on
+/// Windows. A descendant that has left the tree (reparented to init or launchd, or orphaned on
+/// Windows) is no longer counted; that is the edge of "tree" on every platform alike.
+/// </summary>
+public static partial class TreeStats
 {
-    /// <summary>
-    /// True when a sample covers the whole process tree. Only Linux exposes parent pids and
-    /// per-process io counters cheaply (/proc); elsewhere a sample sees the root process alone,
-    /// so work happening in a descendant is invisible and must not be read as idleness.
-    /// </summary>
-    public static bool CoversTree => OperatingSystem.IsLinux();
-
     /// <summary>Linux process state: uninterruptible sleep, i.e. blocked inside a kernel io wait.</summary>
     const char UninterruptibleSleep = 'D';
 
@@ -46,27 +45,24 @@ public static class TreeStats
         now.IoBytes > prev.IoBytes ||
         now.States.Contains(UninterruptibleSleep);
 
-    public static bool TrySample(int rootPid, out TreeSample sample) =>
-        CoversTree ? TrySampleLinux(rootPid, out sample) : TrySampleRootOnly(rootPid, out sample);
-
-    static bool TrySampleRootOnly(int rootPid, out TreeSample sample)
+    /// <summary>
+    /// Samples <paramref name="rootPid"/>'s tree. False when the root itself is gone. Process states,
+    /// and with them the <c>D</c> clause of <see cref="ShowsProgress"/>, are read on Linux only;
+    /// elsewhere <see cref="TreeSample.States"/> is empty and the counters carry the verdict.
+    /// </summary>
+    public static bool TrySample(int rootPid, out TreeSample sample)
     {
-        sample = default;
-        if (!ProcUtil.TryRefresh(rootPid, out var p) || p is null) return false;
-        using (p)
-        {
-            long cpu = 0;
-            // the root exiting under the read: InvalidOperationException once the runtime knows,
-            // Win32Exception when the OS entry went first
-            try { cpu = (long)(p.TotalProcessorTime.TotalSeconds * 100); }
-            catch (Exception e) when (e is InvalidOperationException or Win32Exception) { }
-            long rssMb = 0;
-            try { rssMb = p.WorkingSet64 / (1024 * 1024); }
-            catch (Exception e) when (e is InvalidOperationException or Win32Exception) { }
-            sample = new TreeSample(cpu, 0, rssMb, 1, "");
-            return true;
-        }
+        if (OperatingSystem.IsLinux()) return TrySampleLinux(rootPid, out sample);
+        if (OperatingSystem.IsMacOS()) return TrySampleMacOS(rootPid, out sample);
+        if (OperatingSystem.IsWindows()) return TrySampleWindows(rootPid, out sample);
+        throw new PlatformNotSupportedException("tman samples process trees on Linux, macOS and Windows only");
     }
+
+    /// <summary>
+    /// <see cref="TreeSample.CpuJiffies"/> are hundredths of a second on every platform, as Linux
+    /// USER_HZ is; the other samplers convert into them.
+    /// </summary>
+    const long TimeSpanTicksPerJiffy = TimeSpan.TicksPerSecond / 100;
 
     static bool TrySampleLinux(int rootPid, out TreeSample sample)
     {

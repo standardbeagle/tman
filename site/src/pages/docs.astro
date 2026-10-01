@@ -58,12 +58,12 @@ curl -fsSL https://raw.githubusercontent.com/standardbeagle/tman/main/install.sh
 
   <h2>platform note</h2>
   <p>
-    Activity-aware stall detection walks the whole process tree on <strong>Linux</strong> only, where
-    <code>/proc</code> exposes parent pids and per-process io counters cheaply. On macOS and Windows a
-    sample sees the supervised process alone, so work done by a descendant is invisible and
-    <code>--stall</code> falls back to output-only detection — give quiet-but-busy runs a longer
-    <code>--stall</code> there. <code>--max-mem</code> and <code>--max-cpu</code> have the same limit: they
-    sum the tree on Linux and measure the root process elsewhere.
+    Every sample covers the whole process tree on all three platforms — <code>/proc</code> on Linux,
+    libproc on macOS, a Toolhelp snapshot on Windows — so <code>--stall</code>, <code>--max-mem</code> and
+    <code>--max-cpu</code> see a forked worker wherever it runs. Only Linux reads process states, so the
+    kernel-io-wait (<code>D</code>) signal is Linux's alone; the io counter is <code>rchar</code>/<code>wchar</code>
+    on Linux, disk bytes on macOS, and all io transfer bytes on Windows. A descendant that has left the
+    tree — reparented to init or launchd, or orphaned on Windows — is not counted anywhere.
   </p>
 
   <h2>buckets</h2>

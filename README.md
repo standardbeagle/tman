@@ -27,8 +27,8 @@ Works with **[Claude Code](https://dev.standardbeagle.com/tman/setup/claude-code
 
 LLM agents start test suites and then hang, get distracted, or survive a machine suspend — leaving processes that drain your system for hours. `tman` wraps every run with hard limits and a reaper, so nothing outlives its welcome.
 
-- **wall-time + stall kills** — `--max-time 10m`, `--stall 30m` (on Linux: silent *and* idle = hung, so quiet-but-busy work like `go test` keeps running)
-- **resource culling** — opt-in `--max-mem 2g`, `--max-cpu 95` (sustained) kill the whole process tree; both are measured across the tree on Linux, so a runner that forks its workers cannot hide behind an idle root
+- **wall-time + stall kills** — `--max-time 10m`, `--stall 30m` (silent *and* idle across the whole process tree = hung, so quiet-but-busy work like `go test` keeps running)
+- **resource culling** — opt-in `--max-mem 2g`, `--max-cpu 95` (sustained) kill the whole process tree; both are measured across the tree on Linux, macOS and Windows, so a runner that forks its workers cannot hide behind an idle root
 - **orphan reaping** — every `tman` command kills children whose runner died and prunes expired records; a lock whose runner died is taken over in place by the next run of that name
 - **dedup locks** — `--name test` refuses duplicates; `--replace` kills the old run and waits for it to hand the name back
 - **resource gating** — `--max-parallel 2` queues excess runs instead of stampeding cores
@@ -127,12 +127,13 @@ config share one parser, so each accepts exactly what the other does.
 > bucket's `max-parallel` slots. If you do want a tight bound, that is `--max-time`, or write
 > `stall` explicitly and it wins.
 
-> **Platform note.** Activity-aware stall detection walks the whole process tree on **Linux**
-> only, where `/proc` exposes parent pids and per-process io counters cheaply. On macOS and
-> Windows a sample sees the supervised process alone, so work done by a descendant is invisible
-> and `--stall` falls back to output-only detection. Give quiet-but-busy runs a longer `--stall`
-> on those platforms. `--max-mem` and `--max-cpu` have the same limit: they sum the tree on Linux
-> and measure the root process elsewhere.
+> **Platform note.** Every sample covers the whole process tree — the root and every descendant
+> still parented under it — on all three platforms: `/proc` on Linux, libproc on macOS, a Toolhelp
+> snapshot on Windows. `--stall`, `--max-mem` and `--max-cpu` therefore see a forked worker
+> wherever it runs. What differs is the activity signal. Only Linux reads process states, so the
+> `D` (kernel io wait) clause below is Linux's alone. The io counter is `rchar`/`wchar` on Linux,
+> disk bytes on macOS, and all io transfer bytes on Windows. A descendant that has left the tree,
+> reparented to init or launchd or orphaned on Windows, is no longer counted on any of them.
 
 > **A run ends when its root process exits.** Output still in the pipe is drained for up to 2s.
 > After that, a process the run left behind that still holds its stdout or stderr — `server &`,

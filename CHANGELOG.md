@@ -14,6 +14,14 @@ below 1.0, behavior changes land in minor releases.
   `.tman.kdl`, and under which caps. The overview is built from the same table, so the two cannot
   disagree. Help is answered before anything else runs: it creates no `~/.tman`, runs no sweep, and
   works with a read-only store.
+- **macOS and Windows meter the whole process tree.** Off Linux a sample read the root process
+  alone. A runner that forked its workers, or a shell wrapping the real job, could pin every core
+  or fill memory unseen by `--max-cpu` and `--max-mem`, and `--stall` read the busy descendants as
+  silence. macOS now walks the tree through libproc and reads each process's rusage. Its cpu
+  times are converted from mach time, which is not nanoseconds on Apple silicon. Windows walks
+  parent pids from a Toolhelp snapshot, counting a child only if it started after its parent, which
+  guards against pid reuse. Process states, and with them the kernel-io-wait signal, remain
+  Linux-only.
 - **Named queues: one line shared by every project on the machine.** Buckets are per project, so
   three checkouts each running `cargo build` never saw each other. Declare a queue once in
   `~/.tman/tman.kdl` (`queue "compile" { max-parallel 1 }`) and join it from any project with

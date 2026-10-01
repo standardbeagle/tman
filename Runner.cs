@@ -39,9 +39,8 @@ public static class Runner
 
     /// <summary>
     /// Clock ticks per second behind <see cref="TreeSample.CpuJiffies"/>. Linux /proc reports
-    /// utime+stime in USER_HZ, fixed at 100 on every supported arch; the root-only sampler off
-    /// Linux manufactures its jiffies from TotalProcessorTime at the same rate, so one constant
-    /// serves both.
+    /// utime+stime in USER_HZ, fixed at 100 on every supported arch; the macOS and Windows samplers
+    /// convert into the same unit, so one constant serves all three.
     /// </summary>
     const double JiffiesPerSecond = 100;
 
@@ -280,9 +279,8 @@ public static class Runner
                 }
                 if (memMb > record.PeakMemMb) record.PeakMemMb = memMb;
 
-                // Only when there is no tree sample to read: the root's own processor time. Off Linux
-                // the sample is root-only too (see TreeStats.CoversTree), so there --max-cpu never
-                // sees a descendant on either path — the README's platform note carries that limit.
+                // Only when there is no tree sample to read — the root is exiting under the sample —
+                // the root's own processor time stands in for the tree's.
                 try
                 {
                     var curCpu = proc.TotalProcessorTime;

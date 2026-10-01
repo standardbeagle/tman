@@ -48,15 +48,16 @@ public class RunnerTests : IDisposable
         }
 
         Assert.Equal(Runner.ExitStalled, exit);
-        if (TreeStats.CoversTree)
+        // process states are read on Linux only
+        if (OperatingSystem.IsLinux())
             Assert.Contains("[S]", err.ToString());
     }
 
-    [TreeSamplingFact("the busy work is a grandchild, so only tree-wide sampling can see it")]
+    [UnixFact("the busy work is a `yes` under sh")]
     public async Task SilentBusyChild_IsNotStalled()
     {
-        // The busy work happens in a grandchild, so seeing it requires walking the tree.
-        // Where tman cannot do that, silence is all it has to go on and the kill is correct.
+        // The busy work happens in a descendant, so seeing it requires walking the tree; the root
+        // itself only sleeps, and a root-only sample would read the run as stalled.
         var err = new StringWriter();
         var prevErr = Console.Error;
         Console.SetError(err);
@@ -73,6 +74,17 @@ public class RunnerTests : IDisposable
         }
 
         Assert.True(exit == 0, $"exit={exit} stderr: {err}");
+    }
+
+    [WindowsFact("the busy work is a powershell loop under cmd")]
+    public async Task SilentBusyChild_IsNotStalled_OnWindows()
+    {
+        // the same case as SilentBusyChild_IsNotStalled: cmd waits, its powershell child burns cpu
+        var exit = await Runner.RunAsync("cmd.exe",
+            ["/c", "powershell -NoProfile -Command \"$end=(Get-Date).AddSeconds(4); while((Get-Date) -lt $end){}\""],
+            StallOnly(1), null, null);
+
+        Assert.Equal(0, exit);
     }
 
     /// <summary>A sampler that reports the same frozen counters every tick, differing only in state.</summary>

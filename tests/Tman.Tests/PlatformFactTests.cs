@@ -28,16 +28,4 @@ public class PlatformFactTests
     [Fact]
     public void UnixFact_TakesItsVerdictFromTheRunningPlatform()
         => Assert.Equal(OperatingSystem.IsWindows(), new UnixFactAttribute("reason").Skip is not null);
-
-    [Fact]
-    public void TreeSamplingFact_WithoutTreeCoverage_CarriesTheReasonAsItsSkip()
-        => Assert.Equal("needs /proc", new TreeSamplingFactAttribute("needs /proc", coversTree: false).Skip);
-
-    [Fact]
-    public void TreeSamplingFact_WithTreeCoverage_DoesNotSkip()
-        => Assert.Null(new TreeSamplingFactAttribute("needs /proc", coversTree: true).Skip);
-
-    [Fact]
-    public void TreeSamplingFact_TakesItsVerdictFromTheProductionPredicate()
-        => Assert.Equal(!TreeStats.CoversTree, new TreeSamplingFactAttribute("reason").Skip is not null);
 }

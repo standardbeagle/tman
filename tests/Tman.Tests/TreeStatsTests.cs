@@ -115,7 +115,7 @@ public class TreeStatsTests
         Assert.True(TreeStats.ShowsProgress(Tick("", cpu: 100), Tick("", cpu: 101)));
     }
 
-    [TreeSamplingFact("proc states are read out of /proc")]
+    [LinuxFact("process states are read out of /proc, and only there")]
     public void TrySample_PopulatesStates_ForTheProgressVerdict()
     {
         Assert.True(TreeStats.TrySample(Environment.ProcessId, out var s));
@@ -124,31 +124,64 @@ public class TreeStatsTests
             Assert.True("RSDZTtWXxKPI".Contains(c), $"unexpected proc state '{c}' in \"{s.States}\"");
     }
 
-    [Fact]
-    public void CoversTree_OnlyWhereParentPidsAreCheaplyAvailable()
+    /// <summary>
+    /// A shell whose only work is a descendant: the shell itself waits, so everything the sample
+    /// sees beyond one idle process it found by walking the tree.
+    /// </summary>
+    static System.Diagnostics.Process ShellWithBusyChild() => System.Diagnostics.Process.Start(
+        OperatingSystem.IsWindows()
+            ? new System.Diagnostics.ProcessStartInfo("cmd.exe") { ArgumentList = { "/c", "powershell -NoProfile -Command \"while($true){}\"" } }
+            : new System.Diagnostics.ProcessStartInfo("sh") { ArgumentList = { "-c", "yes > /dev/null & wait" } })!;
+
+    static TreeSample SampleOnceTheTreeHas(int rootPid, int procs)
     {
-        Assert.Equal(OperatingSystem.IsLinux(), TreeStats.CoversTree);
+        for (var i = 0; i < 100; i++)
+        {
+            Assert.True(TreeStats.TrySample(rootPid, out var s), "the root vanished");
+            if (s.Procs >= procs) return s;
+            Thread.Sleep(50);
+        }
+        throw new TimeoutException($"the tree under {rootPid} never reached {procs} processes");
     }
 
-    [TreeSamplingFact("walking from the root to its child needs /proc parent pids")]
-    public void TrySample_IncludesChildProcesses()
+    [Fact]
+    public void TrySample_IncludesTheRootsDescendants()
     {
-        using var child = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-        {
-            FileName = "sleep",
-            ArgumentList = { "5" },
-            UseShellExecute = false,
-        })!;
+        using var shell = ShellWithBusyChild();
         try
         {
-            Assert.True(TreeStats.TrySample(Environment.ProcessId, out var s));
-            Assert.True(s.Procs >= 2, $"expected tree to include sleep child, got {s.Procs} proc(s)");
-            Assert.Contains('S', s.States);
+            var s = SampleOnceTheTreeHas(shell.Id, procs: 2);
             Assert.True(s.RssMb > 0, "tree rss should be reported alongside the child");
+            if (OperatingSystem.IsLinux()) Assert.Contains('S', s.States);
+            else Assert.Equal("", s.States);
         }
         finally
         {
-            try { child.Kill(); } catch { }
+            shell.Kill(entireProcessTree: true);
+        }
+    }
+
+    [Fact]
+    public void TrySample_MetersADescendantsCpuInHundredthsOfASecond()
+    {
+        // Bounded on both sides: a busy descendant shows real cpu, and no more than the machine has.
+        // A unit slip — macOS rusage times are mach ticks, not nanoseconds, on Apple silicon — lands
+        // well outside the window either way.
+        using var shell = ShellWithBusyChild();
+        try
+        {
+            var before = SampleOnceTheTreeHas(shell.Id, procs: 2);
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            Thread.Sleep(1500);
+            Assert.True(TreeStats.TrySample(shell.Id, out var after));
+            var seconds = clock.Elapsed.TotalSeconds;
+
+            var jiffies = after.CpuJiffies - before.CpuJiffies;
+            Assert.InRange(jiffies, (long)(seconds * 100 * 0.3), (long)(seconds * 100 * Environment.ProcessorCount * 1.2) + 10);
+        }
+        finally
+        {
+            shell.Kill(entireProcessTree: true);
         }
     }
 }
