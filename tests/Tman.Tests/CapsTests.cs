@@ -81,8 +81,9 @@ public class CapsParseTests
     [Fact]
     public void Retain_IsConfigurable()
     {
-        var node = Kdl.Parse("defaults {\n    retain \"2h\"\n}\n").Single();
-        Assert.Equal(TimeSpan.FromHours(2), Caps.FromNode(node).Retain);
+        using var proj = new TempDir();
+        proj.WriteFile(Config.FileName, "defaults {\n    retain \"2h\"\n}\n");
+        Assert.Equal(TimeSpan.FromHours(2), Config.Load(proj.Path)!.Defaults.Retain);
     }
 
     [Fact]

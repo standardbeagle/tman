@@ -17,6 +17,14 @@ below 1.0, behavior changes land in minor releases.
   or point `TMAN_HOME` at a shared writable directory), and exits 74. A child already started when
   its record could not be written, or whose store went away mid-run, is killed rather than left
   running where nothing can list, reap, or cap it.
+- **A cap that cannot be read is refused, not dropped.** `max-time "bogus"` in `.tman.kdl` parsed
+  as no deadline, so the command ran unbounded, exited 0, and printed nothing. A setting tman did
+  not know (`max_time`), one given twice or with no value, a second `defaults` block, and a
+  duplicate alias were skipped the same way. Every one is now a config error naming the file,
+  block, key, and value, with exit 127. The flags and the config now share one parser per cap, so
+  `max-parallel -1` and `max-cpu NaN` are refused in the file as they already were on the command
+  line, and a figure past the type's range (`--max-time 99999999999h`) is refused instead of
+  crashing.
 - **A truncated `.tman.kdl` is refused.** A file cut off inside a block parsed as if its closing
   brace were there, and an unterminated `/* ...` comment silently swallowed everything after it, so
   an alias could lose its caps — or its existence — to a bad save and still run. Both are now parse

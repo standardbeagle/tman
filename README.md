@@ -100,9 +100,11 @@ tman init --shims --gitignore
 
 Cap precedence: CLI flags > alias block > `defaults` block > built-ins.
 
-A cap flag whose value cannot be read refuses the run with exit 127 and names the flag —
-`bad --max-cpu`, `bad --max-parallel` — nothing is clamped or defaulted. `--max-cpu` takes a
-non-negative number and `--max-parallel` a non-negative integer.
+A cap whose value cannot be read refuses the run with exit 127 and names it — `bad --max-cpu
+"abc"` for a flag, `bad max-time "bogus"` with the file and block for `.tman.kdl` — nothing is
+clamped, defaulted, or dropped. Durations take `ms`/`s`/`m`/`h`, `max-mem` megabytes or a `k`/`m`/`g`
+size, `max-cpu` a non-negative number, and `max-parallel` a non-negative integer. Flags and the
+config share one parser, so each accepts exactly what the other does.
 
 > **`--stall` is a hang backstop, not a runtime budget.** It answers "is this process dead?",
 > not "is this taking too long?" — use `--max-time` for the latter. A cold `go build ./...`,
@@ -218,6 +220,11 @@ alias "e2e" {
 The parser reads a subset of KDL: nodes with string and number arguments, `//` and `/* */`
 comments, and `/-` slashdash, which comments out the next node or value. Properties
 (`max-parallel=4`) are refused with a message naming the `max-parallel 4` form to write instead.
+
+The file is read whole or refused with exit 127. A node tman would otherwise skip is an error
+naming it: an unknown or misspelt setting (`max_time`), a setting given twice or with no value, a
+second `defaults` block or alias of the same name, a block cut off before its `}`, or a `/*`
+comment that never closes. Each of those used to load, leaving out a bound the file declared.
 
 ## Run logs
 

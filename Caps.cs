@@ -59,14 +59,19 @@ public sealed record Caps
         if (!double.TryParse(span[..numEnd], NumberStyles.Float, CultureInfo.InvariantCulture, out var n))
             return null;
         var unit = span[numEnd..].ToString().ToLowerInvariant();
-        return unit switch
+        // a figure past TimeSpan's range is as unreadable as a misspelt unit, not a crash
+        try
         {
-            "" or "s" or "sec" or "secs" => TimeSpan.FromSeconds(n),
-            "ms" => TimeSpan.FromMilliseconds(n),
-            "m" or "min" or "mins" => TimeSpan.FromMinutes(n),
-            "h" or "hr" or "hrs" => TimeSpan.FromHours(n),
-            _ => null,
-        };
+            return unit switch
+            {
+                "" or "s" or "sec" or "secs" => TimeSpan.FromSeconds(n),
+                "ms" => TimeSpan.FromMilliseconds(n),
+                "m" or "min" or "mins" => TimeSpan.FromMinutes(n),
+                "h" or "hr" or "hrs" => TimeSpan.FromHours(n),
+                _ => null,
+            };
+        }
+        catch (OverflowException) { return null; }
     }
 
     public static long? ParseMemMb(string? s)
@@ -81,33 +86,54 @@ public sealed record Caps
         if (!double.TryParse(span[..numEnd], NumberStyles.Float, CultureInfo.InvariantCulture, out var n))
             return null;
         var unit = span[numEnd..].ToString().ToLowerInvariant();
-        return unit switch
+        double? mb = unit switch
         {
-            "" or "m" or "mb" => (long)Math.Ceiling(n),
-            "k" or "kb" => (long)Math.Ceiling(n / 1024),
-            "g" or "gb" => (long)Math.Ceiling(n * 1024),
+            "" or "m" or "mb" => Math.Ceiling(n),
+            "k" or "kb" => Math.Ceiling(n / 1024),
+            "g" or "gb" => Math.Ceiling(n * 1024),
             _ => null,
         };
+        return mb is { } v && v <= long.MaxValue ? (long)v : null;
     }
 
-    public static Caps FromNode(KdlNode? node)
+    /// <summary>The settings a caps-bearing `.tman.kdl` block may hold, in the order the docs list them.</summary>
+    public static readonly IReadOnlyList<string> Keys =
+        ["max-time", "stall", "max-mem", "max-cpu", "max-parallel", "queue-timeout", "retain"];
+
+    public static bool IsKey(string key) => Keys.Contains(key);
+
+    /// <summary>
+    /// <paramref name="caps"/> with <paramref name="key"/> set from <paramref name="value"/>: the one
+    /// reading of a cap value, shared by `.tman.kdl` and the `--key` flags so neither can accept what
+    /// the other refuses. A value it cannot read throws, naming <paramref name="label"/> — a cap
+    /// someone wrote down is enforced or refused, never read as absent, which would run the command
+    /// without the bound it was given.
+    /// </summary>
+    public static Caps With(Caps caps, string key, string? value, string label)
     {
-        if (node is null) return new Caps();
-        return new Caps
+        FormatException Bad(string expected) => new($"bad {label} \"{value}\": expected {expected}");
+        const string duration = "a duration such as 30s, 10m or 2h";
+        return key switch
         {
-            MaxTime = ParseDuration(node.Child("max-time")?.Arg(0)),
-            Stall = ParseDuration(node.Child("stall")?.Arg(0)),
-            MaxMemMb = ParseMemMb(node.Child("max-mem")?.Arg(0)),
-            MaxCpuPct = ParseDouble(node.Child("max-cpu")?.Arg(0)),
-            MaxParallel = ParseInt(node.Child("max-parallel")?.Arg(0)),
-            QueueTimeout = ParseDuration(node.Child("queue-timeout")?.Arg(0)),
-            Retain = ParseDuration(node.Child("retain")?.Arg(0)),
+            "max-time" => caps with { MaxTime = ParseDuration(value) ?? throw Bad(duration) },
+            "stall" => caps with { Stall = ParseDuration(value) ?? throw Bad(duration) },
+            "queue-timeout" => caps with { QueueTimeout = ParseDuration(value) ?? throw Bad(duration) },
+            "retain" => caps with { Retain = ParseDuration(value) ?? throw Bad(duration) },
+            "max-mem" => caps with { MaxMemMb = ParseMemMb(value) ?? throw Bad("megabytes, or a size such as 512m or 2g") },
+            "max-cpu" => caps with
+            {
+                MaxCpuPct = double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var pct)
+                            && double.IsFinite(pct) && pct >= 0
+                    ? pct
+                    : throw Bad("a non-negative percentage"),
+            },
+            "max-parallel" => caps with
+            {
+                MaxParallel = int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var n)
+                    ? n
+                    : throw Bad("a non-negative whole number"),
+            },
+            _ => throw new ArgumentOutOfRangeException(nameof(key), key, "not a cap key"),
         };
     }
-
-    static double? ParseDouble(string? s) =>
-        double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out var d) ? d : null;
-
-    static int? ParseInt(string? s) =>
-        int.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var i) ? i : null;
 }

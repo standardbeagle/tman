@@ -87,15 +87,7 @@ public static partial class Program
 
         string? name = null, aliasName = null;
         var replace = false;
-        TimeSpan? capMaxTime = null, capStall = null, capQueueTimeout = null;
-        long? capMaxMemMb = null;
-        double? capMaxCpuPct = null;
-        int? capMaxParallel = null;
-        Caps CliCaps() => new()
-        {
-            MaxTime = capMaxTime, Stall = capStall, QueueTimeout = capQueueTimeout,
-            MaxMemMb = capMaxMemMb, MaxCpuPct = capMaxCpuPct, MaxParallel = capMaxParallel,
-        };
+        var cliCaps = new Caps();
         var cmdArgs = new List<string>();
         var i = 0;
         var sawDashDash = false;
@@ -112,20 +104,9 @@ public static partial class Program
                     case "--name": name = Next(); break;
                     case "--alias": aliasName = Next(); break;
                     case "--replace": replace = true; break;
-                    case "--max-time": capMaxTime = Caps.ParseDuration(Next()) ?? throw new FormatException("bad --max-time"); break;
-                    case "--stall": capStall = Caps.ParseDuration(Next()) ?? throw new FormatException("bad --stall"); break;
-                    case "--max-mem": capMaxMemMb = Caps.ParseMemMb(Next()) ?? throw new FormatException("bad --max-mem"); break;
-                    case "--max-cpu":
-                        capMaxCpuPct = double.TryParse(Next(), System.Globalization.NumberStyles.Float,
-                            System.Globalization.CultureInfo.InvariantCulture, out var cpu) && cpu >= 0
-                            ? cpu : throw new FormatException("bad --max-cpu");
+                    case "--max-time" or "--stall" or "--max-mem" or "--max-cpu" or "--max-parallel" or "--queue-timeout":
+                        cliCaps = Caps.With(cliCaps, a[2..], Next(), a);
                         break;
-                    case "--max-parallel":
-                        capMaxParallel = int.TryParse(Next(), System.Globalization.NumberStyles.None,
-                            System.Globalization.CultureInfo.InvariantCulture, out var par)
-                            ? par : throw new FormatException("bad --max-parallel");
-                        break;
-                    case "--queue-timeout": capQueueTimeout = Caps.ParseDuration(Next()) ?? throw new FormatException("bad --queue-timeout"); break;
                     default: throw new FormatException($"unknown flag {a}");
                 }
                 continue;
@@ -140,7 +121,7 @@ public static partial class Program
             if (!config.Aliases.TryGetValue(aliasName, out var alias))
                 throw new FormatException($"alias '{aliasName}' not defined in {config.FilePath}");
             var args = alias.Args.Concat(cmdArgs).ToArray();
-            var caps = Config.EffectiveCaps(alias, CliCaps(), config);
+            var caps = Config.EffectiveCaps(alias, cliCaps, config);
             return await GatedRun(
                 alias.Command, args, caps, name ?? alias.Name, alias.Name, replace,
                 RunKey.ScopeDir(config), config.Dir, cwd: config.Dir);
@@ -149,7 +130,7 @@ public static partial class Program
         if (cmdArgs.Count == 0) throw new FormatException("run requires a command");
         {
             var config = Config.Load();
-            var caps = Config.EffectiveCaps(null, CliCaps(), config);
+            var caps = Config.EffectiveCaps(null, cliCaps, config);
             return await GatedRun(
                 cmdArgs[0], cmdArgs[1..].ToArray(), caps, name, null, replace,
                 RunKey.ScopeDir(config), config?.Dir);
