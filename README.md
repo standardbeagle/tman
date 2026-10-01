@@ -132,6 +132,15 @@ config share one parser, so each accepts exactly what the other does.
 > on those platforms. `--max-mem` and `--max-cpu` have the same limit: they sum the tree on Linux
 > and measure the root process elsewhere.
 
+> **A run ends when its root process exits.** Output still in the pipe is drained for up to 2s.
+> After that, a process the run left behind that still holds its stdout or stderr — `server &`,
+> or a daemon that kept the pipe — is killed on Linux, which finds it by the pipe itself in
+> `/proc/*/fd`. On macOS and Windows tman says on stderr that the output is still held and stops
+> waiting. Either way the run finishes with the root's exit code and releases its slot. Before
+> this a leftover kept the run open indefinitely, past `--max-time`, holding the slot. Leftovers
+> that let go of the output, such as compiler servers and build daemons that outlive
+> `dotnet build` by design, are left running.
+
 #### Which waits `--stall` protects
 
 On Linux a tick counts as activity if the tree's CPU jiffies moved, its `rchar`/`wchar` moved, or

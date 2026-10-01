@@ -28,6 +28,12 @@ public static class Runner
     public const string ExitStatusUnknownReason = "child exit status unknown";
 
     const int MonitorTickMs = 1000;
+
+    /// <summary>
+    /// How long output may keep flowing once the root has exited. What the root wrote is already in
+    /// the pipe and drains at once; this only runs out when something else still holds the pipe open.
+    /// </summary>
+    static readonly TimeSpan OutputDrainGrace = TimeSpan.FromSeconds(2);
     const int CpuBreachLimit = 3;
     const int SampleFailLimit = 5;
 
@@ -140,6 +146,11 @@ public static class Runner
             return RecordStartFailure(record, $"cannot start '{command}': {e.Message}", log);
         }
         var startedAt = clock.GetTimestamp();
+        // read now, while both ends are certainly open: after the root exits these are how the
+        // processes still holding its output are told apart from every other process
+        var outputPipes = OperatingSystem.IsLinux()
+            ? ProcUtil.PipeIds(proc.StandardOutput.BaseStream, proc.StandardError.BaseStream)
+            : [];
 
         (DateTime Utc, long? Ticks)? childStart;
         try { childStart = ProcUtil.StartStamp(proc); }
@@ -314,8 +325,8 @@ public static class Runner
                 ProcUtil.KillTree(proc);
             }
 
-            try { await Task.WhenAll(outPump, errPump); } catch { }
             await proc.WaitForExitAsync();
+            await DrainOutput(Task.WhenAll(outPump, errPump), outputPipes);
 
             record.HeartbeatUtc = Utc();
             if (killReason is not null)
@@ -373,6 +384,45 @@ public static class Runner
         };
 
     /// <summary>
+    /// Waits for the run's output to end, after its root has exited. Output ends when every holder of
+    /// the pipes has closed them, so a descendant the root left running — `server &amp;`, a daemon that
+    /// kept stdout — holds the run open for as long as it lives, and with it the run's slot and
+    /// every deadline: the monitor has already stopped. The run is over when its root is, so after
+    /// <see cref="OutputDrainGrace"/> the holders are the run's leftovers. On Linux they are found
+    /// by the pipes themselves and killed; elsewhere tman cannot name them, says so, and stops
+    /// waiting — exiting closes its end, and the next write they make fails.
+    /// </summary>
+    static async Task DrainOutput(Task pumps, string[] outputPipes)
+    {
+        if (await Ends(pumps)) return;
+        if (outputPipes.Length == 0)
+        {
+            Console.Error.WriteLine(
+                "tman: a process the run left behind still holds its output; not waiting for it");
+            return;
+        }
+        foreach (var pid in ProcUtil.PipeHolders(outputPipes))
+        {
+            try
+            {
+                using var holder = Process.GetProcessById(pid);
+                Console.Error.WriteLine(
+                    $"tman: killing pid {pid} ({holder.ProcessName}): still holds the run's output after it exited");
+                ProcUtil.KillTree(holder);
+            }
+            catch (Exception e) when (ProcUtil.VerdictFor(e) is not null || e is InvalidOperationException) { }
+        }
+        if (!await Ends(pumps))
+            Console.Error.WriteLine("tman: the run's output is still held open after its leftovers were killed; not waiting for it");
+
+        static async Task<bool> Ends(Task pumps)
+        {
+            try { await pumps.WaitAsync(OutputDrainGrace); return true; }
+            catch (TimeoutException) { return false; }
+        }
+    }
+
+    /// <summary>
     /// A read of the child's counters failed because the child exited under it: the runtime raises
     /// InvalidOperationException once it knows, Win32Exception when the OS entry went first. Any
     /// other failure, or either one from a child still running, is a defect and propagates.
@@ -410,5 +460,7 @@ public static class Runner
         }
         catch (OperationCanceledException) { }
         catch (IOException) { }
+        // the run stopped waiting for this pump and disposed the pipe under it
+        catch (ObjectDisposedException) { }
     }
 }

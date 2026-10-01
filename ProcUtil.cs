@@ -223,4 +223,44 @@ public static class ProcUtil
         }
         catch (Exception e) when (VerdictFor(e) is not null) { return false; }
     }
+
+    /// <summary>
+    /// Linux: the kernel's name for the pipe behind each stream, `pipe:[inode]` — the link text
+    /// /proc/&lt;pid&gt;/fd shows in every process holding either end of it.
+    /// </summary>
+    public static string[] PipeIds(params Stream[] streams) =>
+        streams.Select(stream =>
+        {
+            var fd = stream is System.IO.Pipes.PipeStream pipe
+                ? pipe.SafePipeHandle.DangerousGetHandle()
+                : throw new InvalidOperationException($"redirected output is a {stream.GetType().Name}, not a pipe");
+            return new FileInfo($"/proc/self/fd/{fd}").LinkTarget
+                   ?? throw new InvalidDataException($"/proc/self/fd/{fd} is not a link");
+        }).ToArray();
+
+    /// <summary>
+    /// Linux: every other process holding one of <paramref name="pipeIds"/> open. Only tman holds
+    /// the read ends, so the rest are writers — the root's tree, and whatever left it while keeping
+    /// its stdout. A process this user may not inspect is not one tman started, and is skipped.
+    /// </summary>
+    public static List<int> PipeHolders(string[] pipeIds)
+    {
+        var holders = new List<int>();
+        foreach (var dir in Directory.EnumerateDirectories("/proc"))
+        {
+            if (!int.TryParse(Path.GetFileName(dir), out var pid) || pid == Environment.ProcessId) continue;
+            string[] fds;
+            try { fds = Directory.GetFileSystemEntries(Path.Combine(dir, "fd")); }
+            catch (Exception e) when (VerdictFor(e) is not null) { continue; }
+            if (fds.Any(fd => pipeIds.Contains(LinkTargetOrNull(fd)))) holders.Add(pid);
+        }
+        return holders;
+    }
+
+    /// <summary>A /proc fd link's target, or null for one closed or exited since it was listed.</summary>
+    static string? LinkTargetOrNull(string fdLink)
+    {
+        try { return new FileInfo(fdLink).LinkTarget; }
+        catch (Exception e) when (VerdictFor(e) is not null) { return null; }
+    }
 }

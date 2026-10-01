@@ -236,4 +236,67 @@ public class RunnerTests : IDisposable
 
         Assert.Equal(Runner.ExitTimeout, await run.WaitAsync(TimeSpan.FromSeconds(15)));
     }
+
+    /// <summary>Runs `sh -c script` and returns its exit, what it printed, and how long the run took.</summary>
+    static async Task<(int Exit, string Out, string Err, TimeSpan Took)> Timed(string script, Caps caps)
+    {
+        var outw = new StringWriter();
+        var errw = new StringWriter();
+        var (prevOut, prevErr) = (Console.Out, Console.Error);
+        Console.SetOut(outw);
+        Console.SetError(errw);
+        var started = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            var exit = await Runner.RunAsync("sh", ["-c", script], caps, null, null).WaitAsync(TimeSpan.FromSeconds(30));
+            return (exit, outw.ToString(), errw.ToString(), started.Elapsed);
+        }
+        finally
+        {
+            Console.SetOut(prevOut);
+            Console.SetError(prevErr);
+        }
+    }
+
+    [UnixFact("backgrounds a sleep from sh")]
+    public async Task ARootThatExitsLeavingItsOutputHeld_StillFinishesTheRun()
+    {
+        // The review's reproduction: the root exits at once, a background sleep keeps its stdout,
+        // and the runner waited on that pipe forever — past max-time, holding its slot.
+        var (exit, _, _, took) = await Timed("sleep 60 & echo started", new Caps { MaxTime = TimeSpan.FromSeconds(1) });
+
+        Assert.Equal(0, exit);
+        Assert.True(took < TimeSpan.FromSeconds(15), $"took {took}");
+        Assert.Equal(RunState.Exited, Assert.Single(Store.LoadAll()).State);
+    }
+
+    [LinuxFact("finds the holder through /proc/<pid>/fd")]
+    public async Task ALeftoverHoldingTheRunsOutput_IsKilled()
+    {
+        var (_, printed, err, _) = await Timed("sleep 60 & echo $!", new Caps());
+        var leftover = int.Parse(printed.Trim());
+
+        Assert.Contains($"killing pid {leftover} (sleep)", err);
+        Assert.Equal(ProcessIdentity.Gone, ProcUtil.Probe(leftover, null));
+    }
+
+    [LinuxFact("finds the holder through /proc/<pid>/fd")]
+    public async Task ALeftoverThatLetGoOfTheOutput_IsLeftRunning()
+    {
+        // a descendant that outlives the root on purpose and does not hold its output — a compiler
+        // server, a build daemon — is not what kept the run open, and is not tman's to kill
+        var (exit, printed, _, took) = await Timed("sleep 60 >/dev/null 2>&1 & echo $!", new Caps());
+        var leftover = int.Parse(printed.Trim());
+        try
+        {
+            Assert.Equal(0, exit);
+            Assert.True(took < TimeSpan.FromSeconds(1.5), $"took {took}: waited out the drain grace");
+            Assert.Equal(ProcessIdentity.Mine, ProcUtil.Probe(leftover, null));
+        }
+        finally
+        {
+            using var p = System.Diagnostics.Process.GetProcessById(leftover);
+            p.Kill();
+        }
+    }
 }

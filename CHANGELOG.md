@@ -17,6 +17,13 @@ below 1.0, behavior changes land in minor releases.
   or point `TMAN_HOME` at a shared writable directory), and exits 74. A child already started when
   its record could not be written, or whose store went away mid-run, is killed rather than left
   running where nothing can list, reap, or cap it.
+- **A run whose root exits no longer hangs on a leftover holding its output.** Monitoring stopped
+  when the root exited, and tman then waited without limit for stdout and stderr to close. A
+  background process that kept them open (`sleep 60 &`, `server &`) held the run, its slot, and
+  its caller indefinitely, ignoring `--max-time`. Output now drains for at most 2s after the root
+  exits. On Linux the processes still holding the run's pipes are then found through
+  `/proc/*/fd` and killed. On macOS and Windows tman says the output is still held and stops
+  waiting. Descendants that let go of the output are left alone.
 - **Deadlines no longer move with the wall clock.** `--max-time`, `--stall`, the CPU interval, the
   queue timeout, and the `--replace` wait all subtracted `DateTime.UtcNow` readings. An NTP step,
   a WSL clock resync after sleep, or a changed date could kill a run early or push its deadline
