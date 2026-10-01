@@ -82,6 +82,41 @@ public class KdlTests
     }
 
     [Fact]
+    public void BlockMissingItsClosingBrace_Throws_NamingWhereItOpened()
+    {
+        // a config cut short inside a block used to parse as if the brace were there, so an alias
+        // whose caps had been lost to truncation ran with none of them
+        var ex = Assert.Throws<FormatException>(() => Kdl.Parse("""
+            alias "test" {
+                command "npm"
+            """));
+        Assert.Contains("never closed", ex.Message);
+        Assert.Contains("offset 13", ex.Message);
+    }
+
+    [Fact]
+    public void NestedBlockMissingItsClosingBrace_Throws()
+    {
+        Assert.Throws<FormatException>(() => Kdl.Parse("a { b { c 1 }"));
+    }
+
+    [Fact]
+    public void SlashdashedBlockMissingItsClosingBrace_Throws()
+    {
+        Assert.Throws<FormatException>(() => Kdl.Parse("/-a { b 1"));
+    }
+
+    [Theory]
+    [InlineData("a 1\n/* never closed")]
+    [InlineData("a 1 /* never closed")]
+    [InlineData("a 1\n/* outer /* inner */ still open")]
+    public void UnterminatedBlockComment_Throws(string text)
+    {
+        var ex = Assert.Throws<FormatException>(() => Kdl.Parse(text.Replace("\\n", "\n")));
+        Assert.Contains("unterminated block comment", ex.Message);
+    }
+
+    [Fact]
     public void SlashdashNode_IsDiscardedWithItsChildren()
     {
         var nodes = Kdl.Parse("""

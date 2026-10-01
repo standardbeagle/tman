@@ -17,6 +17,10 @@ below 1.0, behavior changes land in minor releases.
   or point `TMAN_HOME` at a shared writable directory), and exits 74. A child already started when
   its record could not be written, or whose store went away mid-run, is killed rather than left
   running where nothing can list, reap, or cap it.
+- **A truncated `.tman.kdl` is refused.** A file cut off inside a block parsed as if its closing
+  brace were there, and an unterminated `/* ...` comment silently swallowed everything after it, so
+  an alias could lose its caps — or its existence — to a bad save and still run. Both are now parse
+  errors naming the offset where the block or comment opened, and tman exits 127.
 
 ## [0.5.1] - 2026-09-28
 

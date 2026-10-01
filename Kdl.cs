@@ -50,7 +50,7 @@ public static class Kdl
     public static List<KdlNode> Parse(string text)
     {
         var p = new Parser(text);
-        return p.ParseNodes(topLevel: true);
+        return p.ParseNodes(openedAt: null);
     }
 
     sealed class Parser
@@ -63,16 +63,25 @@ public static class Kdl
         char Cur => _i < _s.Length ? _s[_i] : '\0';
         char Peek => _i + 1 < _s.Length ? _s[_i + 1] : '\0';
 
-        public List<KdlNode> ParseNodes(bool topLevel)
+        /// <param name="openedAt">
+        /// Offset of the '{' this block opened at, or null for the document itself. A block is only
+        /// whole once its '}' is read: input that ends first was cut short, and parsing it as if the
+        /// brace were there hands back a config missing whatever followed the cut.
+        /// </param>
+        public List<KdlNode> ParseNodes(int? openedAt)
         {
             var nodes = new List<KdlNode>();
             while (true)
             {
                 SkipTrivia();
-                if (_i >= _s.Length) break;
+                if (_i >= _s.Length)
+                {
+                    if (openedAt is { } open) throw Error(open, "block opened here is never closed (missing '}')");
+                    break;
+                }
                 if (Cur == '}')
                 {
-                    if (topLevel) throw Error("unexpected '}'");
+                    if (openedAt is null) throw Error("unexpected '}'");
                     _i++;
                     return nodes;
                 }
@@ -101,8 +110,8 @@ public static class Kdl
                 }
                 if (Cur == '{')
                 {
-                    _i++;
-                    node.Children.AddRange(ParseNodes(topLevel: false));
+                    var open = _i++;
+                    node.Children.AddRange(ParseNodes(openedAt: open));
                     ConsumeTerminator();
                     return node;
                 }
@@ -235,10 +244,13 @@ public static class Kdl
 
         void SkipBlockComment()
         {
+            var open = _i;
             _i += 2;
             var depth = 1;
-            while (_i < _s.Length && depth > 0)
+            while (depth > 0)
             {
+                // a comment still open at the end swallowed everything after its opener
+                if (_i >= _s.Length) throw Error(open, "unterminated block comment");
                 if (Cur == '/' && Peek == '*') { depth++; _i += 2; }
                 else if (Cur == '*' && Peek == '/') { depth--; _i += 2; }
                 else _i++;
