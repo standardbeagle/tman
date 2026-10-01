@@ -21,7 +21,8 @@ public class QueuedRunTests : IDisposable
     {
         Environment.SetEnvironmentVariable("TMAN_HOME", _home.Path);
         Environment.SetEnvironmentVariable(Runner.ParentIdEnvVar, null);
-        _scope = _home.Mkdir("proj");
+        // physical, as the apphost's cwd-derived bucket is: on macOS the temp root is behind /var
+        _scope = TempDir.RealPath(_home.Mkdir("proj"));
     }
 
     public void Dispose()

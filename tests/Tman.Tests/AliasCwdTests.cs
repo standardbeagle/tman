@@ -111,21 +111,8 @@ public class AliasCwdTests : IDisposable
         var (printed, _) = await RanIn("tool");
 
         Assert.Equal(Canon.Dir(RealPath(_repo.Path)), printed);
-        Assert.Equal(Canon.Dir(script), Assert.Single(Store.LoadAll()).Command);
+        Assert.Equal(Canon.Dir(RealPath(script)), Assert.Single(Store.LoadAll()).Command);
     }
 
-    /// <summary>
-    /// The physical path. `pwd -P` resolves symlinks, and so does getcwd, which the recorded cwd comes
-    /// from; the temp root may be one — macOS's /var is a link to /private/var.
-    /// </summary>
-    static string RealPath(string path)
-    {
-        var dir = new DirectoryInfo(path);
-        while (dir is not null)
-        {
-            if (dir.LinkTarget is not null) return Path.Combine(dir.ResolveLinkTarget(true)!.FullName, Path.GetRelativePath(dir.FullName, path));
-            dir = dir.Parent;
-        }
-        return path;
-    }
+    static string RealPath(string path) => TempDir.RealPath(path);
 }
