@@ -151,26 +151,28 @@ public class NamedQueueRunTests : IDisposable
     [UnixFact("drives tman apphosts running sh children")]
     public async Task ThreeProjectsInOneQueue_RunOneAtATimeInArrivalOrder()
     {
-        // Each one launched once the last has a record, so the order they arrive in is the order
-        // they were started in: an apphost's cold start can outlast a fixed gap, and then the
-        // second launched is the first to arrive.
+        // The queue's one slot is held here until all three are in line, so the line is observed
+        // whole however slowly each apphost starts. Each is launched once the last has a record, so
+        // the order they arrive in is the order they were started in.
+        var held = Store.TryAcquireSlot(Admission.QueueKey("compile"), 1)!;
         var runs = new List<Process>();
         for (var n = 1; n <= 3; n++)
         {
-            var run = Tman($"project{n}", $"echo {n}; sleep 2");
+            var run = Tman($"project{n}", $"echo {n}; sleep 1");
             runs.Add(run);
-            await AwaitRecords(all => all.Any(r => r.RunnerPid == run.Id));
+            await AwaitRecords(all => all.Any(r => r.RunnerPid == run.Id && r.State == RunState.Queued));
         }
 
-        var waiting = await AwaitRecords(all => all.Count(r => r.State == RunState.Queued) == 2);
+        var waiting = Store.LoadAll();
         var listed = await ListOutput();
-        foreach (var (pid, position) in new[] { (runs[1].Id, 1), (runs[2].Id, 2) })
+        for (var i = 0; i < runs.Count; i++)
         {
-            var waiter = waiting.Single(r => r.RunnerPid == pid);
+            var waiter = waiting.Single(r => r.RunnerPid == runs[i].Id);
             Assert.Equal("compile", waiter.Queue);
-            Assert.True(System.Text.RegularExpressions.Regex.IsMatch(listed, $@"(?m)^{waiter.Id}\s.*\squeued #{position}\s"),
-                $"no row for {waiter.Id} at position {position} in:\n{listed}");
+            Assert.True(System.Text.RegularExpressions.Regex.IsMatch(listed, $@"(?m)^{waiter.Id}\s.*\squeued #{i + 1}\s"),
+                $"no row for {waiter.Id} at position {i + 1} in:\n{listed}");
         }
+        Store.ReleaseLock(held);
 
         foreach (var p in runs)
         {
