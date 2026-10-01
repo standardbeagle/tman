@@ -8,7 +8,7 @@ public class CanonTests
     [UnixFact("resolves sh across a colon-separated PATH")]
     public void ResolveCommand_FindsBareNameOnPath()
     {
-        var resolved = Canon.ResolveCommand("sh");
+        var resolved = Canon.ResolveCommand("sh", Directory.GetCurrentDirectory());
 
         Assert.True(System.IO.Path.IsPathRooted(resolved), $"expected an absolute path, got '{resolved}'");
         Assert.True(File.Exists(resolved));
@@ -18,21 +18,32 @@ public class CanonTests
     [UnixFact("resolves sh across a colon-separated PATH")]
     public void ResolveCommand_IsIdempotent()
     {
-        var once = Canon.ResolveCommand("sh");
-        Assert.Equal(once, Canon.ResolveCommand(once));
+        var once = Canon.ResolveCommand("sh", Directory.GetCurrentDirectory());
+        Assert.Equal(once, Canon.ResolveCommand(once, Directory.GetCurrentDirectory()));
     }
 
     [Fact]
     public void ResolveCommand_UnknownName_IsReturnedUnchanged()
     {
         // the run is about to fail to start; the name the user typed is the useful thing to report
-        Assert.Equal("definitely-not-a-real-command-xyz", Canon.ResolveCommand("definitely-not-a-real-command-xyz"));
+        Assert.Equal("definitely-not-a-real-command-xyz", Canon.ResolveCommand("definitely-not-a-real-command-xyz", Directory.GetCurrentDirectory()));
+    }
+
+    [Fact]
+    public void ResolveCommand_ARelativePath_IsReadFromTheChildsDirectory()
+    {
+        // the base is passed in, so this cannot pass by the test host standing in the right place
+        var childCwd = Path.Combine(Path.GetTempPath(), "canon-child-cwd");
+        Assert.NotEqual(Canon.Dir(childCwd), Canon.Dir(Directory.GetCurrentDirectory()));
+
+        Assert.Equal(Path.Combine(childCwd, "tool"), Canon.ResolveCommand("./tool", childCwd));
+        Assert.Equal(Path.Combine(childCwd, "bin", "tool"), Canon.ResolveCommand(Path.Combine("bin", "tool"), childCwd));
     }
 
     [UnixFact("asserts the absolute form of /bin/sh")]
     public void ResolveCommand_CollapsesRelativeSegments()
     {
-        Assert.Equal("/bin/sh", Canon.ResolveCommand("/bin/./sh"));
+        Assert.Equal("/bin/sh", Canon.ResolveCommand("/bin/./sh", Directory.GetCurrentDirectory()));
     }
 
     [Fact]

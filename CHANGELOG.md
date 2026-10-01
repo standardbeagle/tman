@@ -17,6 +17,10 @@ below 1.0, behavior changes land in minor releases.
   or point `TMAN_HOME` at a shared writable directory), and exits 74. A child already started when
   its record could not be written, or whose store went away mid-run, is killed rather than left
   running where nothing can list, reap, or cap it.
+- **An alias program written as a relative path runs from the config's directory.** An alias
+  already runs there, and its args are read from there, but `command "./tool"` was resolved
+  against the caller's directory first — so `tman tool` from a subdirectory looked for
+  `sub/tool` and exited 127. The program is now resolved against the directory the child runs in.
 - **A cap that cannot be read is refused, not dropped.** `max-time "bogus"` in `.tman.kdl` parsed
   as no deadline, so the command ran unbounded, exited 0, and printed nothing. A setting tman did
   not know (`max_time`), one given twice or with no value, a second `defaults` block, and a

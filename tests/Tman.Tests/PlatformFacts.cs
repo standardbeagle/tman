@@ -24,6 +24,15 @@ public sealed class UnixFactAttribute : FactAttribute
     }
 }
 
+/// <summary>The theory form of <see cref="UnixFactAttribute"/>, skipped off Unix for the same reason.</summary>
+public sealed class UnixTheoryAttribute : TheoryAttribute
+{
+    public UnixTheoryAttribute(string because)
+    {
+        if (!(OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())) Skip = because;
+    }
+}
+
 /// <summary>
 /// A fact whose subject only exists on Linux — /proc — skipped elsewhere carrying
 /// <paramref name="because"/>, for the same reason as <see cref="UnixFactAttribute"/>.

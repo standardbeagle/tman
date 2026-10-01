@@ -14,11 +14,16 @@ public static class Canon
     /// record identically. Returns the input unchanged when nothing on PATH matches — the run is
     /// about to fail to start anyway, and the unresolved name is the more useful thing to report.
     /// </summary>
-    public static string ResolveCommand(string command)
+    /// <param name="childCwd">
+    /// The directory the child will run in. A command written as a relative path (`./tool`,
+    /// `scripts/tool`) means that path from there — for an alias, the config's directory — and not
+    /// from wherever tman was invoked.
+    /// </param>
+    public static string ResolveCommand(string command, string childCwd)
     {
         if (command.Length == 0) return command;
         if (command.Contains(Path.DirectorySeparatorChar) || command.Contains(Path.AltDirectorySeparatorChar))
-            return TryFullPath(command);
+            return TryFullPath(command, childCwd);
 
         var pathVar = Environment.GetEnvironmentVariable("PATH");
         if (string.IsNullOrEmpty(pathVar)) return command;
@@ -45,9 +50,9 @@ public static class Canon
             yield return combined + ext;
     }
 
-    static string TryFullPath(string path)
+    static string TryFullPath(string path, string? basePath = null)
     {
-        try { return Path.GetFullPath(path); }
+        try { return basePath is null ? Path.GetFullPath(path) : Path.GetFullPath(path, basePath); }
         catch (ArgumentException) { return path; }
         catch (NotSupportedException) { return path; }
         catch (PathTooLongException) { return path; }

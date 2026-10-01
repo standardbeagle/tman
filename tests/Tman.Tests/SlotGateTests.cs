@@ -30,7 +30,7 @@ public class SlotGateTests : IDisposable
         _home.Dispose();
     }
 
-    string Group(string command) => RunKey.For(null, Canon.ResolveCommand(command), _scope);
+    string Group(string command) => RunKey.For(null, Canon.ResolveCommand(command, Directory.GetCurrentDirectory()), _scope);
 
     Task<int> Sleep(string seconds, Caps caps, string? name = null) =>
         Program.GatedRun("sleep", new[] { seconds }, caps, name, null, replace: false, _scope);
@@ -253,7 +253,7 @@ public class SlotGateTests : IDisposable
     [UnixFact("needs a real orphaned sleep child and its /proc start time")]
     public async Task ARunWhoseChildOutlivedItsRunner_IsRefusedAndLeavesTheNameFree()
     {
-        var group = RunKey.For("dedup", Canon.ResolveCommand("sleep"), _scope);
+        var group = RunKey.For("dedup", Canon.ResolveCommand("sleep", Directory.GetCurrentDirectory()), _scope);
         using var orphan = System.Diagnostics.Process.Start("sleep", "30")
             ?? throw new IOException("could not start sleep");
         try
@@ -266,7 +266,7 @@ public class SlotGateTests : IDisposable
                 Pid = orphan.Id,
                 ChildStartUtc = orphanStart.Utc,
                 ChildStartTicks = orphanStart.Ticks,
-                Command = Canon.ResolveCommand("sleep"),
+                Command = Canon.ResolveCommand("sleep", Directory.GetCurrentDirectory()),
                 Args = new[] { "30" },
                 Group = group,
                 StartedUtc = DateTime.UtcNow,
@@ -295,7 +295,7 @@ public class SlotGateTests : IDisposable
     [UnixFact("drives the production gate against the sleep binary")]
     public async Task AReplaceThatIsNeverGivenTheName_DoesNotRun()
     {
-        var group = RunKey.For("dedup", Canon.ResolveCommand("sleep"), _scope);
+        var group = RunKey.For("dedup", Canon.ResolveCommand("sleep", Directory.GetCurrentDirectory()), _scope);
         var heldByAnotherRunner = Store.TryAcquireNameLock(group);
         Assert.NotNull(heldByAnotherRunner);
 
@@ -320,7 +320,7 @@ public class SlotGateTests : IDisposable
     public async Task ReclaimingADeadRunnersName_TakesOverItsLockFileRatherThanReplacingIt()
     {
         Store.EnsureDirs();
-        var lockPath = Store.LockPathFor(RunKey.For("dedup", Canon.ResolveCommand("sleep"), _scope));
+        var lockPath = Store.LockPathFor(RunKey.For("dedup", Canon.ResolveCommand("sleep", Directory.GetCurrentDirectory()), _scope));
         // the dedup lock of a runner that was killed while holding it
         File.WriteAllText(lockPath, $"2147483646 {DateTime.UtcNow:O}\n");
         var sameInode = Path.Combine(_home.Path, "reclaimed-lock-inode");
@@ -358,7 +358,7 @@ public class SlotGateTests : IDisposable
 
         Store.EnsureDirs();
         var caps = new Caps { QueueTimeout = TimeSpan.FromSeconds(30) };
-        var lockPath = Store.LockPathFor(RunKey.For("dedup", Canon.ResolveCommand("sleep"), _scope));
+        var lockPath = Store.LockPathFor(RunKey.For("dedup", Canon.ResolveCommand("sleep", Directory.GetCurrentDirectory()), _scope));
         var runsDir = Path.Combine(_home.Path, "runs");
         var badRounds = 0;
 

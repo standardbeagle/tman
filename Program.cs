@@ -152,7 +152,7 @@ public static partial class Program
         string command, string[] args, Caps caps, string? name, string? alias, bool replace,
         string scopeDir, string? logDir = null, string? cwd = null)
     {
-        command = Canon.ResolveCommand(command);
+        command = Canon.ResolveCommand(command, cwd ?? Directory.GetCurrentDirectory());
         var group = RunKey.For(name, command, scopeDir);
         // a supervised process that re-enters tman is one logical run, not a second claim on a slot
         var nested = Environment.GetEnvironmentVariable(Runner.ParentIdEnvVar) is not null;

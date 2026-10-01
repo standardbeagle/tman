@@ -90,6 +90,30 @@ public class AliasCwdTests : IDisposable
         Assert.Equal(Canon.Dir(RealPath(_sub)), recorded);
     }
 
+    [UnixTheory("the alias's program is a shell script made executable with chmod")]
+    [InlineData("./tool")]
+    [InlineData("scripts/tool")]
+    public async Task AnAliasProgramWrittenRelativeToTheConfig_IsFoundFromASubdirectory(string program)
+    {
+        // An alias's args are relative to its config, and so is a program written as a path. It was
+        // resolved against the caller's directory instead, so `tman tool` from src/deeper looked
+        // for src/deeper/tool and exited 127.
+        var script = _repo.WriteFile(program, "#!/bin/sh\npwd -P\n");
+        File.SetUnixFileMode(script, File.GetUnixFileMode(script) | UnixFileMode.UserExecute);
+        _repo.WriteFile(Config.FileName, $$"""
+            alias "tool" {
+                command "{{program}}"
+            }
+            """);
+        // precondition: the same relative path from where the caller stands names nothing
+        Assert.False(File.Exists(Path.Combine(_sub, program)));
+
+        var (printed, _) = await RanIn("tool");
+
+        Assert.Equal(Canon.Dir(RealPath(_repo.Path)), printed);
+        Assert.Equal(Canon.Dir(script), Assert.Single(Store.LoadAll()).Command);
+    }
+
     /// <summary>
     /// The physical path. `pwd -P` resolves symlinks, and so does getcwd, which the recorded cwd comes
     /// from; the temp root may be one — macOS's /var is a link to /private/var.
