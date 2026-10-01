@@ -49,7 +49,7 @@ public static class Config
         var dir = FindConfigDir(startDir);
         if (dir is null) return null;
         var path = Path.Combine(dir, FileName);
-        var nodes = Kdl.Parse(File.ReadAllText(path));
+        var nodes = ParseFile(path);
 
         Caps? defaults = null;
         var aliases = new Dictionary<string, AliasDef>(StringComparer.OrdinalIgnoreCase);
@@ -105,7 +105,7 @@ public static class Config
         var queues = new Dictionary<string, NamedQueue>(StringComparer.Ordinal);
         if (File.Exists(path))
         {
-            foreach (var n in Kdl.Parse(File.ReadAllText(path)))
+            foreach (var n in ParseFile(path))
             {
                 if (n.Name != "queue")
                     throw new FormatException($"{path}: unknown node \"{n.Name}\" (expected queue)");
@@ -123,6 +123,13 @@ public static class Config
             ? queue
             : throw new FormatException(
                 $"queue \"{name}\" is not declared in {path}; declare it there, e.g. queue \"{name}\" {{ max-parallel 1 }}");
+    }
+
+    /// <summary>A config file's nodes; a parse error names the file, since the offset alone does not.</summary>
+    static List<KdlNode> ParseFile(string path)
+    {
+        try { return Kdl.Parse(File.ReadAllText(path)); }
+        catch (FormatException e) { throw new FormatException($"{path}: {e.Message}"); }
     }
 
     /// <param name="ownedElsewhere">Children the caller reads itself, such as an alias's command.</param>

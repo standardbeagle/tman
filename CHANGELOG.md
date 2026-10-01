@@ -89,7 +89,8 @@ below 1.0, behavior changes land in minor releases.
 - **A truncated `.tman.kdl` is refused.** A file cut off inside a block parsed as if its closing
   brace were there, and an unterminated `/* ...` comment silently swallowed everything after it, so
   an alias could lose its caps — or its existence — to a bad save and still run. Both are now parse
-  errors naming the offset where the block or comment opened, and tman exits 127.
+  errors naming the offset where the block or comment opened, and tman exits 127. Every parse error
+  in `.tman.kdl` or `~/.tman/tman.kdl` now names the file too, not just the offset.
 
 ## [0.5.1] - 2026-09-28
 

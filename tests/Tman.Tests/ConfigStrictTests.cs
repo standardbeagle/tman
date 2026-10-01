@@ -68,6 +68,15 @@ public class ConfigStrictTests
     }
 
     [Fact]
+    public void AFileThatDoesNotParse_IsNamedInTheError()
+    {
+        using var proj = new TempDir();
+        proj.WriteFile(Config.FileName, "alias \"t\" {\n    command \"true\"\n");
+        var ex = Assert.Throws<FormatException>(() => Config.Load(proj.Path));
+        Assert.StartsWith(Path.Combine(proj.Path, Config.FileName) + ": KDL parse error", ex.Message);
+    }
+
+    [Fact]
     public void EveryCapKey_IsReadFromABlock()
     {
         // the refusal above must not cost a valid key: each one, written as the docs write it
