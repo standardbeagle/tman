@@ -226,6 +226,9 @@ public static class Runner
             {
                 try { await Task.Delay(MonitorTickMs, interrupt.Token); }
                 catch (OperationCanceledException) { break; }
+                // a root that exited during the delay finished inside every cap it is about to be
+                // measured against; judging it at this tick reported a run that ended in time as timed out
+                if (proc.HasExited) break;
 
                 var now = clock.GetTimestamp();
                 var nowUtc = Utc();

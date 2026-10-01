@@ -41,6 +41,11 @@ below 1.0, behavior changes land in minor releases.
   is published by an atomic rename, so concurrent first launches can no longer exec a
   half-written file. Only the binary is read out of the archive. A leftover
   `~/.cache/tman/tman` from older versions is unused and can be deleted.
+- **A run that finishes inside its deadline is never reported timed out.** The monitor checked
+  for exit only before each 1s tick, then judged the caps after the tick. A root that exited during
+  that second was measured as if still running, so a run ending just before `--max-time` could be
+  recorded `timedout` with exit 124. The same applied to stall and resource kills. The runner now
+  re-checks for exit after every tick.
 - **A run whose root exits no longer hangs on a leftover holding its output.** Monitoring stopped
   when the root exited, and tman then waited without limit for stdout and stderr to close. A
   background process that kept them open (`sleep 60 &`, `server &`) held the run, its slot, and

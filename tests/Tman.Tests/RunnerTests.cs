@@ -299,4 +299,15 @@ public class RunnerTests : IDisposable
             p.Kill();
         }
     }
+
+    [UnixFact("supervises the sleep binary")]
+    public async Task ARootThatExitsDuringATick_IsNotJudgedAtThatTick()
+    {
+        // the child outlives the start of the monitor loop and exits half way into its first tick;
+        // that tick lands past max-time, and used to report the finished run as timed out
+        var exit = await Runner.RunAsync("sleep", ["0.5"], new Caps { MaxTime = TimeSpan.FromSeconds(1) }, null, null);
+
+        Assert.Equal(0, exit);
+        Assert.Equal(RunState.Exited, Assert.Single(Store.LoadAll()).State);
+    }
 }
