@@ -17,6 +17,10 @@ below 1.0, behavior changes land in minor releases.
   or point `TMAN_HOME` at a shared writable directory), and exits 74. A child already started when
   its record could not be written, or whose store went away mid-run, is killed rather than left
   running where nothing can list, reap, or cap it.
+- **`tman init --shims` shims the aliases the config defines.** With a `.tman.kdl` already in
+  place it still named the shims after what project detection would scaffold, so a config with a
+  `custom` alias got a `test` shim that could only fail with "alias not defined", and no `custom`
+  shim. Shims and their `.gitignore` entries now come from the config on disk.
 - **An alias program written as a relative path runs from the config's directory.** An alias
   already runs there, and its args are read from there, but `command "./tool"` was resolved
   against the caller's directory first — so `tman tool` from a subdirectory looked for

@@ -88,6 +88,28 @@ public class InitTests
     }
 
     [Fact]
+    public void ExistingConfig_ShimsItsAliasesNotDetectedOnes()
+    {
+        // the config on disk is what the shims call into: one per alias it defines, and none for an
+        // alias it does not — that shim could only ever fail with "alias not defined"
+        using var dir = new TempDir();
+        dir.WriteFile("go.mod", "module x\n");
+        dir.WriteFile(".tman.kdl", """
+            alias "custom" {
+                command "true"
+            }
+            """);
+
+        Assert.Equal(0, RunInitIn(dir.Path, "--shims", "--gitignore"));
+
+        Assert.True(File.Exists(System.IO.Path.Combine(dir.Path, "custom")));
+        Assert.False(File.Exists(System.IO.Path.Combine(dir.Path, "test")));
+        var ignored = File.ReadAllLines(System.IO.Path.Combine(dir.Path, ".gitignore"));
+        Assert.Contains("/custom", ignored);
+        Assert.DoesNotContain("/test", ignored);
+    }
+
+    [Fact]
     public void Rerun_KeepsExistingConfig()
     {
         using var dir = new TempDir();

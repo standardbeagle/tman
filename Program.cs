@@ -454,20 +454,21 @@ public static partial class Program
         var withShims = argv.Contains("--shims");
         var withGitignore = argv.Contains("--gitignore");
 
-        var detected = DetectAliases(dir);
         if (File.Exists(path))
         {
             Console.WriteLine($"tman: {Config.FileName} already exists");
         }
         else
         {
-            File.WriteAllText(path, RenderConfig(detected));
+            File.WriteAllText(path, RenderConfig(DetectAliases(dir)));
             Console.WriteLine($"tman: wrote {path}");
         }
 
-        var names = detected.Count > 0
-            ? detected.Select(a => a.Name).ToList()
-            : new List<string> { "test" };
+        // Shims call into the config on disk, so they are named after its aliases — a kept config's
+        // aliases are not what detection would scaffold today. A config with none still gets a
+        // `test` shim, which fails naming the undefined alias until one is written.
+        var aliases = Config.Load(dir)!.Aliases.Values.Select(a => a.Name).ToList();
+        var names = aliases.Count > 0 ? aliases : ["test"];
         if (withShims)
         {
             var (written, skipped) = Shim.Generate(dir, names);
