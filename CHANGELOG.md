@@ -17,6 +17,11 @@ below 1.0, behavior changes land in minor releases.
   or point `TMAN_HOME` at a shared writable directory), and exits 74. A child already started when
   its record could not be written, or whose store went away mid-run, is killed rather than left
   running where nothing can list, reap, or cap it.
+- **A failed write to the run log no longer skips the digest and leaks the log's lock.** The first
+  write error marked the log closed, so finishing the run returned early: the digest was never
+  written, and the writer and the `.lock` were released only when tman exited. Capture now stops
+  with one stderr line, and the run still finishes normally. The digest is written with a
+  `capture: failed` line, and the lock is released.
 - **`tman init --shims` shims the aliases the config defines.** With a `.tman.kdl` already in
   place it still named the shims after what project detection would scaffold, so a config with a
   `custom` alias got a `test` shim that could only fail with "alias not defined", and no `custom`

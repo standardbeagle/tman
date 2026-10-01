@@ -276,6 +276,7 @@ like a clean run.
 | no `.tman.kdl` | no log — an unconfigured `tman run` has no project to write into, and `.tman/` dirs scattered through arbitrary cwds is not a side effect a supervisor should have |
 | size | the full log is capped at 64 MB, after which the most recent 512 KB is kept and the cut is marked |
 | killed runs | get a digest too: the outcome line names the kill reason, and the tail is the last output before the silence |
+| a log write that fails | a full disk or a vanished mount stops capture with one line on stderr; the run goes on, and its digest is still written, with a `capture: failed` line saying the full log is incomplete |
 
 ## AI agent setup
 

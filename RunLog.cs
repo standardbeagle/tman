@@ -51,6 +51,12 @@ public sealed class RunLog : IDisposable
     long _written;
     bool _capped;
     bool _closed;
+    /// <summary>
+    /// Why the log stopped taking output, or null while it is whole. Kept apart from
+    /// <see cref="_closed"/>: a write that failed ends capture, not the log's duty to release its
+    /// lock and report the run.
+    /// </summary>
+    string? _captureError;
 
     public string LogPath { get; }
     public string DigestPath { get; }
@@ -70,7 +76,15 @@ public sealed class RunLog : IDisposable
     /// run because the convenience is unavailable is not acceptable, and neither is two runs
     /// writing one file.
     /// </summary>
-    public static RunLog? Open(string scopeDir, string? name, string? alias, string command)
+    public static RunLog? Open(string scopeDir, string? name, string? alias, string command) =>
+        Open(scopeDir, name, alias, command,
+            path => new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.ReadWrite));
+
+    /// <summary>
+    /// Test seam: <paramref name="openLog"/> stands in for the file the log is written through, so a
+    /// test can make it fail mid-run — a full disk cannot be produced on demand.
+    /// </summary>
+    internal static RunLog? Open(string scopeDir, string? name, string? alias, string command, Func<string, Stream> openLog)
     {
         try
         {
@@ -94,8 +108,7 @@ public sealed class RunLog : IDisposable
                 // honest state is "this run has produced no verdict yet", not the previous run's.
                 try { File.Delete(digestPath); } catch (IOException) { }
 
-                var writer = new StreamWriter(
-                    new FileStream(logPath, FileMode.Create, FileAccess.Write, FileShare.ReadWrite));
+                var writer = new StreamWriter(openLog(logPath));
                 return new RunLog(writer, hold, logPath, digestPath);
             }
             catch
@@ -125,7 +138,7 @@ public sealed class RunLog : IDisposable
     {
         lock (_gate)
         {
-            if (_closed) return;
+            if (_closed || _captureError is not null) return;
             try
             {
                 if (!_capped)
@@ -137,8 +150,15 @@ public sealed class RunLog : IDisposable
                 }
                 AppendTail(chunk);
             }
-            catch (IOException) { _closed = true; }
+            catch (IOException e) { StopCapture(e); }
         }
+    }
+
+    /// <summary>Said once, when it happens: the run goes on, but its log is no longer whole.</summary>
+    void StopCapture(IOException e)
+    {
+        _captureError = e.Message;
+        Console.Error.WriteLine($"tman: writing {LogPath} failed: {e.Message}; the rest of this run's output is not captured");
     }
 
     // Once capped, the most recent output is the part worth keeping: every runner prints its
@@ -172,17 +192,20 @@ public sealed class RunLog : IDisposable
         {
             if (_closed) return;
             _closed = true;
-            try
+            if (_captureError is null)
             {
-                if (_capped)
+                try
                 {
-                    _writer.Write($"{Environment.NewLine}── tman: log capped at {MaxBytes / (1024 * 1024)}MB; tail follows ──{Environment.NewLine}");
-                    for (var i = 0; i < _tailLen; i++) _writer.Write(_tail[(_tailStart + i) % TailChars]);
+                    if (_capped)
+                    {
+                        _writer.Write($"{Environment.NewLine}── tman: log capped at {MaxBytes / (1024 * 1024)}MB; tail follows ──{Environment.NewLine}");
+                        for (var i = 0; i < _tailLen; i++) _writer.Write(_tail[(_tailStart + i) % TailChars]);
+                    }
+                    _writer.Flush();
                 }
-                _writer.Flush();
+                catch (IOException e) { StopCapture(e); }
             }
-            catch (IOException) { }
-            try { _writer.Dispose(); } catch (IOException) { }
+            DisposeWriter();
         }
 
         // the lock outlives the digest write: released first, a run claiming the slug in between
@@ -217,6 +240,8 @@ public sealed class RunLog : IDisposable
         yield return $"  outcome:  {outcome}";
         yield return $"  command:  {record.Command} {string.Join(' ', record.Args)}";
         yield return $"  cwd:      {record.Cwd}";
+        if (_captureError is not null)
+            yield return $"  capture:  failed — {_captureError}; the full log is incomplete";
         yield return $"  started:  {record.StartedUtc:u}  ({duration.TotalSeconds:F1}s)";
         yield return $"  full log: {LogPath}";
         yield return "";
@@ -228,8 +253,17 @@ public sealed class RunLog : IDisposable
         {
             if (_closed) return;
             _closed = true;
-            try { _writer.Dispose(); } catch (IOException) { }
+            DisposeWriter();
             _hold.Dispose();
         }
+    }
+
+    /// <summary>
+    /// Disposing flushes what is still buffered, which fails again after a failed write; the handle
+    /// is released either way, and the failure was already reported where it happened.
+    /// </summary>
+    void DisposeWriter()
+    {
+        try { _writer.Dispose(); } catch (IOException) { }
     }
 }

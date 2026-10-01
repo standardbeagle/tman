@@ -215,6 +215,47 @@ public class RunLogTests : IDisposable
         Assert.NotNull(next);
     }
 
+    /// <summary>A log file whose every write fails, as one does on a full disk.</summary>
+    sealed class FailingStream : MemoryStream
+    {
+        public override void Write(byte[] buffer, int offset, int count) => throw new IOException("No space left on device");
+        public override void Write(ReadOnlySpan<byte> buffer) => throw new IOException("No space left on device");
+    }
+
+    [Fact]
+    public void ALogWriteThatFails_StillWritesTheDigestAndReleasesTheLock()
+    {
+        var log = RunLog.Open(_repo.Path, "test", "test", "sh", path =>
+        {
+            File.WriteAllText(path, "");
+            return new FailingStream();
+        })!;
+        var err = new StringWriter();
+        var prevErr = Console.Error;
+        Console.SetError(err);
+        try
+        {
+            // larger than the writer's buffer, so the write reaches the stream and fails there
+            log.Write(new string('x', 64 * 1024));
+            log.Complete(new RunRecord
+            {
+                Id = "abc123", Command = "sh", Args = [], State = RunState.Exited, ExitCode = 1,
+            });
+        }
+        finally
+        {
+            Console.SetError(prevErr);
+        }
+
+        Assert.Contains("No space left on device", err.ToString());
+        var digest = File.ReadAllText(DigestPath("test"));
+        Assert.Contains("exit 1", digest);
+        Assert.Contains("capture:  failed — No space left on device", digest);
+        // released: the next run of the key can open its log
+        using var next = RunLog.Open(_repo.Path, "test", "test", "sh");
+        Assert.NotNull(next);
+    }
+
     [Fact]
     public void OpenOnAnUnwritableParent_ReturnsNullRatherThanThrowing()
     {
