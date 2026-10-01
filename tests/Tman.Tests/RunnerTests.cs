@@ -80,11 +80,14 @@ public class RunnerTests : IDisposable
     public async Task SilentBusyChild_IsNotStalled_OnWindows()
     {
         // the same case as SilentBusyChild_IsNotStalled: cmd waits, its powershell child burns cpu
+        var took = System.Diagnostics.Stopwatch.StartNew();
         var exit = await Runner.RunAsync("cmd.exe",
-            ["/c", "powershell -NoProfile -Command \"$end=(Get-Date).AddSeconds(4); while((Get-Date) -lt $end){}\""],
+            ["/c", WindowsCommand.PowerShell("$end=(Get-Date).AddSeconds(4); while((Get-Date) -lt $end){}")],
             StallOnly(1), null, null);
 
         Assert.Equal(0, exit);
+        // the loop really ran: a run over in under its 4s never gave the stall window a chance
+        Assert.True(took.Elapsed >= TimeSpan.FromSeconds(3.5), $"took {took.Elapsed}");
     }
 
     /// <summary>A sampler that reports the same frozen counters every tick, differing only in state.</summary>

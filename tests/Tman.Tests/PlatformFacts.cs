@@ -56,3 +56,15 @@ public sealed class WindowsFactAttribute : FactAttribute
         if (!OperatingSystem.IsWindows()) Skip = because;
     }
 }
+
+internal static class WindowsCommand
+{
+    /// <summary>
+    /// A `powershell` command line for `cmd /c` that runs <paramref name="script"/>. Encoded rather
+    /// than quoted: .NET escapes an inner quote as \", cmd passes it through, and PowerShell then
+    /// reads `-Command "..."` as a string literal to print — the script never runs, and a test built
+    /// on it passes having done nothing.
+    /// </summary>
+    public static string PowerShell(string script) =>
+        "powershell -NoProfile -EncodedCommand " + Convert.ToBase64String(System.Text.Encoding.Unicode.GetBytes(script));
+}

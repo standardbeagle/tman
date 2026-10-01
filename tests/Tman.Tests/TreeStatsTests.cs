@@ -130,7 +130,7 @@ public class TreeStatsTests
     /// </summary>
     static System.Diagnostics.Process ShellWithBusyChild() => System.Diagnostics.Process.Start(
         OperatingSystem.IsWindows()
-            ? new System.Diagnostics.ProcessStartInfo("cmd.exe") { ArgumentList = { "/c", "powershell -NoProfile -Command \"while($true){}\"" } }
+            ? new System.Diagnostics.ProcessStartInfo("cmd.exe") { ArgumentList = { "/c", WindowsCommand.PowerShell("while($true){}") } }
             : new System.Diagnostics.ProcessStartInfo("sh") { ArgumentList = { "-c", "yes > /dev/null & wait" } })!;
 
     static TreeSample SampleOnceTheTreeHas(int rootPid, int procs)
@@ -173,7 +173,8 @@ public class TreeStatsTests
             var before = SampleOnceTheTreeHas(shell.Id, procs: 2);
             var clock = System.Diagnostics.Stopwatch.StartNew();
             Thread.Sleep(1500);
-            Assert.True(TreeStats.TrySample(shell.Id, out var after));
+            Assert.True(TreeStats.TrySample(shell.Id, out var after),
+                $"the root vanished between samples (exited: {shell.HasExited})");
             var seconds = clock.Elapsed.TotalSeconds;
 
             var jiffies = after.CpuJiffies - before.CpuJiffies;
