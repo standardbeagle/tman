@@ -58,6 +58,10 @@ public static class Runner
     /// uninterruptible io wait on demand is not possible; deciding on one is what needs pinning.
     /// </summary>
     /// <param name="cwd">Directory the child runs in; null means where tman itself is standing.</param>
+    /// <param name="clock">
+    /// Null means the system clock. Every cap is enforced on its monotonic timestamps; its wall clock
+    /// only stamps the record, so a test can step the wall clock and see that no deadline moves.
+    /// </param>
     internal static async Task<int> RunAsync(
         string command,
         string[] args,
@@ -68,8 +72,13 @@ public static class Runner
         CancellationToken ct,
         Func<int, TreeSample?>? sampler,
         RunLog? log = null,
-        string? cwd = null)
+        string? cwd = null,
+        TimeProvider? clock = null)
     {
+        // An NTP step, a WSL resync after sleep, or a user setting the date moves the wall clock by
+        // any amount in either direction; a deadline measured on it fires early or never.
+        clock ??= TimeProvider.System;
+        DateTime Utc() => clock.GetUtcNow().UtcDateTime;
         var id = Guid.NewGuid().ToString("N")[..12];
         cwd = Canon.Dir(cwd ?? Directory.GetCurrentDirectory());
 
@@ -114,9 +123,9 @@ public static class Runner
             Cwd = cwd,
             Group = group,
             ParentId = Environment.GetEnvironmentVariable(ParentIdEnvVar),
-            StartedUtc = DateTime.UtcNow,
-            HeartbeatUtc = DateTime.UtcNow,
-            LastOutputUtc = DateTime.UtcNow,
+            StartedUtc = Utc(),
+            HeartbeatUtc = Utc(),
+            LastOutputUtc = Utc(),
             Caps = caps,
         };
 
@@ -130,6 +139,7 @@ public static class Runner
             Console.CancelKeyPress -= onCancel;
             return RecordStartFailure(record, $"cannot start '{command}': {e.Message}", log);
         }
+        var startedAt = clock.GetTimestamp();
 
         (DateTime Utc, long? Ticks)? childStart;
         try { childStart = ProcUtil.StartStamp(proc); }
@@ -166,13 +176,13 @@ public static class Runner
         string? killReason = null;
         RunState killState = RunState.Killed;
         var prevCpu = TimeSpan.Zero;
-        var prevTick = DateTime.UtcNow;
+        var prevTick = clock.GetTimestamp();
         var cpuBreaches = 0;
         try { prevCpu = proc.TotalProcessorTime; }
         catch (Exception e) when (ExitedMeanwhile(e, proc)) { }
 
         var lastOutput = record.LastOutputUtc;
-        var lastProgress = record.StartedUtc;
+        var lastProgress = startedAt;
         var prevOutputBytes = 0L;
         var haveSample = TrySample(sampler, record.Pid, out var prevSample);
         var prevSampleTick = prevTick;
@@ -187,13 +197,14 @@ public static class Runner
                 try { await Task.Delay(MonitorTickMs, interrupt.Token); }
                 catch (OperationCanceledException) { break; }
 
-                var now = DateTime.UtcNow;
-                record.HeartbeatUtc = now;
+                var now = clock.GetTimestamp();
+                var nowUtc = Utc();
+                record.HeartbeatUtc = nowUtc;
 
                 var outNow = Interlocked.Read(ref outputBytes);
                 var progressed = outNow != prevOutputBytes;
                 prevOutputBytes = outNow;
-                if (progressed) lastOutput = now;
+                if (progressed) lastOutput = nowUtc;
                 record.LastOutputUtc = lastOutput;
 
                 long memMb = 0;
@@ -207,7 +218,7 @@ public static class Runner
                         if (TreeStats.ShowsProgress(prevSample, sample)) progressed = true;
                         // cpu of the whole tree, over the interval the two samples actually span —
                         // a missed tick in between is spread over its true elapsed, not the last tick
-                        var sinceSample = (now - prevSampleTick).TotalSeconds;
+                        var sinceSample = clock.GetElapsedTime(prevSampleTick, now).TotalSeconds;
                         if (sinceSample > 0)
                             cpuPct = (sample.CpuJiffies - prevSample.CpuJiffies)
                                 / (sinceSample * JiffiesPerSecond * Environment.ProcessorCount) * 100.0;
@@ -242,7 +253,7 @@ public static class Runner
                 try
                 {
                     var curCpu = proc.TotalProcessorTime;
-                    var elapsed = (now - prevTick).TotalSeconds;
+                    var elapsed = clock.GetElapsedTime(prevTick, now).TotalSeconds;
                     if (!sampleOk && elapsed > 0)
                         cpuPct = (curCpu - prevCpu).TotalSeconds / (elapsed * Environment.ProcessorCount) * 100.0;
                     prevCpu = curCpu;
@@ -252,9 +263,9 @@ public static class Runner
 
                 if (Store.ReadKillRequest(record.Id) is { } requested)
                 { killReason = requested; killState = RunState.Killed; }
-                else if (caps.MaxTime is { } mt && now - record.StartedUtc > mt)
+                else if (caps.MaxTime is { } mt && clock.GetElapsedTime(startedAt, now) > mt)
                 { killReason = $"exceeded max-time {mt}"; killState = RunState.TimedOut; }
-                else if (caps.Stall is { } st && now - lastProgress > st &&
+                else if (caps.Stall is { } st && clock.GetElapsedTime(lastProgress, now) > st &&
                          (sampleOk || sampleFailures >= SampleFailLimit))
                 { killReason = $"no output or activity for {st} (tree: {treeDiag})"; killState = RunState.Stalled; }
                 else if (caps.MaxMemMb is { } mm && memMb > mm)
@@ -306,7 +317,7 @@ public static class Runner
             try { await Task.WhenAll(outPump, errPump); } catch { }
             await proc.WaitForExitAsync();
 
-            record.HeartbeatUtc = DateTime.UtcNow;
+            record.HeartbeatUtc = Utc();
             if (killReason is not null)
             {
                 record.State = killState;

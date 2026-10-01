@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 
 namespace Tman;
@@ -218,8 +219,8 @@ public static partial class Program
         {
             if (!nested && caps.MaxParallel is { } maxPar && maxPar > 0)
             {
-                var queuedAt = DateTime.UtcNow;
-                var deadline = queuedAt + queueTimeout;
+                // monotonic, as every deadline is: a wall clock stepped mid-wait ends it early or never
+                var queuedAt = Stopwatch.GetTimestamp();
                 var waited = false;
                 // holding the slot file, rather than counting live runs, is what admits this run:
                 // every racer would read the same count, but only one can create the same file
@@ -227,7 +228,7 @@ public static partial class Program
                 {
                     // a slot may be held by a live child whose runner died; free it before waiting on it
                     Reaper.ReapOrphans(quiet: true);
-                    if (DateTime.UtcNow >= deadline)
+                    if (Stopwatch.GetElapsedTime(queuedAt) >= queueTimeout)
                     {
                         Console.Error.WriteLine($"tman: queue timeout waiting for a '{group}' slot (all {maxPar} busy)");
                         return Runner.ExitKilled;
@@ -241,7 +242,7 @@ public static partial class Program
                     await Task.Delay(2000);
                 }
                 if (waited)
-                    Console.Error.WriteLine($"tman: slot acquired after {Canon.Duration(DateTime.UtcNow - queuedAt)}");
+                    Console.Error.WriteLine($"tman: slot acquired after {Canon.Duration(Stopwatch.GetElapsedTime(queuedAt))}");
             }
 
             // the same reasoning as the slot: a nested run is the parent's work, and the parent is
@@ -263,12 +264,12 @@ public static partial class Program
     /// </summary>
     static async Task<FileStream?> AwaitNameLock(string group, TimeSpan timeout)
     {
-        var deadline = DateTime.UtcNow + timeout;
+        var waitingSince = Stopwatch.GetTimestamp();
         while (true)
         {
             var claimed = Store.TryAcquireNameLock(group);
             if (claimed is not null) return claimed;
-            if (DateTime.UtcNow >= deadline) return null;
+            if (Stopwatch.GetElapsedTime(waitingSince) >= timeout) return null;
             await Task.Delay(50);
         }
     }

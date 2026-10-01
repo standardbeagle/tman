@@ -204,4 +204,36 @@ public class RunnerTests : IDisposable
         Assert.Equal("outerrun1234", r.ParentId);
         Assert.True(r.IsNested);
     }
+
+    /// <summary>
+    /// The system clock, except that its wall-clock reading jumps by <paramref name="step"/> after the
+    /// first read — an NTP step or a WSL resync landing mid-run. Its monotonic timestamps are real.
+    /// </summary>
+    sealed class SteppedWallClock(TimeSpan step) : TimeProvider
+    {
+        int _reads;
+        public override DateTimeOffset GetUtcNow() =>
+            Interlocked.Increment(ref _reads) == 1 ? base.GetUtcNow() : base.GetUtcNow() + step;
+    }
+
+    [UnixFact("supervises the sleep binary")]
+    public async Task AWallClockSteppedForward_DoesNotKillARunInsideItsDeadline()
+    {
+        // measured on the wall clock, a day's step made a 2s run look 24h old at its first tick
+        var exit = await Runner.RunAsync("sleep", ["2"],
+            new Caps { MaxTime = TimeSpan.FromSeconds(30), Stall = TimeSpan.FromSeconds(30) },
+            null, null, null, default, sampler: null, clock: new SteppedWallClock(TimeSpan.FromDays(1)));
+
+        Assert.Equal(0, exit);
+    }
+
+    [UnixFact("supervises the sleep binary")]
+    public async Task AWallClockSteppedBack_StillEndsTheRunAtItsDeadline()
+    {
+        // measured on the wall clock, a day's step back put the deadline a day further away
+        var run = Runner.RunAsync("sleep", ["30"], new Caps { MaxTime = TimeSpan.FromSeconds(1) },
+            null, null, null, default, sampler: null, clock: new SteppedWallClock(TimeSpan.FromDays(-1)));
+
+        Assert.Equal(Runner.ExitTimeout, await run.WaitAsync(TimeSpan.FromSeconds(15)));
+    }
 }

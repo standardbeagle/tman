@@ -17,6 +17,11 @@ below 1.0, behavior changes land in minor releases.
   or point `TMAN_HOME` at a shared writable directory), and exits 74. A child already started when
   its record could not be written, or whose store went away mid-run, is killed rather than left
   running where nothing can list, reap, or cap it.
+- **Deadlines no longer move with the wall clock.** `--max-time`, `--stall`, the CPU interval, the
+  queue timeout, and the `--replace` wait all subtracted `DateTime.UtcNow` readings. An NTP step,
+  a WSL clock resync after sleep, or a changed date could kill a run early or push its deadline
+  out indefinitely. They are now measured on the monotonic clock. Wall-clock time only stamps the
+  record for display.
 - **`tman kill` and `--replace` no longer lose the killed outcome.** Both saved the record as
   killed while its runner was still alive, and the runner then saved its own stale copy over it, so
   the killed run returned 137 and read as `exited` with no reason instead of `killed` and 130. A
