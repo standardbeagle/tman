@@ -101,6 +101,25 @@ public static class Runner
         };
         Console.CancelKeyPress += onCancel;
 
+        var runnerStart = ProcUtil.OwnStart();
+        var record = new RunRecord
+        {
+            Id = id,
+            Name = name ?? alias,
+            RunnerPid = Environment.ProcessId,
+            RunnerStartUtc = runnerStart.Utc,
+            RunnerStartTicks = runnerStart.Ticks,
+            Command = command,
+            Args = args,
+            Cwd = cwd,
+            Group = group,
+            ParentId = Environment.GetEnvironmentVariable(ParentIdEnvVar),
+            StartedUtc = DateTime.UtcNow,
+            HeartbeatUtc = DateTime.UtcNow,
+            LastOutputUtc = DateTime.UtcNow,
+            Caps = caps,
+        };
+
         Process proc;
         try
         {
@@ -109,9 +128,7 @@ public static class Runner
         catch (Exception e)
         {
             Console.CancelKeyPress -= onCancel;
-            Console.Error.WriteLine($"tman: cannot start '{command}': {e.Message}");
-            log?.Dispose();
-            return ExitNotFound;
+            return RecordStartFailure(record, $"cannot start '{command}': {e.Message}", log);
         }
 
         (DateTime Utc, long? Ticks)? childStart;
@@ -125,28 +142,10 @@ public static class Runner
         // a zombie. A child that is still running after that re-throws.
         catch (Exception e) when ((e is InvalidOperationException || ProcUtil.VerdictFor(e) is not null)
                                   && proc.WaitForExit(ExitConfirmMs)) { childStart = null; }
-        var runnerStart = ProcUtil.OwnStart();
+        record.Pid = proc.Id;
+        record.ChildStartUtc = childStart?.Utc;
+        record.ChildStartTicks = childStart?.Ticks;
 
-        var record = new RunRecord
-        {
-            Id = id,
-            Name = name ?? alias,
-            Pid = proc.Id,
-            RunnerPid = Environment.ProcessId,
-            RunnerStartUtc = runnerStart.Utc,
-            RunnerStartTicks = runnerStart.Ticks,
-            Command = command,
-            Args = args,
-            Cwd = cwd,
-            Group = group,
-            ParentId = Environment.GetEnvironmentVariable(ParentIdEnvVar),
-            StartedUtc = DateTime.UtcNow,
-            ChildStartUtc = childStart?.Utc,
-            ChildStartTicks = childStart?.Ticks,
-            HeartbeatUtc = DateTime.UtcNow,
-            LastOutputUtc = DateTime.UtcNow,
-            Caps = caps,
-        };
         try { Store.Save(record); }
         // a run tman cannot record is one nothing can list, reap, or kill by name, so it is not left
         // running behind the error that reports it
@@ -322,15 +321,35 @@ public static class Runner
         }
         if (unrecorded is not null) throw unrecorded;
 
-        return record.State switch
+        return ExitCodeFor(record);
+    }
+
+    /// <summary>
+    /// A program that cannot be started is a run with an outcome like any other: recorded, so
+    /// `tman status` can answer for it, and completed in its log, so the digest that was cleared when
+    /// the log opened is replaced by one saying why — not left absent, which reads as a pass.
+    /// </summary>
+    static int RecordStartFailure(RunRecord record, string reason, RunLog? log)
+    {
+        Console.Error.WriteLine($"tman: {reason}");
+        record.State = RunState.StartFailed;
+        record.KillReason = reason;
+        log?.Write($"tman: {reason}{Environment.NewLine}");
+        try { Store.Save(record); }
+        finally { log?.Complete(record); }
+        return ExitCodeFor(record);
+    }
+
+    static int ExitCodeFor(RunRecord record) =>
+        record.State switch
         {
             RunState.Exited => record.ExitCode!.Value,
+            RunState.StartFailed => ExitNotFound,
             RunState.TimedOut => ExitTimeout,
             RunState.Stalled => ExitStalled,
             RunState.Culled => ExitCulled,
             _ => ExitKilled,
         };
-    }
 
     /// <summary>
     /// A read of the child's counters failed because the child exited under it: the runtime raises

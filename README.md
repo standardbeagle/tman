@@ -388,7 +388,7 @@ record written by a different tman version is discarded rather than half-read.
 | 124 | timed out (`--max-time`) |
 | 125 | stalled (`--stall`) |
 | 126 | culled (`--max-mem` / `--max-cpu`) |
-| 127 | command / config not found |
+| 127 | command / config not found; a program that cannot be started is recorded as `startfailed` with the reason, and gets a digest |
 | 130 | killed (dedup refusal, queue timeout, `tman kill`, Ctrl+C, exit status unknown) |
 
 tman never reports 0 for a run it did not see finish. A Ctrl+C interrupts the run as a whole, so a

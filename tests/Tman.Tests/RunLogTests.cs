@@ -215,6 +215,28 @@ public class RunLogTests : IDisposable
         Assert.NotNull(next);
     }
 
+    [Fact]
+    public async Task AProgramThatCannotStart_LeavesADigestAndARecordSayingWhy()
+    {
+        // the previous run's digest is cleared when the log opens; a start that fails after that used
+        // to leave no digest at all, which is what a pass looks like
+        File.WriteAllText(Path.Combine(Directory.CreateDirectory(Path.Combine(_repo.Path, RunLog.DirName)).FullName,
+            "test" + RunLog.DigestSuffix), "stale");
+        const string missing = "definitely-not-a-real-command-xyz";
+        int exit;
+        using (var log = RunLog.Open(_repo.Path, "test", "test", missing))
+            exit = await Runner.RunAsync(missing, [], new Caps(), "test", "test", log: log);
+
+        Assert.Equal(Runner.ExitNotFound, exit);
+        var digest = File.ReadAllText(DigestPath("test"));
+        Assert.Contains($"cannot start '{missing}'", digest);
+        Assert.Contains("startfailed", digest);
+        var record = Assert.Single(Store.LoadAll());
+        Assert.Equal(RunState.StartFailed, record.State);
+        Assert.Contains($"cannot start '{missing}'", record.KillReason);
+        Assert.Equal(0, record.Pid);
+    }
+
     /// <summary>A log file whose every write fails, as one does on a full disk.</summary>
     sealed class FailingStream : MemoryStream
     {

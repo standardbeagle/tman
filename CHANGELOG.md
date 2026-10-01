@@ -17,6 +17,11 @@ below 1.0, behavior changes land in minor releases.
   or point `TMAN_HOME` at a shared writable directory), and exits 74. A child already started when
   its record could not be written, or whose store went away mid-run, is killed rather than left
   running where nothing can list, reap, or cap it.
+- **A program that cannot be started leaves a digest and a record.** Opening the run log clears the
+  previous digest, and a start that failed after that only closed the log. A run that exited 127
+  therefore left no `.fail.log`, which is how a pass looks, and no record for `tman status` to show.
+  It is now recorded in a new `startfailed` state with the reason, and its digest says why it did
+  not start.
 - **A failed write to the run log no longer skips the digest and leaks the log's lock.** The first
   write error marked the log closed, so finishing the run returned early: the digest was never
   written, and the writer and the `.lock` were released only when tman exited. Capture now stops

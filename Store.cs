@@ -3,7 +3,16 @@ using System.Text.Json.Serialization;
 
 namespace Tman;
 
-public enum RunState { Running, Exited, Killed, Reaped, TimedOut, Stalled, Culled }
+/// <summary>
+/// Where a run stands. Appended to, never reordered: records store the number, and a record
+/// written before a state existed must keep reading as the state it was written as.
+/// </summary>
+public enum RunState
+{
+    Running, Exited, Killed, Reaped, TimedOut, Stalled, Culled,
+    /// <summary>The program could not be started; the reason is in KillReason, and Pid is 0.</summary>
+    StartFailed,
+}
 
 public sealed class RunRecord
 {
