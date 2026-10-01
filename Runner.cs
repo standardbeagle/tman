@@ -68,7 +68,7 @@ public static class Runner
     /// Null means the system clock. Every cap is enforced on its monotonic timestamps; its wall clock
     /// only stamps the record, so a test can step the wall clock and see that no deadline moves.
     /// </param>
-    internal static async Task<int> RunAsync(
+    internal static Task<int> RunAsync(
         string command,
         string[] args,
         Caps caps,
@@ -80,24 +80,59 @@ public static class Runner
         RunLog? log = null,
         string? cwd = null,
         TimeProvider? clock = null)
+        => Supervise(NewRecord(command, args, caps, name, alias, group, cwd), ct, sampler, log, clock);
+
+    /// <summary>
+    /// A run's identity, before anything has happened to it: who it is, what it runs, where, and
+    /// under which caps. Made by whoever admits the run, so a run that waits for a slot and the run
+    /// it then becomes are one record under one id.
+    /// </summary>
+    /// <param name="cwd">Directory the child runs in; null means where tman itself is standing.</param>
+    public static RunRecord NewRecord(
+        string command, string[] args, Caps caps, string? name, string? alias, string? group, string? cwd)
+    {
+        var runnerStart = ProcUtil.OwnStart();
+        return new RunRecord
+        {
+            Id = Guid.NewGuid().ToString("N")[..12],
+            Name = name ?? alias,
+            RunnerPid = Environment.ProcessId,
+            RunnerStartUtc = runnerStart.Utc,
+            RunnerStartTicks = runnerStart.Ticks,
+            Command = command,
+            Args = args,
+            Cwd = Canon.Dir(cwd ?? Directory.GetCurrentDirectory()),
+            Group = group,
+            ParentId = Environment.GetEnvironmentVariable(ParentIdEnvVar),
+            Caps = caps,
+        };
+    }
+
+    /// <summary>Starts <paramref name="record"/>'s command and supervises it to an outcome, which it records.</summary>
+    /// <param name="clock">See the RunAsync test seam.</param>
+    internal static async Task<int> Supervise(
+        RunRecord record,
+        CancellationToken ct = default,
+        Func<int, TreeSample?>? sampler = null,
+        RunLog? log = null,
+        TimeProvider? clock = null)
     {
         // An NTP step, a WSL resync after sleep, or a user setting the date moves the wall clock by
         // any amount in either direction; a deadline measured on it fires early or never.
         clock ??= TimeProvider.System;
         DateTime Utc() => clock.GetUtcNow().UtcDateTime;
-        var id = Guid.NewGuid().ToString("N")[..12];
-        cwd = Canon.Dir(cwd ?? Directory.GetCurrentDirectory());
+        var (command, caps) = (record.Command, record.Caps);
 
         var psi = new ProcessStartInfo
         {
             FileName = command,
-            WorkingDirectory = cwd,
+            WorkingDirectory = record.Cwd,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
         };
-        foreach (var a in args) psi.ArgumentList.Add(a);
-        psi.Environment[ParentIdEnvVar] = id;
+        foreach (var a in record.Args) psi.ArgumentList.Add(a);
+        psi.Environment[ParentIdEnvVar] = record.Id;
 
         // Ctrl+C reaches the child through the terminal at the same moment it reaches tman. Killing
         // the tree from here and letting the loop read whatever exit code the child chose would let
@@ -116,24 +151,8 @@ public static class Runner
         };
         Console.CancelKeyPress += onCancel;
 
-        var runnerStart = ProcUtil.OwnStart();
-        var record = new RunRecord
-        {
-            Id = id,
-            Name = name ?? alias,
-            RunnerPid = Environment.ProcessId,
-            RunnerStartUtc = runnerStart.Utc,
-            RunnerStartTicks = runnerStart.Ticks,
-            Command = command,
-            Args = args,
-            Cwd = cwd,
-            Group = group,
-            ParentId = Environment.GetEnvironmentVariable(ParentIdEnvVar),
-            StartedUtc = Utc(),
-            HeartbeatUtc = Utc(),
-            LastOutputUtc = Utc(),
-            Caps = caps,
-        };
+        record.State = RunState.Running;
+        record.StartedUtc = record.HeartbeatUtc = record.LastOutputUtc = Utc();
 
         Process proc;
         try
