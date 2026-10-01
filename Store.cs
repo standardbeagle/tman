@@ -59,6 +59,13 @@ public sealed class RunRecord
     public Caps Caps { get; set; } = new();
     public long PeakMemMb { get; set; }
     public string? KillReason { get; set; }
+    /// <summary>The named queue the run joined, from the machine config; null when it named none.</summary>
+    public string? Queue { get; set; }
+    /// <summary>
+    /// When the run joined its named queue's line. Arrival order across every tman on the machine
+    /// is read from this, so it is the one wall-clock time admission depends on.
+    /// </summary>
+    public DateTime? QueuedUtc { get; set; }
 
     public bool IsNested => ParentId is not null;
 

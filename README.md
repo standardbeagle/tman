@@ -97,6 +97,7 @@ tman init --shims --gitignore
 | `--max-cpu P` | — | process-tree CPU above P% for 3 consecutive 1s ticks → cull, exit 126 |
 | `--max-parallel N` | 2 | queue until one of the bucket's N slots can be held; a run that has to wait says so once on stderr (with the queue timeout) and once more, `slot acquired after Xs`, when it gets through. While it waits it is a `queued` run: `tman list` shows it, `tman kill` ends it, and Ctrl+C ends it as `killed: cancelled while queued` with exit 130 — none of which starts its child |
 | `--queue-timeout T` | 5m | give up waiting for a slot; the run is recorded `killed: queue timeout …` and exits 130 |
+| `--queue Q` | — | after its bucket admits it, also wait in the machine-wide [named queue](#named-queues) Q, in arrival order |
 
 Cap precedence: CLI flags > alias block > `defaults` block > built-ins.
 
@@ -195,6 +196,45 @@ same instant queue as configured; counting could not offer that, because every r
 count before any of them has a record to be counted. A slot is given up when the handle closes,
 which includes the runner dying and the kernel closing it. A run that is already inside a
 supervised tree (`TMAN_RUN_ID` set) is the same work as its parent and claims no slot of its own.
+
+### Named queues
+
+A bucket never sees another checkout, which is the point — until several projects compete for the
+same machine. Three Rust and two C++ checkouts each building with every core is the case a
+**named queue** is for. It is declared once for the machine in `~/.tman/tman.kdl` (beside the run
+store, so `TMAN_HOME` moves it too):
+
+```kdl
+queue "compile" {
+    max-parallel 1
+    queue-timeout "8h"   // optional; 8h by default
+}
+```
+
+Any project then joins it by name, with `tman run --queue compile -- cargo build` or from an alias:
+
+```kdl
+alias "build" {
+    command "cargo"
+    args "build"
+    queue "compile"
+}
+```
+
+- **Arrival order.** A run saves itself as `queued` in the queue's line before its first claim,
+  and claims a slot only while nobody who joined earlier is still waiting. `tman list` shows each
+  waiter's place as `queued #1`, `queued #2`, and `tman status` shows it as `queue: compile
+  (position 2)`. A waiter whose tman died holds no place. Arrival is arrival as the store sees it:
+  two runs that join within the same instant are ordered by id.
+- **Bucket first, then queue.** A run held up in its own project's bucket does not sit on a queue
+  slot other projects are waiting for.
+- **Waiting is said, and bounded.** A waiter says where it stands when it joins and once a minute
+  after that, and gives up after the queue's `queue-timeout` — not the project's, which sizes its
+  bucket's wait. `--queue-timeout` on the command line overrides both.
+- **Cancellable.** Ctrl+C or `tman kill` ends a waiter as `killed` with exit 130, its child never
+  started, and the next in line moves up.
+- A queue nobody declared is refused with exit 127, naming the machine config. Nested runs join no
+  queue, like they claim no bucket slot. The queue is read only when a run names one.
 
 ## .tman.kdl
 

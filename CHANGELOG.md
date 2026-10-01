@@ -9,6 +9,14 @@ below 1.0, behavior changes land in minor releases.
 ## [Unreleased]
 
 ### Added
+- **Named queues: one line shared by every project on the machine.** Buckets are per project, so
+  three checkouts each running `cargo build` never saw each other. Declare a queue once in
+  `~/.tman/tman.kdl` (`queue "compile" { max-parallel 1 }`) and join it from any project with
+  `tman run --queue compile` or an alias's `queue "compile"`. Runs are admitted in arrival order,
+  after their own bucket admits them. `tman list` shows each waiter's place (`queued #2`). Waiters
+  report their position once a minute and give up after the queue's `queue-timeout` (8h by
+  default). Ctrl+C or `tman kill` ends a waiter and moves the next one up. An undeclared queue is
+  refused with exit 127, and nested runs join no queue.
 - **A run waiting for a slot is visible and cancellable.** A run queued behind `max-parallel` had
   no record while it waited: `tman list` could not show it, `tman kill` could not reach it, and
   Ctrl+C ended it with no trace. A waiter whose first claim fails is now recorded as `queued`,

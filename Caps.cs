@@ -100,8 +100,6 @@ public sealed record Caps
     public static readonly IReadOnlyList<string> Keys =
         ["max-time", "stall", "max-mem", "max-cpu", "max-parallel", "queue-timeout", "retain"];
 
-    public static bool IsKey(string key) => Keys.Contains(key);
-
     /// <summary>
     /// <paramref name="caps"/> with <paramref name="key"/> set from <paramref name="value"/>: the one
     /// reading of a cap value, shared by `.tman.kdl` and the `--key` flags so neither can accept what

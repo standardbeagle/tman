@@ -79,14 +79,14 @@ public static partial class Program
         var args = alias.Args.Concat(extraArgs).ToArray();
         var caps = Config.EffectiveCaps(alias, new Caps(), config);
         return await GatedRun(alias.Command, args, caps, alias.Name, alias.Name, replace: false,
-            RunKey.ScopeDir(config), config.Dir, cwd: config.Dir);
+            RunKey.ScopeDir(config), config.Dir, cwd: config.Dir, queue: JoinedQueue(alias.Queue, null));
     }
 
     static async Task<int> CmdRun(string[] argv, string? _)
     {
         Reaper.Sweep(Retention());
 
-        string? name = null, aliasName = null;
+        string? name = null, aliasName = null, queueName = null;
         var replace = false;
         var cliCaps = new Caps();
         var cmdArgs = new List<string>();
@@ -105,6 +105,7 @@ public static partial class Program
                     case "--name": name = Next(); break;
                     case "--alias": aliasName = Next(); break;
                     case "--replace": replace = true; break;
+                    case "--queue": queueName = Next(); break;
                     case "--max-time" or "--stall" or "--max-mem" or "--max-cpu" or "--max-parallel" or "--queue-timeout":
                         cliCaps = Caps.With(cliCaps, a[2..], Next(), a);
                         break;
@@ -125,7 +126,8 @@ public static partial class Program
             var caps = Config.EffectiveCaps(alias, cliCaps, config);
             return await GatedRun(
                 alias.Command, args, caps, name ?? alias.Name, alias.Name, replace,
-                RunKey.ScopeDir(config), config.Dir, cwd: config.Dir);
+                RunKey.ScopeDir(config), config.Dir, cwd: config.Dir,
+                queue: JoinedQueue(queueName ?? alias.Queue, cliCaps.QueueTimeout));
         }
 
         if (cmdArgs.Count == 0) throw new FormatException("run requires a command");
@@ -134,8 +136,20 @@ public static partial class Program
             var caps = Config.EffectiveCaps(null, cliCaps, config);
             return await GatedRun(
                 cmdArgs[0], cmdArgs[1..].ToArray(), caps, name, null, replace,
-                RunKey.ScopeDir(config), config?.Dir);
+                RunKey.ScopeDir(config), config?.Dir, queue: JoinedQueue(queueName, cliCaps.QueueTimeout));
         }
+    }
+
+    /// <summary>
+    /// The named queue a run joins, as the machine config declares it, or null for none. Its wait is
+    /// the queue's own timeout unless `--queue-timeout` was given on the command line: a project's
+    /// `queue-timeout` sizes its bucket's wait, and is no judge of a line shared across projects.
+    /// </summary>
+    static NamedQueue? JoinedQueue(string? name, TimeSpan? cliQueueTimeout)
+    {
+        if (name is null) return null;
+        var queue = Config.Queue(name);
+        return cliQueueTimeout is { } timeout ? queue with { Timeout = timeout } : queue;
     }
 
     /// <param name="logDir">
@@ -151,9 +165,10 @@ public static partial class Program
     /// </param>
     const string ReplacedReason = "replaced by newer run";
 
+    /// <param name="queue">The named queue this run joins after its bucket admits it, or null.</param>
     internal static async Task<int> GatedRun(
         string command, string[] args, Caps caps, string? name, string? alias, bool replace,
-        string scopeDir, string? logDir = null, string? cwd = null)
+        string scopeDir, string? logDir = null, string? cwd = null, NamedQueue? queue = null)
     {
         command = Canon.ResolveCommand(command, cwd ?? Directory.GetCurrentDirectory());
         var group = RunKey.For(name, command, scopeDir);
@@ -226,13 +241,20 @@ public static partial class Program
         Console.CancelKeyPress += onCancel;
 
         var record = Runner.NewRecord(command, args, caps, name, alias, group, cwd);
-        FileStream? slotFile = null;
+        FileStream? slotFile = null, queueSlot = null;
         try
         {
+            // bucket first, then queue: a run held up in its own project must not sit on a slot of
+            // a queue other projects are waiting for
             if (!nested && caps.MaxParallel is { } maxPar && maxPar > 0)
             {
                 slotFile = await Admission.ClaimBucketSlot(record, maxPar, queueTimeout, interrupt.Token);
                 if (slotFile is null) return Runner.ExitKilled;
+            }
+            if (!nested && queue is not null)
+            {
+                queueSlot = await Admission.ClaimQueueSlot(record, queue, interrupt.Token);
+                if (queueSlot is null) return Runner.ExitKilled;
             }
 
             // the same reasoning as the slot: a nested run is the parent's work, and the parent is
@@ -243,6 +265,7 @@ public static partial class Program
         finally
         {
             Console.CancelKeyPress -= onCancel;
+            if (queueSlot is not null) Store.ReleaseLock(queueSlot);
             if (slotFile is not null) Store.ReleaseLock(slotFile);
             if (lockFile is not null) Store.ReleaseLock(lockFile);
         }
@@ -276,6 +299,7 @@ public static partial class Program
         if (runs.Count == 0) { Console.WriteLine("no runs"); return 0; }
 
         var now = DateTime.UtcNow;
+        var records = Store.LoadAll();
         Console.WriteLine($"{"ID",-14}{"NAME",-16}{"PID",-8}{"STATE",-12}{"AGE",-8}{"PEAKMEM",-9}COMMAND");
         foreach (var r in runs)
         {
@@ -283,7 +307,7 @@ public static partial class Program
             var name = r.IsNested ? "└ " + (r.Name ?? "-") : r.Name ?? "-";
             Console.WriteLine(
                 $"{r.Id,-14}{Canon.Ellipsize(name, 15),-16}{PidLabel(r),-8}" +
-                $"{StateLabel(r.State),-12}{Canon.Duration(now - r.StartedUtc),-8}" +
+                $"{StateLabel(r, records),-12}{Canon.Duration(now - r.StartedUtc),-8}" +
                 $"{Canon.Mem(r.PeakMemMb),-9}{Canon.CommandLine(r.Command, r.Args)}");
         }
         return 0;
@@ -390,6 +414,10 @@ public static partial class Program
 
     static string StateLabel(RunState state) => state.ToString().ToLowerInvariant();
 
+    /// <summary>The state, with a named-queue waiter's place in line: `queued #2`.</summary>
+    static string StateLabel(RunRecord r, IEnumerable<RunRecord> all) =>
+        Admission.Position(r, all) is { } position ? $"{StateLabel(r.State)} #{position}" : StateLabel(r.State);
+
     /// <summary>A run that never had a child — queued, or unable to start — has no pid to show.</summary>
     static string PidLabel(RunRecord r) => r.Pid == 0 ? "-" : r.Pid.ToString();
 
@@ -407,6 +435,8 @@ public static partial class Program
         Row("command", Canon.CommandLine(r.Command, r.Args, full: true));
         Row("cwd", r.Cwd);
         Row("bucket", r.Group);
+        Row("queue", r.Queue is null ? null
+            : Admission.Position(r, Store.LoadAll()) is { } position ? $"{r.Queue} (position {position})" : r.Queue);
         Row("parent", r.ParentId);
         Row("pid", $"{PidLabel(r)} (runner {r.RunnerPid})");
         Row(r.State == RunState.Queued ? "waiting" : "started", $"{r.StartedUtc:u} ({Canon.Duration(now - r.StartedUtc)} ago)");
@@ -520,6 +550,8 @@ public static partial class Program
           --max-parallel N    queue until one of this bucket's N slot files can be held
                               (bucket: name-or-command @ dir)
           --queue-timeout T   give up queueing after T
+          --queue Q           also wait in named queue Q, shared by every project on this machine
+                              and declared in ~/.tman/tman.kdl; admitted in arrival order
 
         every command sweeps: orphans (dead runner, live child) are killed, and finished records
         past the retention window are pruned. Set the window with `retain` in .tman.kdl defaults

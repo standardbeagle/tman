@@ -4,7 +4,18 @@ public sealed record AliasDef(
     string Name,
     string Command,
     string[] Args,
-    Caps Caps);
+    Caps Caps,
+    string? Queue = null);
+
+/// <summary>A queue declared once for the whole machine, which any project's runs can join by name.</summary>
+public sealed record NamedQueue(string Name, int MaxParallel, TimeSpan Timeout)
+{
+    /// <summary>
+    /// Long, because a named queue exists to serialize heavy work across projects and its line can
+    /// legitimately be hours deep; bounded, because an unbounded wait hides a queue that is wedged.
+    /// </summary>
+    public static readonly TimeSpan DefaultTimeout = TimeSpan.FromHours(8);
+}
 
 public sealed record TmanConfig(
     string FilePath,
@@ -67,19 +78,58 @@ public static class Config
         if (n.Args.Count != 1 || n.Arg(0) is not { Length: > 0 } name)
             throw new FormatException($"{path}: alias takes exactly one name, as in alias \"test\" {{ ... }}");
         var where = $"{path}, alias \"{name}\"";
-        var caps = ReadCaps(n, where, child => child.Name is "command" or "args");
+        var caps = ReadCaps(n, where, child => child.Name is "command" or "args" or "queue");
 
         var commandNode = n.Child("command")
             ?? throw new FormatException($"alias \"{name}\" in {path} is missing a command");
         if (commandNode.Args.Count != 1 || commandNode.Arg(0) is not { Length: > 0 } command)
             throw new FormatException($"{where}: command takes exactly one program; put its arguments under args");
         var args = n.Child("args")?.Args.Select(a => a.AsString() ?? "").ToArray() ?? [];
-        return new AliasDef(name, command, args, caps);
+        string? queue = null;
+        if (n.Child("queue") is { } queueNode && (queueNode.Args.Count != 1 || (queue = queueNode.Arg(0)) is not { Length: > 0 }))
+            throw new FormatException($"{where}: queue takes exactly one queue name");
+        return new AliasDef(name, command, args, caps, queue);
+    }
+
+    /// <summary>The machine config, beside the run store so TMAN_HOME relocates both together.</summary>
+    public static string MachineConfigPath => Path.Combine(Store.Root, "tman.kdl");
+
+    /// <summary>
+    /// The named queue <paramref name="name"/>, as the machine config declares it. Read only when a
+    /// run names a queue, so no other run pays for the file. A queue the file does not declare is an
+    /// error: projects only join queues, and a name nobody declared is a typo or a missing setup.
+    /// </summary>
+    public static NamedQueue Queue(string name)
+    {
+        var path = MachineConfigPath;
+        var queues = new Dictionary<string, NamedQueue>(StringComparer.Ordinal);
+        if (File.Exists(path))
+        {
+            foreach (var n in Kdl.Parse(File.ReadAllText(path)))
+            {
+                if (n.Name != "queue")
+                    throw new FormatException($"{path}: unknown node \"{n.Name}\" (expected queue)");
+                if (n.Args.Count != 1 || n.Arg(0) is not { Length: > 0 } declared)
+                    throw new FormatException($"{path}: queue takes exactly one name, as in queue \"compile\" {{ max-parallel 1 }}");
+                var where = $"{path}, queue \"{declared}\"";
+                var caps = ReadCaps(n, where, _ => false, ["max-parallel", "queue-timeout"]);
+                if (caps.MaxParallel is not ({ } slots and > 0))
+                    throw new FormatException($"{where}: max-parallel is required and must be at least 1");
+                if (!queues.TryAdd(declared, new NamedQueue(declared, slots, caps.QueueTimeout ?? NamedQueue.DefaultTimeout)))
+                    throw new FormatException($"{path}: queue \"{declared}\" is declared twice");
+            }
+        }
+        return queues.TryGetValue(name, out var queue)
+            ? queue
+            : throw new FormatException(
+                $"queue \"{name}\" is not declared in {path}; declare it there, e.g. queue \"{name}\" {{ max-parallel 1 }}");
     }
 
     /// <param name="ownedElsewhere">Children the caller reads itself, such as an alias's command.</param>
-    static Caps ReadCaps(KdlNode block, string where, Func<KdlNode, bool> ownedElsewhere)
+    /// <param name="keys">The cap keys this block may set; every one by default.</param>
+    static Caps ReadCaps(KdlNode block, string where, Func<KdlNode, bool> ownedElsewhere, IReadOnlyList<string>? keys = null)
     {
+        keys ??= Caps.Keys;
         var caps = new Caps();
         var seen = new HashSet<string>();
         foreach (var child in block.Children)
@@ -87,9 +137,9 @@ public static class Config
             if (!seen.Add(child.Name)) throw new FormatException($"{where}: {child.Name} is set twice");
             if (child.Children.Count > 0) throw new FormatException($"{where}: {child.Name} takes no block");
             if (ownedElsewhere(child)) continue;
-            if (!Caps.IsKey(child.Name))
+            if (!keys.Contains(child.Name))
                 throw new FormatException(
-                    $"{where}: unknown setting \"{child.Name}\" (expected one of {string.Join(", ", Caps.Keys)})");
+                    $"{where}: unknown setting \"{child.Name}\" (expected one of {string.Join(", ", keys)})");
             if (child.Args.Count != 1) throw new FormatException($"{where}: {child.Name} takes exactly one value");
             try { caps = Caps.With(caps, child.Name, child.Arg(0), child.Name); }
             catch (FormatException e) { throw new FormatException($"{where}: {e.Message}"); }

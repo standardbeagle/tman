@@ -1,7 +1,7 @@
 ---
 written_at: 2026-09-11
 source_event: session_01SvcLJdbxneiDVKUPHKJj8c
-status: persisted to worktrack 2026-09-11 (epic 01M29BDQMMJHWMT7RAX8BE79D5; slices 01M29BET32Z6505F5KPG82FEYD, 01M29BETGBQT3S4CZHGTHC2XKX, 01M29BETJQ8QY2NB4KNX9WXDZW)
+status: implemented 2026-09-30 outside the worktrack loop (epic 01M29BDQMMJHWMT7RAX8BE79D5; slices 01M29BET32Z6505F5KPG82FEYD, 01M29BETGBQT3S4CZHGTHC2XKX, 01M29BETJQ8QY2NB4KNX9WXDZW). Deviations: bucket waiters record Queued only after their first claim fails, so an uncontended run writes nothing extra; `tman kill` reaches a waiter through the `<id>.kill` request rather than a signal to its runner; the waiting code is Admission.cs, not Queue.cs, which would shadow System.Collections.Generic.Queue<T>
 template: tman-slice-v3
 verify: sh -c "exec ./test"
 ---
