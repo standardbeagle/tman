@@ -1,10 +1,11 @@
 """Locate (downloading if needed) and exec the native tman binary."""
 
+import io
 import os
 import platform
-import stat
 import sys
 import tarfile
+import tempfile
 import urllib.request
 import zipfile
 from importlib.metadata import version as pkg_version
@@ -27,7 +28,10 @@ def cache_dir() -> Path:
 
 
 def ensure_binary() -> Path:
-    exe = cache_dir() / BIN_NAME
+    # One directory per package version: an upgraded package must not keep exec'ing the binary
+    # an older one downloaded, which an unversioned path did forever.
+    ver = pkg_version("tman")
+    exe = cache_dir() / ver / BIN_NAME
     if exe.exists():
         return exe
 
@@ -36,27 +40,46 @@ def ensure_binary() -> Path:
     if asset is None:
         sys.exit(f"tman: unsupported platform {key[0]}/{key[1]}")
 
-    ver = pkg_version("tman")
     url = f"https://github.com/standardbeagle/tman/releases/download/v{ver}/{asset}"
     print(f"tman: downloading {url}", file=sys.stderr)
-
-    archive = cache_dir() / asset
-    cache_dir().mkdir(parents=True, exist_ok=True)
     with urllib.request.urlopen(url) as res:
-        archive.write_bytes(res.read())
+        binary = _binary_from(asset, res.read())
 
-    if asset.endswith(".zip"):
-        with zipfile.ZipFile(archive) as z:
-            z.extractall(cache_dir())
-    else:
-        with tarfile.open(archive) as t:
-            t.extractall(cache_dir())
-    archive.unlink()
-
-    if not exe.exists():
-        sys.exit("tman: archive did not contain the binary")
-    exe.chmod(exe.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    # Published by rename, so a launcher that finds `exe` always finds all of it — two first
+    # launches racing each write a private temp file and the second rename replaces the first
+    # with identical bytes.
+    exe.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=exe.parent, prefix=f".{BIN_NAME}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(binary)
+        os.chmod(tmp, 0o755)
+        try:
+            os.replace(tmp, exe)
+        except PermissionError:
+            # Windows refuses to replace a binary that is running: the racer that published it
+            # first is already exec'ing this same version, so its copy is the one to use
+            if not exe.exists():
+                raise
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
     return exe
+
+
+def _binary_from(asset: str, archive: bytes) -> bytes:
+    """The binary's bytes, read by name: nothing else in the archive is written anywhere."""
+    try:
+        if asset.endswith(".zip"):
+            with zipfile.ZipFile(io.BytesIO(archive)) as z:
+                return z.read(BIN_NAME)
+        with tarfile.open(fileobj=io.BytesIO(archive)) as t:
+            member = t.extractfile(BIN_NAME)
+            if member is None:
+                raise KeyError(BIN_NAME)
+            return member.read()
+    except KeyError:
+        sys.exit(f"tman: {asset} did not contain {BIN_NAME}")
 
 
 def main() -> None:

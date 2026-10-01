@@ -17,6 +17,12 @@ below 1.0, behavior changes land in minor releases.
   or point `TMAN_HOME` at a shared writable directory), and exits 74. A child already started when
   its record could not be written, or whose store went away mid-run, is killed rather than left
   running where nothing can list, reap, or cap it.
+- **Upgrading the Python package runs the new binary.** The launcher cached the downloaded binary at
+  one unversioned path and returned it whenever it existed, so after `pip install -U tman` it kept
+  exec'ing the version first downloaded. The cache is now `~/.cache/tman/<version>/`. The binary
+  is published by an atomic rename, so concurrent first launches can no longer exec a
+  half-written file. Only the binary is read out of the archive. A leftover
+  `~/.cache/tman/tman` from older versions is unused and can be deleted.
 - **A run whose root exits no longer hangs on a leftover holding its output.** Monitoring stopped
   when the root exited, and tman then waited without limit for stdout and stderr to close. A
   background process that kept them open (`sleep 60 &`, `server &`) held the run, its slot, and
