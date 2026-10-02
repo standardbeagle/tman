@@ -8,6 +8,8 @@ below 1.0, behavior changes land in minor releases.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-02
+
 ### Changed
 - **`tman kill all` kills only your own runs.** It used to kill every live run in the shared
   store, so an agent stopping its own CI run also killed sibling agents' runs on the same machine.
@@ -25,6 +27,9 @@ below 1.0, behavior changes land in minor releases.
   `.tman.kdl`, and under which caps. The overview is built from the same table, so the two cannot
   disagree. Help is answered before anything else runs: it creates no `~/.tman`, runs no sweep, and
   works with a read-only store.
+- **Help is enforced harmless.** A test reads `Main`'s dispatch switch and requires every command it
+  handles to have a help entry, then asks each for help in a populated project and checks no file
+  changes. This is the guard on the 0.5.1 bug where `tman init --help` wrote a `.tman.kdl`.
 - **macOS and Windows meter the whole process tree.** Off Linux a sample read the root process
   alone. A runner that forked its workers, or a shell wrapping the real job, could pin every core
   or fill memory unseen by `--max-cpu` and `--max-mem`, and `--stall` read the busy descendants as
@@ -457,7 +462,8 @@ reaping; dedup locks; parallel gating; `.tman.kdl` folder aliases with repo-root
 binaries for linux-x64, linux-arm64, win-x64, osx-arm64, and osx-x64, distributed via npm, PyPI,
 PSGallery, and a shell installer.
 
-[Unreleased]: https://github.com/standardbeagle/tman/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/standardbeagle/tman/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/standardbeagle/tman/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/standardbeagle/tman/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/standardbeagle/tman/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/standardbeagle/tman/compare/v0.3.0...v0.4.0
