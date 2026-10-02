@@ -72,20 +72,31 @@ public static class Help
             "list live (or all) runs",
             """
             Lists live runs: running ones, and ones queued for a slot (pid `-`; a waiter in a named
-            queue shows its place as `queued #N`).
+            queue shows its place as `queued #N`). PROJECT is the run's project root — the scope
+            `tman kill all` works within.
 
               --all               every record still within retention, finished runs included
             """,
             ["ls"]),
         new("kill",
-            ["tman kill <id|name|id-prefix|all>..."],
+            ["tman kill <id|name|id-prefix|all>...", "tman kill all --everywhere"],
             "kill run(s)",
             """
             Kills each matching live run's process tree, queued runs included — a queued run ends
             without ever starting its child. The run's own tman records it `killed: killed via tman
             kill` and exits 130. An id prefix needs at least 4 characters.
 
-            exit: 0, or 1 when part of a run's tree could not be killed; 127 for an unknown flag.
+            `all` means your own runs: the same project root (the directory holding the nearest
+            .tman.kdl above the cwd, else the cwd) and, when both sides have one, the same agent
+            session (CLAUDE_CODE_SESSION_ID). Other projects' and sessions' runs are left alone and
+            counted. A run named by id or name is killed wherever it is, and its owner is printed
+            when that is outside your scope.
+
+              --everywhere        with `all`: every live run on the machine. Needs a controlling
+                                  terminal (/dev/tty); without one it refuses with exit 77
+
+            exit: 0, or 1 when part of a run's tree could not be killed; 127 for an unknown flag;
+            77 for `--everywhere` without a terminal.
             """),
         new("clean",
             ["tman clean"],

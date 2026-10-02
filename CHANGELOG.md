@@ -8,6 +8,17 @@ below 1.0, behavior changes land in minor releases.
 
 ## [Unreleased]
 
+### Changed
+- **`tman kill all` kills only your own runs.** It used to kill every live run in the shared
+  store, so an agent stopping its own CI run also killed sibling agents' runs on the same machine.
+  `all` now means the same project root (nearest `.tman.kdl` above the cwd, else the cwd) and, when
+  both sides carry one, the same agent session (`CLAUDE_CODE_SESSION_ID`). Runs left alone are
+  counted in the output. `tman kill all --everywhere` restores the machine-wide kill but needs a
+  controlling terminal (`/dev/tty`); without one it refuses with exit 77 and names the command a
+  person runs. `tman kill <id|name>` is unchanged and prints the owner when it is outside your
+  scope. `tman list` gains a PROJECT column. Runs recorded before this change are scoped by the
+  directory they ran in.
+
 ### Added
 - **Per-command help.** `tman <command> --help`, `-h`, and `tman help <command>` print that
   command's usage, flags, and exit codes. `tman help <alias>` shows what an alias runs, from which

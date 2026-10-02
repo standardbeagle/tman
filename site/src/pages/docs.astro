@@ -28,8 +28,8 @@ curl -fsSL https://raw.githubusercontent.com/standardbeagle/tman/main/install.sh
     <tr><td><code>tman run [flags] -- &lt;cmd&gt; [args]</code></td><td>run a process under supervision</td></tr>
     <tr><td><code>tman run --alias &lt;name&gt; [args]</code></td><td>run an alias from <code>.tman.kdl</code>, in that file's directory</td></tr>
     <tr><td><code>tman &lt;alias&gt; [args]</code></td><td>shorthand for an alias</td></tr>
-    <tr><td><code>tman list [--all]</code></td><td>list live runs (or all records)</td></tr>
-    <tr><td><code>tman kill &lt;id|name|all&gt;</code></td><td>kill run(s) by id, name, or everything; an unknown flag refuses the command with exit 127 rather than being skipped</td></tr>
+    <tr><td><code>tman list [--all]</code></td><td>list live runs (or all records), with each run's project root</td></tr>
+    <tr><td><code>tman kill &lt;id|name|all&gt;</code></td><td>kill run(s) by id or name, or <code>all</code> of your own (same project root and agent session; others are left alone); <code>all --everywhere</code> reaches every run but needs a terminal, exit 77 without one; an unknown flag refuses the command with exit 127 rather than being skipped</td></tr>
     <tr><td><code>tman clean</code></td><td>run the housekeeping sweep now and report what it did</td></tr>
     <tr><td><code>tman probe --pid &lt;pid&gt; [--start-ticks &lt;ticks&gt;]</code></td><td>is a pid you recorded earlier still that process? exit 0 mine, 1 gone, 3 not mine (pid reused); read-only, <code>--start-ticks</code> is Linux only</td></tr>
     <tr><td><code>tman status [id|name|id-prefix] [--json]</code></td><td>summary counts, or one run's detail</td></tr>
