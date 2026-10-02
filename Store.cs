@@ -36,6 +36,10 @@ public sealed class RunRecord
     public required string Command { get; set; }
     public required string[] Args { get; set; }
     public string? Cwd { get; set; }
+    /// <summary>Scope the run was started under, see <see cref="Scope"/>. Null in records from before scopes.</summary>
+    public string? ProjectRoot { get; set; }
+    /// <summary>Agent session that started the run; null when none was identifiable.</summary>
+    public string? AgentSession { get; set; }
     /// <summary>Dedup/slot bucket, see <see cref="RunKey"/>.</summary>
     public string? Group { get; set; }
     /// <summary>Id of the tman run that launched this one, when a supervised process re-enters tman.</summary>

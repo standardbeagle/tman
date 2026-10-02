@@ -58,6 +58,17 @@ public class KillScopeTests : IDisposable
 
     static bool Live(RunRecord r) => Reaper.LiveRuns().Any(l => l.Id == r.Id);
 
+    /// <summary>A killed child is reaped by its own runner a moment later, so death is waited for.</summary>
+    static async Task<bool> Dies(RunRecord r)
+    {
+        for (var i = 0; i < 100; i++)
+        {
+            if (!Live(r)) return true;
+            await Task.Delay(50);
+        }
+        return false;
+    }
+
     static async Task<(int Exit, string Out, string Err)> Tman(params string[] argv)
     {
         var (o, e) = (new StringWriter(), new StringWriter());
@@ -78,7 +89,7 @@ public class KillScopeTests : IDisposable
         var (exit, _, _) = await Tman("kill", "all");
 
         Assert.Equal(0, exit);
-        Assert.False(Live(mine));
+        Assert.True(await Dies(mine));
         Assert.True(Live(theirs));
     }
 
@@ -92,7 +103,7 @@ public class KillScopeTests : IDisposable
 
         await Tman("kill", "all");
 
-        Assert.False(Live(mine));
+        Assert.True(await Dies(mine));
         Assert.True(Live(theirs));
     }
 
@@ -109,7 +120,7 @@ public class KillScopeTests : IDisposable
 
         await Tman("kill", "all");
 
-        Assert.False(Live(fromSub));
+        Assert.True(await Dies(fromSub));
         Assert.True(Live(elsewhere));
     }
 
@@ -137,7 +148,7 @@ public class KillScopeTests : IDisposable
         var (exit, _, _) = await Tman("kill", "all", "--everywhere");
 
         Assert.Equal(0, exit);
-        Assert.False(Live(theirs));
+        Assert.True(await Dies(theirs));
     }
 
     [UnixFact("supervises the sleep binary")]
@@ -150,7 +161,7 @@ public class KillScopeTests : IDisposable
         var (exit, stdout, _) = await Tman("kill", theirs.Id);
 
         Assert.Equal(0, exit);
-        Assert.False(Live(theirs));
+        Assert.True(await Dies(theirs));
         Assert.Contains("outside this scope", stdout);
         Assert.Contains("/b", stdout);
         Assert.Contains("s2", stdout);

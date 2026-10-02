@@ -10,6 +10,8 @@ public static class Runner
     public const int ExitCulled = 126;
     public const int ExitNotFound = 127;
     public const int ExitKilled = 130;
+    /// <summary>EX_NOPERM: the caller may not do this, as opposed to the command failing.</summary>
+    public const int ExitRefused = 77;
     /// <summary>sysexits EX_IOERR: tman's run store cannot be written, so no run can be recorded.</summary>
     public const int ExitStoreUnwritable = 74;
 
@@ -101,6 +103,9 @@ public static class Runner
             Command = command,
             Args = args,
             Cwd = Canon.Dir(cwd ?? Directory.GetCurrentDirectory()),
+            // from where tman was invoked, not the alias's cwd: the caller's scope is its own cwd
+            ProjectRoot = Scope.CurrentProjectRoot(),
+            AgentSession = Scope.CurrentSession(),
             Group = group,
             ParentId = Environment.GetEnvironmentVariable(ParentIdEnvVar),
             Caps = caps,

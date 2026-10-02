@@ -301,13 +301,13 @@ public static partial class Program
 
         var now = DateTime.UtcNow;
         var records = Store.LoadAll();
-        Console.WriteLine($"{"ID",-14}{"NAME",-16}{"PID",-8}{"STATE",-12}{"AGE",-8}{"PEAKMEM",-9}COMMAND");
+        Console.WriteLine($"{"ID",-14}{"NAME",-16}{"PROJECT",-26}{"PID",-8}{"STATE",-12}{"AGE",-8}{"PEAKMEM",-9}COMMAND");
         foreach (var r in runs)
         {
             // a nested run is the same work as its parent, marked so the list is not read as two runs
             var name = r.IsNested ? "└ " + (r.Name ?? "-") : r.Name ?? "-";
             Console.WriteLine(
-                $"{r.Id,-14}{Canon.Ellipsize(name, 15),-16}{PidLabel(r),-8}" +
+                $"{r.Id,-14}{Canon.Ellipsize(name, 15),-16}{Scope.Short(Scope.RootOf(r)),-26}{PidLabel(r),-8}" +
                 $"{StateLabel(r, records),-12}{Canon.Duration(now - r.StartedUtc),-8}" +
                 $"{Canon.Mem(r.PeakMemMb),-9}{Canon.CommandLine(r.Command, r.Args)}");
         }
@@ -352,26 +352,56 @@ public static partial class Program
         Reaper.Sweep(Retention(), quiet: true);
         // a flag that is not understood is refused, not skipped: `kill all --<something>` read as
         // `kill all` kills the runs the caller was trying to exclude
-        var unknown = argv.FirstOrDefault(a => a.StartsWith("--"));
+        var unknown = argv.FirstOrDefault(a => a.StartsWith("--") && a != "--everywhere");
         if (unknown is not null) throw new FormatException($"unknown flag {unknown}");
-        var targets = argv.ToList();
+        var everywhere = argv.Contains("--everywhere");
+        var targets = argv.Where(a => a != "--everywhere").ToList();
         if (targets.Count == 0) throw new FormatException("kill requires <id|name|all>");
+        if (everywhere && targets.Any(t => t != "all"))
+            throw new FormatException("--everywhere only goes with `all`; a run named by id is killed wherever it is");
+        // checked before anything is killed: an agent has no terminal, so for it this is a refusal
+        // however the rest of the command reads
+        if (everywhere && !Scope.HasControllingTerminal())
+            throw new KnownError(
+                "`kill all --everywhere` kills every run on this machine, other projects' and sessions' included, and needs a terminal",
+                [
+                    "This process has no controlling terminal, so it will not do that.",
+                    "To kill only your own runs: tman kill all",
+                    "To kill everything, a person runs this from a terminal: tman kill all --everywhere",
+                ],
+                Runner.ExitRefused);
 
+        var callerRoot = Scope.CurrentProjectRoot();
+        var callerSession = Scope.CurrentSession();
         var killed = 0;
         var failed = 0;
+        var spared = new List<RunRecord>();
         foreach (var target in targets)
         {
-            IEnumerable<RunRecord> matches = target == "all"
-                ? Reaper.LiveRuns()
-                : Reaper.LiveRuns().Where(r => r.Matches(target));
+            var live = Reaper.LiveRuns();
+            List<RunRecord> matches;
+            if (target == "all")
+            {
+                matches = live.Where(r => everywhere || Scope.Contains(r, callerRoot, callerSession)).ToList();
+                spared.AddRange(live.Except(matches));
+            }
+            else matches = live.Where(r => r.Matches(target)).ToList();
 
             foreach (var r in matches)
             {
-                Console.WriteLine($"tman: killing {r.Name ?? r.Id} (pid {r.Pid})");
+                // an id is deliberate, so it is honoured; the owner is named so it is never a surprise
+                var owner = target != "all" && !Scope.Contains(r, callerRoot, callerSession)
+                    ? $" — outside this scope, belonging to {Scope.Describe(r)}"
+                    : "";
+                Console.WriteLine($"tman: killing {r.Name ?? r.Id} (pid {r.Pid}){owner}");
                 if (Reaper.KillRun(r, "killed via tman kill")) killed++;
                 else failed++;
             }
         }
+        if (spared.Count > 0)
+            Console.WriteLine(
+                $"tman: left {spared.Count} live run(s) of other projects or sessions alone " +
+                "(see `tman list`; kill one by id, or a person can run `tman kill all --everywhere`)");
         if (killed == 0 && failed == 0) Console.WriteLine("no matching live runs");
         // a run that is still partly alive is not killed, and a script checking the exit must see that
         return failed == 0 ? 0 : 1;
