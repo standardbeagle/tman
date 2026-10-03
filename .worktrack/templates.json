@@ -1,4 +1,15 @@
 {
   "stack": "generic",
+  "delivery": {
+    "landing": "task-branch",
+    "push": "after-each-merge",
+    "gates": [
+      "test"
+    ],
+    "deploy": {
+      "via": "tag",
+      "bump": "patch"
+    }
+  },
   "templates": []
 }
