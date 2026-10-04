@@ -79,7 +79,7 @@ public static partial class Program
         var args = alias.Args.Concat(extraArgs).ToArray();
         var caps = Config.EffectiveCaps(alias, new Caps(), config);
         return await GatedRun(alias.Command, args, caps, alias.Name, alias.Name, replace: false,
-            RunKey.ScopeDir(config), config.Dir, cwd: config.Dir, queue: JoinedQueue(alias.Queue, null));
+            RunKey.ScopeDir(config), config.Dir, cwd: config.Dir, queue: JoinedQueue(alias.Queue ?? config.DefaultQueue, null));
     }
 
     static async Task<int> CmdRun(string[] argv, string? _)
@@ -87,7 +87,7 @@ public static partial class Program
         Reaper.Sweep(Retention());
 
         string? name = null, aliasName = null, queueName = null;
-        var replace = false;
+        bool replace = false, noQueue = false;
         var cliCaps = new Caps();
         var cmdArgs = new List<string>();
         var i = 0;
@@ -106,6 +106,7 @@ public static partial class Program
                     case "--alias": aliasName = Next(); break;
                     case "--replace": replace = true; break;
                     case "--queue": queueName = Next(); break;
+                    case "--no-queue": noQueue = true; break;
                     case "--max-time" or "--stall" or "--max-mem" or "--max-cpu" or "--max-parallel" or "--queue-timeout":
                         cliCaps = Caps.With(cliCaps, a[2..], Next(), a);
                         break;
@@ -115,6 +116,8 @@ public static partial class Program
             }
             cmdArgs.Add(a);
         }
+        if (noQueue && queueName is not null)
+            throw new FormatException("--queue and --no-queue cannot both be given");
 
         if (aliasName is not null)
         {
@@ -127,7 +130,7 @@ public static partial class Program
             return await GatedRun(
                 alias.Command, args, caps, name ?? alias.Name, alias.Name, replace,
                 RunKey.ScopeDir(config), config.Dir, cwd: config.Dir,
-                queue: JoinedQueue(queueName ?? alias.Queue, cliCaps.QueueTimeout));
+                queue: JoinedQueue(noQueue ? null : queueName ?? alias.Queue ?? config.DefaultQueue, cliCaps.QueueTimeout));
         }
 
         if (cmdArgs.Count == 0) throw new FormatException("run requires a command");
@@ -136,7 +139,7 @@ public static partial class Program
             var caps = Config.EffectiveCaps(null, cliCaps, config);
             return await GatedRun(
                 cmdArgs[0], cmdArgs[1..].ToArray(), caps, name, null, replace,
-                RunKey.ScopeDir(config), config?.Dir, queue: JoinedQueue(queueName, cliCaps.QueueTimeout));
+                RunKey.ScopeDir(config), config?.Dir, queue: JoinedQueue(noQueue ? null : queueName ?? config?.DefaultQueue, cliCaps.QueueTimeout));
         }
     }
 

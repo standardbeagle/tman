@@ -99,6 +99,7 @@ tman init --shims --gitignore
 | `--max-parallel N` | 2 | queue until one of the bucket's N slots can be held; a run that has to wait says so once on stderr (with the queue timeout) and once more, `slot acquired after Xs`, when it gets through. While it waits it is a `queued` run: `tman list` shows it, `tman kill` ends it, and Ctrl+C ends it as `killed: cancelled while queued` with exit 130 — none of which starts its child |
 | `--queue-timeout T` | 5m | give up waiting for a slot; the run is recorded `killed: queue timeout …` and exits 130 |
 | `--queue Q` | — | after its bucket admits it, also wait in the machine-wide [named queue](#named-queues) Q, in arrival order |
+| `--no-queue` | off | join no named queue, even one the alias or `defaults` names |
 
 Cap precedence: CLI flags > alias block > `defaults` block > built-ins.
 
@@ -222,6 +223,19 @@ alias "build" {
     queue "compile"
 }
 ```
+
+A project can also put every run in a queue at once, from its `defaults`:
+
+```kdl
+defaults {
+    queue "compile"
+}
+```
+
+That reaches the runs no alias names: the PATH shims' `tman run -- go test ./...`, the Claude Code
+hook's rewrite, and a bare `tman run`. An alias's own `queue` wins over it, and `--queue` wins over
+both. A long-lived run — a dev server, a watcher — would hold a slot for hours, so start it with
+`tman run --no-queue`; `--no-queue` together with `--queue` is refused.
 
 - **Arrival order.** A run saves itself as `queued` in the queue's line before its first claim,
   and claims a slot only while nobody who joined earlier is still waiting. `tman list` shows each

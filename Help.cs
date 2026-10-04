@@ -28,7 +28,9 @@ public static class Help
                               (bucket: name-or-command @ dir)
           --queue-timeout T   give up queueing after T
           --queue Q           also wait in named queue Q, shared by every project on this machine
-                              and declared in ~/.tman/tman.kdl; admitted in arrival order
+                              and declared in ~/.tman/tman.kdl; admitted in arrival order.
+                              Without it, the alias's queue, else the .tman.kdl defaults' queue
+          --no-queue          join no named queue, whatever .tman.kdl says (a dev server, a watch)
         """;
 
     const string Sweep = """
@@ -232,7 +234,7 @@ public static class Help
         sb.AppendLine($"  runs:   {Canon.CommandLine(alias.Command, alias.Args, full: true)} [args...]");
         sb.AppendLine($"  in:     {config.Dir}");
         sb.AppendLine($"  caps:   {Program.DescribeCaps(Config.EffectiveCaps(alias, new Caps(), config))}");
-        if (alias.Queue is not null) sb.AppendLine($"  queue:  {alias.Queue}");
+        if ((alias.Queue ?? config.DefaultQueue) is { } queue) sb.AppendLine($"  queue:  {queue}");
         sb.Append("Every arg, --help included, goes to the command.");
         return sb.ToString();
     }

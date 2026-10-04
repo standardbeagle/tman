@@ -21,7 +21,8 @@ public sealed record TmanConfig(
     string FilePath,
     string Dir,
     Caps Defaults,
-    IReadOnlyDictionary<string, AliasDef> Aliases);
+    IReadOnlyDictionary<string, AliasDef> Aliases,
+    string? DefaultQueue = null);
 
 public static class Config
 {
@@ -52,6 +53,7 @@ public static class Config
         var nodes = ParseFile(path);
 
         Caps? defaults = null;
+        string? defaultQueue = null;
         var aliases = new Dictionary<string, AliasDef>(StringComparer.OrdinalIgnoreCase);
         foreach (var n in nodes)
         {
@@ -59,7 +61,8 @@ public static class Config
             {
                 case "defaults":
                     if (defaults is not null) throw new FormatException($"{path}: defaults is declared twice");
-                    defaults = ReadCaps(n, $"{path}, defaults", _ => false);
+                    defaults = ReadCaps(n, $"{path}, defaults", child => child.Name == "queue");
+                    defaultQueue = ReadQueueName(n, $"{path}, defaults");
                     break;
                 case "alias":
                     var alias = ReadAlias(n, path);
@@ -70,7 +73,7 @@ public static class Config
                     throw new FormatException($"{path}: unknown node \"{n.Name}\" (expected defaults or alias)");
             }
         }
-        return new TmanConfig(path, dir, defaults ?? new Caps(), aliases);
+        return new TmanConfig(path, dir, defaults ?? new Caps(), aliases, defaultQueue);
     }
 
     static AliasDef ReadAlias(KdlNode n, string path)
@@ -85,10 +88,16 @@ public static class Config
         if (commandNode.Args.Count != 1 || commandNode.Arg(0) is not { Length: > 0 } command)
             throw new FormatException($"{where}: command takes exactly one program; put its arguments under args");
         var args = n.Child("args")?.Args.Select(a => a.AsString() ?? "").ToArray() ?? [];
-        string? queue = null;
-        if (n.Child("queue") is { } queueNode && (queueNode.Args.Count != 1 || (queue = queueNode.Arg(0)) is not { Length: > 0 }))
+        return new AliasDef(name, command, args, caps, ReadQueueName(n, where));
+    }
+
+    /// <summary>The named queue a `defaults` or alias block joins, or null when it names none.</summary>
+    static string? ReadQueueName(KdlNode block, string where)
+    {
+        if (block.Child("queue") is not { } queueNode) return null;
+        if (queueNode.Args.Count != 1 || queueNode.Arg(0) is not { Length: > 0 } queue)
             throw new FormatException($"{where}: queue takes exactly one queue name");
-        return new AliasDef(name, command, args, caps, queue);
+        return queue;
     }
 
     /// <summary>The machine config, beside the run store so TMAN_HOME relocates both together.</summary>

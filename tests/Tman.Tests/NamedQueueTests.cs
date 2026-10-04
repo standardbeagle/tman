@@ -69,6 +69,25 @@ public class NamedQueueConfigTests : IDisposable
         Assert.Contains("queue takes exactly one queue name",
             Assert.Throws<FormatException>(() => Config.Load(proj.Path)).Message);
     }
+
+    [Fact]
+    public void Defaults_NameAQueueEveryRunInTheProjectJoins()
+    {
+        using var proj = new TempDir();
+        proj.WriteFile(Config.FileName, """
+            defaults {
+                max-parallel 2
+                queue "compile"
+            }
+            """);
+        var config = Config.Load(proj.Path)!;
+        Assert.Equal("compile", config.DefaultQueue);
+        Assert.Equal(2, config.Defaults.MaxParallel);
+
+        proj.WriteFile(Config.FileName, "defaults {\n    queue\n}\n");
+        Assert.Contains("defaults: queue takes exactly one queue name",
+            Assert.Throws<FormatException>(() => Config.Load(proj.Path)).Message);
+    }
 }
 
 /// <summary>
@@ -267,6 +286,90 @@ public class NamedQueueRunTests : IDisposable
 
         Assert.Equal(Runner.ExitNotFound, exit);
         Assert.Contains($"queue \"nope\" is not declared in {Config.MachineConfigPath}", err.ToString());
+        Assert.Empty(Store.LoadAll());
+    }
+
+    /// <summary>
+    /// A project whose defaults name compile, compile's only slot held here, and the cwd moved
+    /// into it — the setting every route into `tman run` without an alias meets: the PATH shims'
+    /// `exec tman run -- "$real" "$@"` and the Claude Code hook's rewrite alike.
+    /// </summary>
+    TempDir ProjectWhoseDefaultsJoinCompile(string? aliases = null)
+    {
+        var proj = new TempDir();
+        proj.WriteFile(Config.FileName, $$"""
+            defaults {
+                queue "compile"
+            }
+            {{aliases}}
+            """);
+        Directory.SetCurrentDirectory(proj.Path);
+        return proj;
+    }
+
+    [UnixFact("queues the sleep binary")]
+    public async Task ABareRun_InAProjectWhoseDefaultsNameAQueue_WaitsInIt()
+    {
+        using var held = Store.TryAcquireSlot(Admission.QueueKey("compile"), 1)!;
+        using var proj = ProjectWhoseDefaultsJoinCompile();
+        var run = Task.Run(() => Program.Main(["run", "--", "sleep", "30"]));
+
+        var queued = (await AwaitRecords(all => all.Any(r => r.State == RunState.Queued))).Single();
+        Assert.Equal("compile", queued.Queue);
+        Assert.Equal(0, await Program.Main(["kill", queued.Id]));
+        Assert.Equal(Runner.ExitKilled, await run.WaitAsync(TimeSpan.FromSeconds(10)));
+    }
+
+    [UnixFact("runs the true binary")]
+    public async Task NoQueue_KeepsARunOutOfTheDefaultsQueue()
+    {
+        // compile's slot is held for the whole test: a run that joined it could not finish
+        using var held = Store.TryAcquireSlot(Admission.QueueKey("compile"), 1)!;
+        using var proj = ProjectWhoseDefaultsJoinCompile();
+
+        var exit = await Program.Main(["run", "--no-queue", "--", "true"]).WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.Equal(0, exit);
+        Assert.Null(Assert.Single(Store.LoadAll()).Queue);
+    }
+
+    [UnixFact("runs the true binary from an alias")]
+    public async Task AnAliasQueue_TakesPrecedenceOverTheDefaultsQueue()
+    {
+        _home.WriteFile("tman.kdl", """
+            queue "compile" {
+                max-parallel 1
+            }
+            queue "free" {
+                max-parallel 1
+            }
+            """);
+        using var held = Store.TryAcquireSlot(Admission.QueueKey("compile"), 1)!;
+        using var proj = ProjectWhoseDefaultsJoinCompile("""
+            alias "build" {
+                command "true"
+                queue "free"
+            }
+            """);
+
+        var exit = await Program.Main(["build"]).WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.Equal(0, exit);
+        Assert.Equal("free", Assert.Single(Store.LoadAll()).Queue);
+    }
+
+    [Fact]
+    public async Task QueueAndNoQueueTogether_RefuseTheRun()
+    {
+        var err = new StringWriter();
+        var prev = Console.Error;
+        Console.SetError(err);
+        int exit;
+        try { exit = await Program.Main(["run", "--queue", "compile", "--no-queue", "--", "true"]); }
+        finally { Console.SetError(prev); }
+
+        Assert.Equal(Runner.ExitNotFound, exit);
+        Assert.Contains("--queue and --no-queue cannot both be given", err.ToString());
         Assert.Empty(Store.LoadAll());
     }
 
