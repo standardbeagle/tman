@@ -46,6 +46,18 @@ public sealed class LinuxFactAttribute : FactAttribute
 }
 
 /// <summary>
+/// A fact whose subject only exists on macOS; skipped elsewhere carrying <paramref name="because"/>,
+/// for the same reason as <see cref="UnixFactAttribute"/>.
+/// </summary>
+public sealed class MacFactAttribute : FactAttribute
+{
+    public MacFactAttribute(string because)
+    {
+        if (!OperatingSystem.IsMacOS()) Skip = because;
+    }
+}
+
+/// <summary>
 /// A fact whose subject only exists on Windows; skipped elsewhere carrying <paramref name="because"/>,
 /// for the same reason as <see cref="UnixFactAttribute"/>.
 /// </summary>

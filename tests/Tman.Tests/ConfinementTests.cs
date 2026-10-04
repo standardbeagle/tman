@@ -285,6 +285,19 @@ public class ConfinementRunTests : IDisposable
         Assert.Empty(Store.LoadAll());
     }
 
+    [MacFact("macOS has neither affinity nor a tree memory ceiling to enforce with")]
+    public async Task LimitCpusAndLimitMem_OnMacOS_AreRefusedBeforeTheRunExists()
+    {
+        foreach (var limit in new[] { new[] { "--limit-cpus", "1" }, ["--limit-mem", "96m"] })
+        {
+            var (exit, stderr) = await Tman(["run", .. limit, "--", "true"]);
+
+            Assert.Equal(Runner.ExitNotFound, exit);
+            Assert.Contains("cannot be enforced on macOS", stderr);
+            Assert.Empty(Store.LoadAll());
+        }
+    }
+
     [WindowsFact("sets a Job Object's affinity")]
     public async Task LimitCpus_OnWindows_ConfinesTheChildsChildren()
     {
