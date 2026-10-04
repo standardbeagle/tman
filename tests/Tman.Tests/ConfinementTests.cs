@@ -309,7 +309,7 @@ public class ConfinementRunTests : IDisposable
         Assert.Contains("limit-mem 256MB", record.KillReason);
     }
 
-    [Fact]
+    [LinuxFact("a cgroup directory is a Linux path, and /sys/fs/cgroup is not fully qualified on Windows")]
     public void TheMachineConfig_NamesTheDelegatedCgroup()
     {
         Assert.Null(Config.MemCgroup());
