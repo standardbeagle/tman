@@ -107,7 +107,8 @@ public static partial class Program
                     case "--replace": replace = true; break;
                     case "--queue": queueName = Next(); break;
                     case "--no-queue": noQueue = true; break;
-                    case "--max-time" or "--stall" or "--max-mem" or "--max-cpu" or "--max-parallel" or "--queue-timeout":
+                    case "--max-time" or "--stall" or "--max-mem" or "--max-cpu" or "--max-parallel" or "--limit-cpus"
+                        or "--limit-mem" or "--queue-timeout":
                         cliCaps = Caps.With(cliCaps, a[2..], Next(), a);
                         break;
                     default: throw new FormatException($"unknown flag {a}");
@@ -173,6 +174,8 @@ public static partial class Program
         string command, string[] args, Caps caps, string? name, string? alias, bool replace,
         string scopeDir, string? logDir = null, string? cwd = null, NamedQueue? queue = null)
     {
+        // before any waiting: a run this machine can never confine must not sit in a queue first
+        if (Confinement.Refusal(caps) is { } refusal) throw new FormatException(refusal);
         command = Canon.ResolveCommand(command, cwd ?? Directory.GetCurrentDirectory());
         var group = RunKey.For(name, command, scopeDir);
         // a supervised process that re-enters tman is one logical run, not a second claim on a slot
@@ -479,6 +482,7 @@ public static partial class Program
         Row("heartbeat", $"{r.HeartbeatUtc:u} ({Canon.Duration(now - r.HeartbeatUtc)} ago)");
         Row("peak mem", Canon.Mem(r.PeakMemMb));
         Row("caps", DescribeCaps(r.Caps));
+        Row("cpus", r.Cpus is null ? null : string.Join(",", r.Cpus));
         Row("killed", r.KillReason);
     }
 
@@ -490,6 +494,8 @@ public static partial class Program
         if (c.MaxMemMb is { } mm) parts.Add($"max-mem {Canon.Mem(mm)}");
         if (c.MaxCpuPct is { } mc) parts.Add($"max-cpu {mc:0.#}%");
         if (c.MaxParallel is { } mp) parts.Add($"max-parallel {mp}");
+        if (c.LimitCpus is { } lc) parts.Add($"limit-cpus {lc}");
+        if (c.LimitMemMb is { } lm) parts.Add($"limit-mem {Canon.Mem(lm)}");
         return parts.Count == 0 ? "none" : string.Join(", ", parts);
     }
 

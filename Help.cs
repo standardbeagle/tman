@@ -24,6 +24,9 @@ public static class Help
           --stall T           kill if no output or cpu/io/io-wait activity for T
           --max-mem M         kill above process-tree memory (4096, 2g)
           --max-cpu P         kill above P% sustained CPU
+          --limit-cpus N      run the tree on N CPUs, enforced by the kernel (affinity; nproc sees N)
+          --limit-mem M       hard memory ceiling for the tree, enforced by the kernel; crossing it
+                              ends the tree (Linux: a systemd user scope; Windows: a Job Object)
           --max-parallel N    queue until one of this bucket's N slot files can be held
                               (bucket: name-or-command @ dir)
           --queue-timeout T   give up queueing after T
@@ -58,7 +61,7 @@ public static class Help
             caps: flags > alias block > .tman.kdl defaults > built-ins (stall 30m, max-parallel 2,
             queue-timeout 5m). A cap value tman cannot read refuses the run.
 
-            exit: the child's own code, or 124 max-time, 125 stall, 126 max-mem/max-cpu, 127 cannot
+            exit: the child's own code, or 124 max-time, 125 stall, 126 max-mem/max-cpu/limit-mem, 127 cannot
             start / bad flag or config, 130 killed, interrupted, queue timeout, or name already
             running, 74 the run store cannot be written.
             """),

@@ -9,6 +9,16 @@ public sealed record Caps
     public long? MaxMemMb { get; init; }
     public double? MaxCpuPct { get; init; }
     public int? MaxParallel { get; init; }
+    /// <summary>
+    /// How many CPUs the tree may run on, enforced by the kernel as an affinity mask rather than
+    /// sampled — so `nproc` and every runner's worker count see the narrowed set. See <see cref="Confinement"/>.
+    /// </summary>
+    public int? LimitCpus { get; init; }
+    /// <summary>
+    /// A memory ceiling for the whole tree that the kernel enforces, where <see cref="MaxMemMb"/> is
+    /// sampled once a second and can be outrun between samples. See <see cref="Confinement"/>.
+    /// </summary>
+    public long? LimitMemMb { get; init; }
     public TimeSpan? QueueTimeout { get; init; }
     /// <summary>How long finished run records survive before automatic pruning.</summary>
     public TimeSpan? Retain { get; init; }
@@ -43,6 +53,8 @@ public sealed record Caps
         MaxMemMb = MaxMemMb ?? lower.MaxMemMb,
         MaxCpuPct = MaxCpuPct ?? lower.MaxCpuPct,
         MaxParallel = MaxParallel ?? lower.MaxParallel,
+        LimitCpus = LimitCpus ?? lower.LimitCpus,
+        LimitMemMb = LimitMemMb ?? lower.LimitMemMb,
         QueueTimeout = QueueTimeout ?? lower.QueueTimeout,
         Retain = Retain ?? lower.Retain,
     };
@@ -98,7 +110,7 @@ public sealed record Caps
 
     /// <summary>The settings a caps-bearing `.tman.kdl` block may hold, in the order the docs list them.</summary>
     public static readonly IReadOnlyList<string> Keys =
-        ["max-time", "stall", "max-mem", "max-cpu", "max-parallel", "queue-timeout", "retain"];
+        ["max-time", "stall", "max-mem", "max-cpu", "max-parallel", "limit-cpus", "limit-mem", "queue-timeout", "retain"];
 
     /// <summary>
     /// <paramref name="caps"/> with <paramref name="key"/> set from <paramref name="value"/>: the one
@@ -111,13 +123,22 @@ public sealed record Caps
     {
         FormatException Bad(string expected) => new($"bad {label} \"{value}\": expected {expected}");
         const string duration = "a duration such as 30s, 10m or 2h";
+        const string size = "megabytes, or a size such as 512m or 2g";
         return key switch
         {
             "max-time" => caps with { MaxTime = ParseDuration(value) ?? throw Bad(duration) },
             "stall" => caps with { Stall = ParseDuration(value) ?? throw Bad(duration) },
             "queue-timeout" => caps with { QueueTimeout = ParseDuration(value) ?? throw Bad(duration) },
             "retain" => caps with { Retain = ParseDuration(value) ?? throw Bad(duration) },
-            "max-mem" => caps with { MaxMemMb = ParseMemMb(value) ?? throw Bad("megabytes, or a size such as 512m or 2g") },
+            "max-mem" => caps with { MaxMemMb = ParseMemMb(value) ?? throw Bad(size) },
+            // zero would be a ceiling nothing can run under, which is a typo, not a limit
+            "limit-mem" => caps with { LimitMemMb = ParseMemMb(value) is { } mb and > 0 ? mb : throw Bad(size) },
+            "limit-cpus" => caps with
+            {
+                LimitCpus = int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var cpus) && cpus > 0
+                    ? cpus
+                    : throw Bad("a whole number of CPUs, at least 1"),
+            },
             "max-cpu" => caps with
             {
                 MaxCpuPct = double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var pct)

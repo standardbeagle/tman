@@ -62,6 +62,8 @@ public sealed class RunRecord
     /// <summary>The effective caps this run was started under — the same shape the config parses into.</summary>
     public Caps Caps { get; set; } = new();
     public long PeakMemMb { get; set; }
+    /// <summary>The CPUs limit-cpus confined the run to; null when it set none. See <see cref="Confinement"/>.</summary>
+    public int[]? Cpus { get; set; }
     public string? KillReason { get; set; }
     /// <summary>The named queue the run joined, from the machine config; null when it named none.</summary>
     public string? Queue { get; set; }

@@ -46,8 +46,12 @@ curl -fsSL https://raw.githubusercontent.com/standardbeagle/tman/main/install.sh
     <tr><td><code>--stall T</code></td><td>30m</td><td>no output <strong>and</strong> no cpu/io/kernel-io-wait activity for T → kill, exit 125</td></tr>
     <tr><td><code>--max-mem M</code></td><td>—</td><td>RSS above M (MB, or <code>2g</code>) → cull, exit 126</td></tr>
     <tr><td><code>--max-cpu P</code></td><td>—</td><td>process-tree CPU above P% for 3 consecutive seconds → cull, exit 126</td></tr>
+    <tr><td><code>--limit-cpus N</code></td><td>—</td><td>run the whole tree on N CPUs through an affinity mask the kernel enforces, so <code>nproc</code> sees N; Linux and Windows, refused on macOS</td></tr>
+    <tr><td><code>--limit-mem M</code></td><td>—</td><td>memory ceiling the kernel enforces on the whole tree (a systemd user scope on Linux, a Job Object on Windows); crossing it ends the tree, exit 126; refused on macOS</td></tr>
     <tr><td><code>--max-parallel N</code></td><td>2</td><td>queue until one of the bucket's N slots can be held; a run that waits says so once on stderr, and once more when it gets a slot</td></tr>
     <tr><td><code>--queue-timeout T</code></td><td>5m</td><td>give up waiting for a parallel slot</td></tr>
+    <tr><td><code>--queue Q</code></td><td>—</td><td>also wait in the machine-wide named queue Q, in arrival order; without it, the alias's queue, else the <code>defaults</code> queue</td></tr>
+    <tr><td><code>--no-queue</code></td><td>off</td><td>join no named queue, whatever <code>.tman.kdl</code> says — for a dev server or watcher</td></tr>
   </table>
   <p>Durations accept <code>ms</code>, <code>s</code>, <code>m</code>, <code>h</code> (e.g. <code>90s</code>, <code>10m</code>). Cap precedence: CLI flags &gt; alias block &gt; <code>defaults</code> block &gt; built-ins. A flag whose value cannot be read refuses the run with exit 127 and names the flag (<code>bad --max-cpu</code>); nothing is clamped or defaulted.</p>
   <p>

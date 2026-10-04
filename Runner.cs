@@ -158,14 +158,23 @@ public static class Runner
         record.State = RunState.Running;
         record.StartedUtc = record.HeartbeatUtc = record.LastOutputUtc = Utc();
 
+        Confinement confinement;
+        try { confinement = Confinement.For(record); }
+        catch (Exception e) when (e is FormatException or Win32Exception)
+        {
+            Console.CancelKeyPress -= onCancel;
+            return RecordStartFailure(record, e.Message, log);
+        }
+
         Process proc;
         try
         {
-            proc = Process.Start(psi) ?? throw new InvalidOperationException("failed to start process");
+            proc = confinement.Start(psi);
         }
         catch (Exception e)
         {
             Console.CancelKeyPress -= onCancel;
+            confinement.Dispose();
             return RecordStartFailure(record, $"cannot start '{command}': {e.Message}", log);
         }
         var startedAt = clock.GetTimestamp();
@@ -199,6 +208,7 @@ public static class Runner
             ProcUtil.KillTree(proc);
             proc.WaitForExit();
             proc.Dispose();
+            confinement.Dispose();
             log?.Dispose();
             throw;
         }
@@ -299,6 +309,8 @@ public static class Runner
 
                 if (Store.ReadKillRequest(record.Id) is { } requested)
                 { killReason = requested; killState = RunState.Killed; }
+                else if (confinement.Breach() is { } breach)
+                { killReason = breach; killState = RunState.Culled; }
                 else if (caps.MaxTime is { } mt && clock.GetElapsedTime(startedAt, now) > mt)
                 { killReason = $"exceeded max-time {mt}"; killState = RunState.TimedOut; }
                 else if (caps.Stall is { } st && clock.GetElapsedTime(lastProgress, now) > st &&
@@ -359,6 +371,17 @@ public static class Runner
                 killState = RunState.Killed;
             }
             Console.CancelKeyPress -= onCancel;
+            // a limit the kernel enforced ended the run without tman doing anything, so it is only
+            // known once the run is over — and it outranks the bare signal the root died of
+            // asked even when tman did the killing: asking is also what clears a scope that failed
+            var verdict = confinement.Verdict();
+            if (killReason is null && verdict is not null)
+            {
+                Console.Error.WriteLine($"tman: pid {record.Pid} ended: {verdict}");
+                killReason = verdict;
+                killState = RunState.Culled;
+            }
+            confinement.Dispose();
 
             record.HeartbeatUtc = Utc();
             if (killReason is not null)

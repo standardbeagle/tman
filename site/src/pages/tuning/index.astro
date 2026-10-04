@@ -18,7 +18,7 @@ const faqs = [
   },
   {
     q: "What do exit codes 124, 125, and 126 mean?",
-    a: "124 is a wall-clock timeout (--max-time), 125 is a stall (--stall), and 126 is a resource cull (--max-mem or --max-cpu). All three are findings rather than flakes: the right first response is to ask why the cap fired, not to widen it.",
+    a: "124 is a wall-clock timeout (--max-time), 125 is a stall (--stall), and 126 is a resource cull (--max-mem, --max-cpu, or a tree crossing --limit-mem). All three are findings rather than flakes: the right first response is to ask why the cap fired, not to widen it.",
   },
   {
     q: "Should a lint alias and a test alias share a parallel limit?",

@@ -29,6 +29,7 @@ LLM agents start test suites and then hang, get distracted, or survive a machine
 
 - **wall-time + stall kills** — `--max-time 10m`, `--stall 30m` (silent *and* idle across the whole process tree = hung, so quiet-but-busy work like `go test` keeps running)
 - **resource culling** — opt-in `--max-mem 2g`, `--max-cpu 95` (sustained) kill the whole process tree; both are measured across the tree on Linux, macOS and Windows, so a runner that forks its workers cannot hide behind an idle root
+- **kernel-enforced limits** — opt-in `--limit-cpus 4` runs the tree on four CPUs (an affinity mask, so `nproc` and every runner's worker pool see four), and `--limit-mem 8g` is a ceiling the kernel holds rather than one tman samples; Linux and Windows
 - **orphan reaping** — every `tman` command kills children whose runner died and prunes expired records; a lock whose runner died is taken over in place by the next run of that name
 - **dedup locks** — `--name test` refuses duplicates; `--replace` kills the old run and waits for it to hand the name back
 - **resource gating** — `--max-parallel 2` queues excess runs instead of stampeding cores
@@ -96,6 +97,8 @@ tman init --shims --gitignore
 | `--stall T` | 30m | no output **and** no cpu/io/kernel-io-wait activity for T → kill, exit 125 |
 | `--max-mem M` | — | ceiling on the process tree's RSS (MB or `2g`) → cull, exit 126 |
 | `--max-cpu P` | — | process-tree CPU above P% for 3 consecutive 1s ticks → cull, exit 126 |
+| `--limit-cpus N` | — | run the whole tree on N CPUs, enforced by the kernel — see [Kernel-enforced limits](#kernel-enforced-limits) |
+| `--limit-mem M` | — | memory ceiling (MB or `2g`) the kernel enforces on the whole tree; crossing it ends the tree → exit 126 |
 | `--max-parallel N` | 2 | queue until one of the bucket's N slots can be held; a run that has to wait says so once on stderr (with the queue timeout) and once more, `slot acquired after Xs`, when it gets through. While it waits it is a `queued` run: `tman list` shows it, `tman kill` ends it, and Ctrl+C ends it as `killed: cancelled while queued` with exit 130 — none of which starts its child |
 | `--queue-timeout T` | 5m | give up waiting for a slot; the run is recorded `killed: queue timeout …` and exits 130 |
 | `--queue Q` | — | after its bucket admits it, also wait in the machine-wide [named queue](#named-queues) Q, in arrival order |
@@ -106,8 +109,45 @@ Cap precedence: CLI flags > alias block > `defaults` block > built-ins.
 A cap whose value cannot be read refuses the run with exit 127 and names it — `bad --max-cpu
 "abc"` for a flag, `bad max-time "bogus"` with the file and block for `.tman.kdl` — nothing is
 clamped, defaulted, or dropped. Durations take `ms`/`s`/`m`/`h`, `max-mem` megabytes or a `k`/`m`/`g`
-size, `max-cpu` a non-negative number, and `max-parallel` a non-negative integer. Flags and the
+size, `max-cpu` a non-negative number, `max-parallel` a non-negative integer, `limit-mem` a size
+above zero, and `limit-cpus` a whole number of at least 1. Flags and the
 config share one parser, so each accepts exactly what the other does.
+
+### Kernel-enforced limits
+
+`max-mem` and `max-cpu` are samples: tman reads the tree once a second and culls it when a sample
+is over. A runner that allocates 30 GB between two samples has already pushed the machine into
+swap by the time tman looks. `limit-cpus` and `limit-mem` are held by the kernel instead, so there
+is nothing to outrun.
+
+| | Linux | Windows | macOS |
+| --- | --- | --- | --- |
+| `limit-cpus N` | affinity mask, set on the forking thread so the child inherits it before it runs | Job Object affinity | refused, exit 127 |
+| `limit-mem M` | `systemd-run --user --scope` with `MemoryMax`, `MemorySwapMax=0`, `OOMPolicy=kill` | Job Object job memory limit | refused, exit 127 |
+
+- **`limit-cpus` narrows what the tree sees, not just what it gets.** `nproc`, .NET's
+  `ProcessorCount`, Go's `GOMAXPROCS` and pytest-xdist's `-n auto` all count N, so a runner starts
+  N workers instead of one per core and then fighting over N. tman picks the N CPUs the fewest live
+  runs already hold, so two runs of `limit-cpus 4` on a 16-CPU machine get eight CPUs between them,
+  not the same four; `tman status` shows which. Asking for more CPUs than tman may use gives every
+  one of them. A nested run picks from its parent's set and can never widen it.
+- **`limit-mem` ends the whole tree.** On Linux the kernel's OOM kill takes every process in the
+  scope, and tman reads the scope's result to report the run `culled` with exit 126 rather than
+  as the child's bare SIGKILL (137). On Windows the job refuses the allocation that would cross the
+  limit, and tman ends the tree on the job's notice. Swap does not count as room: a tree that could
+  swap past its ceiling would still take that memory from the machine.
+- **Linux needs a systemd user manager** with the memory controller delegated to it — the only
+  way an unprivileged user can set a cgroup's `memory.max`. Without one, a run that sets
+  `limit-mem` is refused with exit 127 before it queues, naming what is missing (`loginctl
+  enable-linger` starts a manager for a user with no login session, such as a CI account). A run
+  nested inside a run with `limit-mem` stays in its parent's scope rather than making its own,
+  which would move it out from under the parent's limit; it says so on stderr.
+- **Windows has a window.** .NET cannot create a process suspended, so the child runs for the
+  instant between its creation and tman putting it in the job. A process it started in that
+  instant would be outside the job; a runtime or interpreter is still loading then, which is why
+  this holds in practice, but it is not a guarantee.
+- **macOS refuses both**: an unprivileged process there has neither CPU affinity nor a memory
+  ceiling for a process tree. Use `max-mem` and `max-cpu` there.
 
 > **`--stall` is a hang backstop, not a runtime budget.** It answers "is this process dead?",
 > not "is this taking too long?" — use `--max-time` for the latter. A cold `go build ./...`,
@@ -454,7 +494,7 @@ record written by a different tman version is discarded rather than half-read.
 | 74 | the run store (`~/.tman`, or `TMAN_HOME`) cannot be written; the message says how to fix it |
 | 124 | timed out (`--max-time`) |
 | 125 | stalled (`--stall`) |
-| 126 | culled (`--max-mem` / `--max-cpu`) |
+| 126 | culled (`--max-mem` / `--max-cpu` / `--limit-mem`) |
 | 127 | command / config not found; a program that cannot be started is recorded as `startfailed` with the reason, and gets a digest |
 | 130 | killed (dedup refusal, queue timeout, `tman kill`, Ctrl+C, exit status unknown) |
 

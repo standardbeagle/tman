@@ -8,6 +8,22 @@ below 1.0, behavior changes land in minor releases.
 
 ## [Unreleased]
 
+### Added
+- **Kernel-enforced limits: `limit-cpus` and `limit-mem`.** Unlike `max-mem` and `max-cpu`,
+  which sample the tree once a second and cull it, these are held by the kernel and cannot be
+  outrun between samples. `limit-cpus N` runs the tree on N CPUs through an affinity mask, so
+  `nproc` and runners' worker pools see N; tman spreads concurrent runs over the least-held CPUs.
+  `limit-mem M` is a hard ceiling for the whole tree: on Linux a systemd user scope (`MemoryMax`,
+  no swap, `OOMPolicy=kill`), on Windows a Job Object; crossing it ends the tree and the run exits
+  126. Both are refused on macOS, and `limit-mem` is refused on a Linux machine with no systemd
+  user manager, with exit 127 before the run queues. Available as flags, in `defaults`, and in
+  aliases.
+- **`defaults` can name a queue.** `queue "compile"` in a `.tman.kdl` `defaults` block puts every
+  run in the project in that machine-wide queue, including runs that no alias names: the PATH
+  shims' `tman run -- go test`, the Claude Code hook's rewrite, and bare `tman run`. An alias's
+  `queue` and `--queue` still take precedence. `--no-queue` keeps a long-lived run, such as a dev
+  server, out of the queue.
+
 ## [0.6.1] - 2026-10-02
 
 The first release of this work. `v0.6.0` was tagged, but its release build failed on a Windows
