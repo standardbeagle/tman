@@ -12,12 +12,14 @@ namespace Tman;
 /// ProcessorCount, Go's GOMAXPROCS and pytest-xdist all size their worker pools to N. Linux sets it
 /// on the starting thread around the fork, so the child inherits it before it runs a single
 /// instruction; Windows sets it on the run's Job Object.</item>
-/// <item><c>limit-mem</c>: on Linux a memory cgroup, made by starting the child through
-/// <c>systemd-run --user --scope</c> — a user's own cgroup is the one place a user may set
-/// memory.max, and the user manager is what delegates it. The scope is
-/// <c>OOMPolicy=kill</c>, so the kernel's OOM kill ends the whole tree rather than one worker. On
-/// Windows a Job Object's job memory limit, which fails the allocation that would cross it; tman
-/// then ends the tree.</item>
+/// <item><c>limit-mem</c>: on Linux a memory cgroup. An unprivileged process may set memory.max
+/// only on a cgroup delegated to it, so the cgroup comes from whoever delegates one: by default the
+/// systemd user manager, through <c>systemd-run --user --scope</c> with <c>OOMPolicy=kill</c>; or,
+/// when the machine config names a <c>cgroup</c>, a leaf tman makes in that delegated directory
+/// itself with <c>memory.oom.group</c> set — a container's own cgroup, or one an admin handed over.
+/// Either way the kernel's OOM kill ends the whole tree rather than one worker. On Windows a Job
+/// Object's job memory limit, which fails the allocation that would cross it; tman then ends the
+/// tree.</item>
 /// </list>
 /// macOS has neither, for an unprivileged process, and a run that asks for either is refused there.
 /// A limit someone wrote down is enforced or refused, never quietly left out.
@@ -36,14 +38,17 @@ public sealed partial class Confinement : IDisposable
 
     readonly Caps _caps;
     readonly int[]? _cpus;
-    /// <summary>The run's systemd scope unit (Linux limit-mem), or null when it has none.</summary>
+    /// <summary>The run's systemd scope unit (Linux limit-mem, by default), or null when it has none.</summary>
     readonly string? _memScope;
+    /// <summary>The run's own cgroup directory (Linux limit-mem in a configured cgroup), or null.</summary>
+    readonly string? _memLeaf;
 
-    Confinement(Caps caps, int[]? cpus, string? memScope)
+    Confinement(Caps caps, int[]? cpus, string? memScope = null, string? memLeaf = null)
     {
         _caps = caps;
         _cpus = cpus;
         _memScope = memScope;
+        _memLeaf = memLeaf;
     }
 
     /// <summary>
@@ -66,18 +71,20 @@ public sealed partial class Confinement : IDisposable
             record.Cpus = cpus;
         }
 
-        string? memScope = null;
+        string? memScope = null, memLeaf = null;
         if (caps.LimitMemMb is { } mb && OperatingSystem.IsLinux())
         {
             if (Environment.GetEnvironmentVariable(MemScopeEnvVar) is { Length: > 0 } parentScope)
                 Console.Error.WriteLine(
                     $"tman: nested run stays in its parent's memory scope {parentScope}; " +
                     $"its own limit-mem {Canon.Mem(mb)} is not applied separately");
+            else if (Config.MemCgroup() is { } root)
+                memLeaf = MakeMemLeaf(root, $"tman-{record.Id}", mb);
             else
                 memScope = $"tman-{record.Id}.scope";
         }
 
-        var confinement = new Confinement(caps, cpus, memScope);
+        var confinement = new Confinement(caps, cpus, memScope, memLeaf);
         if (OperatingSystem.IsWindows()) confinement.CreateJob();
         return confinement;
     }
@@ -95,10 +102,115 @@ public sealed partial class Confinement : IDisposable
                    "process neither CPU affinity nor a memory ceiling for a process tree; " +
                    "max-mem and max-cpu cull on samples instead";
         if (!OperatingSystem.IsLinux() || caps.LimitMemMb is null) return null;
-        // a nested run makes no scope (see MemScopeEnvVar), so needs no user manager
+        // a nested run makes no cgroup (see MemScopeEnvVar), so needs nothing to make one with
         if (Environment.GetEnvironmentVariable(MemScopeEnvVar) is { Length: > 0 }) return null;
-        return LinuxMemScopeRefusal(
-            Environment.GetEnvironmentVariable("XDG_RUNTIME_DIR"), getuid(), FindOnPath("systemd-run"));
+        return Config.MemCgroup() is { } root
+            ? MemCgroupRefusal(root, OwnCgroupDir())
+            : SystemdScopeRefusal();
+    }
+
+    /// <summary>What stops a systemd user scope being made for limit-mem on this machine, or null.</summary>
+    internal static string? SystemdScopeRefusal() =>
+        LinuxMemScopeRefusal(Environment.GetEnvironmentVariable("XDG_RUNTIME_DIR"), getuid(), FindOnPath("systemd-run"));
+
+    /// <summary>
+    /// What stops tman making a run's cgroup inside the configured <paramref name="root"/>, given
+    /// that tman itself runs in <paramref name="ownCgroup"/>. Besides the directory being there,
+    /// carrying the memory controller and being tman's to write, the kernel moves a process between
+    /// cgroups only for a writer of cgroup.procs in the nearest cgroup holding both — so a root
+    /// delegated to this user is still no use to a tman running outside it, as from a login session
+    /// or WSL's /non-systemd, where that nearest cgroup is the machine's own.
+    /// </summary>
+    internal static string? MemCgroupRefusal(string root, string ownCgroup)
+    {
+        var needs = $"limit-mem makes its cgroups in {root}, from the machine config {Config.MachineConfigPath}";
+        if (!Directory.Exists(root)) return $"{needs}, and it does not exist";
+        string controllers;
+        try { controllers = File.ReadAllText(Path.Combine(root, "cgroup.controllers")); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return $"{needs}, and it is not a cgroup v2 directory ({e.Message})";
+        }
+        if (!controllers.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Contains("memory"))
+            return $"{needs}, and the memory controller is not enabled for it — enable it in its parent's cgroup.subtree_control";
+        foreach (var file in new[] { root, Path.Combine(root, "cgroup.subtree_control") })
+            if (!Writable(file)) return $"{needs}, and {file} is not writable by this user";
+        var ancestor = NearestCommonDir(root, ownCgroup);
+        var procs = Path.Combine(ancestor, "cgroup.procs");
+        return Writable(procs)
+            ? null
+            : $"{needs}, and tman runs in {ownCgroup}: moving a process from there into {root} needs " +
+              $"write access to {procs}. Run tman inside the delegated cgroup's subtree, as from a container's own cgroup";
+    }
+
+    /// <summary>The deepest directory that contains both paths.</summary>
+    internal static string NearestCommonDir(string a, string b)
+    {
+        var x = a.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        var y = b.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        var shared = x.Zip(y).TakeWhile(p => p.First == p.Second).Count();
+        return "/" + string.Join('/', x.Take(shared));
+    }
+
+    /// <summary>tman's own cgroup directory, from /proc/self/cgroup's v2 line.</summary>
+    static string OwnCgroupDir() =>
+        "/sys/fs/cgroup" + File.ReadLines("/proc/self/cgroup").First(l => l.StartsWith("0::"))[3..].TrimEnd('/');
+
+    static bool Writable(string path) => access(path, WriteOk) == 0;
+
+    /// <summary>
+    /// The run's cgroup in <paramref name="root"/>: memory.max at the limit, no swap to spill into,
+    /// and memory.oom.group so the kernel's OOM kill takes the whole tree. The root's
+    /// subtree_control is given the memory controller if it lacks it — the root being delegated to
+    /// this user is what the machine config says, and a leaf without the controller has no
+    /// memory.max to set. A cgroup half made is removed before the error that says why.
+    /// </summary>
+    static string MakeMemLeaf(string root, string name, long limitMemMb)
+    {
+        var leaf = Path.Combine(root, name);
+        try
+        {
+            var subtree = Path.Combine(root, "cgroup.subtree_control");
+            if (!File.ReadAllText(subtree).Split(' ', StringSplitOptions.TrimEntries).Contains("memory"))
+                File.WriteAllText(subtree, "+memory");
+            Directory.CreateDirectory(leaf);
+            File.WriteAllText(Path.Combine(leaf, "memory.max"), (limitMemMb * 1024 * 1024).ToString());
+            // a ceiling the tree can swap past is not a ceiling on what it takes from the machine
+            File.WriteAllText(Path.Combine(leaf, "memory.swap.max"), "0");
+            File.WriteAllText(Path.Combine(leaf, "memory.oom.group"), "1");
+            return leaf;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            RemoveMemLeaf(leaf);
+            throw new FormatException($"cannot make the run's cgroup {leaf} for limit-mem: {e.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Removes the run's cgroup, ending first anything the run left in it. The run is over when its
+    /// root is, and a leftover inside the cgroup is the run's by construction — as the scope's would
+    /// be, which systemd ends with it.
+    /// </summary>
+    static void RemoveMemLeaf(string leaf)
+    {
+        if (!Directory.Exists(leaf)) return;
+        var deadline = Stopwatch.GetTimestamp() + Stopwatch.Frequency * 2;
+        while (true)
+        {
+            try { Directory.Delete(leaf); return; }
+            catch (IOException) when (Stopwatch.GetTimestamp() < deadline)
+            {
+                try { File.WriteAllText(Path.Combine(leaf, "cgroup.kill"), "1"); }
+                catch (IOException) { }
+                Thread.Sleep(20);
+            }
+            catch (IOException e)
+            {
+                Console.Error.WriteLine($"tman: cannot remove the run's cgroup {leaf}: {e.Message}");
+                return;
+            }
+        }
     }
 
     /// <summary>
@@ -163,6 +275,7 @@ public sealed partial class Confinement : IDisposable
     public Process Start(ProcessStartInfo psi)
     {
         if (_memScope is not null) WrapInMemScope(psi, _memScope, _caps.LimitMemMb!.Value);
+        if (_memLeaf is not null) WrapInMemLeaf(psi, _memLeaf);
         if (OperatingSystem.IsWindows()) return StartInJob(psi);
         if (_cpus is null) return Process.Start(psi) ?? throw new InvalidOperationException("failed to start process");
 
@@ -199,6 +312,26 @@ public sealed partial class Confinement : IDisposable
     }
 
     /// <summary>
+    /// Rewrites <paramref name="psi"/> to join <paramref name="leaf"/> before the command runs: a
+    /// shell writes its own pid into the leaf's cgroup.procs and then execs the command, so the pid
+    /// tman watches is the command's own, and nothing the command starts can start outside the leaf.
+    /// Moving the child in after Process.Start would leave a window for that; moving tman in would
+    /// put tman under the limit, where the OOM kill that ends the tree would end its record too. A
+    /// write that fails fails the shell, loudly, before the command runs.
+    /// </summary>
+    internal static void WrapInMemLeaf(ProcessStartInfo psi, string leaf)
+    {
+        var command = psi.FileName;
+        var args = psi.ArgumentList.ToArray();
+        psi.FileName = "/bin/sh";
+        psi.ArgumentList.Clear();
+        foreach (var a in (string[])["-c", "echo $$ > \"$0\" && exec \"$@\"", Path.Combine(leaf, "cgroup.procs"), command])
+            psi.ArgumentList.Add(a);
+        foreach (var a in args) psi.ArgumentList.Add(a);
+        psi.Environment[MemScopeEnvVar] = leaf;
+    }
+
+    /// <summary>
     /// A limit the tree crossed while running, once per tick: Windows reports the job memory limit
     /// through the job's completion port. On Linux the kernel acts on its own and there is nothing
     /// to report until the run is over.
@@ -213,6 +346,7 @@ public sealed partial class Confinement : IDisposable
     public string? Verdict()
     {
         if (OperatingSystem.IsWindows()) return JobMemoryBreach();
+        if (_memLeaf is not null) return LeafOomKilled(_memLeaf) ? OomVerdict() : null;
         if (_memScope is null) return null;
         var result = Systemctl("show", _memScope, "-p", "Result", "--value");
         // a scope that ended cleanly is unloaded at once; one that failed stays until it is reset
@@ -222,9 +356,26 @@ public sealed partial class Confinement : IDisposable
         if (result is null)
             Console.Error.WriteLine(
                 $"tman: cannot tell whether limit-mem ended the run: `systemctl --user show {_memScope}` failed");
-        return result == "oom-kill"
-            ? $"tree memory reached limit-mem {Canon.Mem(_caps.LimitMemMb!.Value)}; the kernel ended the tree"
-            : null;
+        return result == "oom-kill" ? OomVerdict() : null;
+    }
+
+    string OomVerdict() => $"tree memory reached limit-mem {Canon.Mem(_caps.LimitMemMb!.Value)}; the kernel ended the tree";
+
+    /// <summary>Whether the kernel OOM-killed anything in the leaf, from its memory.events.</summary>
+    static bool LeafOomKilled(string leaf)
+    {
+        var events = Path.Combine(leaf, "memory.events");
+        try
+        {
+            foreach (var line in File.ReadLines(events))
+                if (line.Split(' ') is ["oom_kill", var count] && count != "0") return true;
+        }
+        // as with the scope: not knowing leaves the child's own status, a SIGKILL's 137, standing
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            Console.Error.WriteLine($"tman: cannot tell whether limit-mem ended the run: {events}: {e.Message}");
+        }
+        return false;
     }
 
     /// <summary>systemctl --user's trimmed stdout, or null when it could not be asked.</summary>
@@ -257,6 +408,7 @@ public sealed partial class Confinement : IDisposable
     public void Dispose()
     {
         if (OperatingSystem.IsWindows()) CloseJob();
+        if (_memLeaf is not null) RemoveMemLeaf(_memLeaf);
     }
 
     // 1024 CPUs, the kernel's CONFIG_NR_CPUS default; a mask smaller than the kernel's is EINVAL
@@ -291,4 +443,9 @@ public sealed partial class Confinement : IDisposable
 
     [DllImport("libc")]
     static extern uint getuid();
+
+    const int WriteOk = 2;
+
+    [DllImport("libc", SetLastError = true)]
+    static extern int access(string path, int mode);
 }

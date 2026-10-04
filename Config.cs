@@ -110,29 +110,55 @@ public static class Config
     /// </summary>
     public static NamedQueue Queue(string name)
     {
-        var path = MachineConfigPath;
-        var queues = new Dictionary<string, NamedQueue>(StringComparer.Ordinal);
-        if (File.Exists(path))
-        {
-            foreach (var n in ParseFile(path))
-            {
-                if (n.Name != "queue")
-                    throw new FormatException($"{path}: unknown node \"{n.Name}\" (expected queue)");
-                if (n.Args.Count != 1 || n.Arg(0) is not { Length: > 0 } declared)
-                    throw new FormatException($"{path}: queue takes exactly one name, as in queue \"compile\" {{ max-parallel 1 }}");
-                var where = $"{path}, queue \"{declared}\"";
-                var caps = ReadCaps(n, where, _ => false, ["max-parallel", "queue-timeout"]);
-                if (caps.MaxParallel is not ({ } slots and > 0))
-                    throw new FormatException($"{where}: max-parallel is required and must be at least 1");
-                if (!queues.TryAdd(declared, new NamedQueue(declared, slots, caps.QueueTimeout ?? NamedQueue.DefaultTimeout)))
-                    throw new FormatException($"{path}: queue \"{declared}\" is declared twice");
-            }
-        }
-        return queues.TryGetValue(name, out var queue)
+        var machine = LoadMachine();
+        return machine.Queues.TryGetValue(name, out var queue)
             ? queue
             : throw new FormatException(
-                $"queue \"{name}\" is not declared in {path}; declare it there, e.g. queue \"{name}\" {{ max-parallel 1 }}");
+                $"queue \"{name}\" is not declared in {MachineConfigPath}; declare it there, e.g. queue \"{name}\" {{ max-parallel 1 }}");
     }
+
+    /// <summary>
+    /// The delegated cgroup limit-mem makes its runs' cgroups in, or null for a systemd user scope —
+    /// see <see cref="Confinement"/>. Read only when a run sets limit-mem.
+    /// </summary>
+    public static string? MemCgroup() => LoadMachine().Cgroup;
+
+    /// <summary>The machine config, read whole or refused like `.tman.kdl`; empty when the file is absent.</summary>
+    static MachineConfig LoadMachine()
+    {
+        var path = MachineConfigPath;
+        var queues = new Dictionary<string, NamedQueue>(StringComparer.Ordinal);
+        string? cgroup = null;
+        if (!File.Exists(path)) return new MachineConfig(queues, null);
+        foreach (var n in ParseFile(path))
+        {
+            switch (n.Name)
+            {
+                case "queue":
+                    if (n.Args.Count != 1 || n.Arg(0) is not { Length: > 0 } declared)
+                        throw new FormatException($"{path}: queue takes exactly one name, as in queue \"compile\" {{ max-parallel 1 }}");
+                    var where = $"{path}, queue \"{declared}\"";
+                    var caps = ReadCaps(n, where, _ => false, ["max-parallel", "queue-timeout"]);
+                    if (caps.MaxParallel is not ({ } slots and > 0))
+                        throw new FormatException($"{where}: max-parallel is required and must be at least 1");
+                    if (!queues.TryAdd(declared, new NamedQueue(declared, slots, caps.QueueTimeout ?? NamedQueue.DefaultTimeout)))
+                        throw new FormatException($"{path}: queue \"{declared}\" is declared twice");
+                    break;
+                case "cgroup":
+                    if (cgroup is not null) throw new FormatException($"{path}: cgroup is declared twice");
+                    if (n.Children.Count > 0 || n.Args.Count != 1 || n.Arg(0) is not { Length: > 0 } dir || !Path.IsPathFullyQualified(dir))
+                        throw new FormatException(
+                            $"{path}: cgroup takes exactly one absolute directory, as in cgroup \"/sys/fs/cgroup/tman\"");
+                    cgroup = Path.TrimEndingDirectorySeparator(dir);
+                    break;
+                default:
+                    throw new FormatException($"{path}: unknown node \"{n.Name}\" (expected queue or cgroup)");
+            }
+        }
+        return new MachineConfig(queues, cgroup);
+    }
+
+    sealed record MachineConfig(IReadOnlyDictionary<string, NamedQueue> Queues, string? Cgroup);
 
     /// <summary>A config file's nodes; a parse error names the file, since the offset alone does not.</summary>
     static List<KdlNode> ParseFile(string path)

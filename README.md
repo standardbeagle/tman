@@ -123,7 +123,7 @@ is nothing to outrun.
 | | Linux | Windows | macOS |
 | --- | --- | --- | --- |
 | `limit-cpus N` | affinity mask, set on the forking thread so the child inherits it before it runs | Job Object affinity | refused, exit 127 |
-| `limit-mem M` | `systemd-run --user --scope` with `MemoryMax`, `MemorySwapMax=0`, `OOMPolicy=kill` | Job Object job memory limit | refused, exit 127 |
+| `limit-mem M` | a memory cgroup: a systemd user scope by default, or a leaf in the delegated cgroup the machine config names | Job Object job memory limit | refused, exit 127 |
 
 - **`limit-cpus` narrows what the tree sees, not just what it gets.** `nproc`, .NET's
   `ProcessorCount`, Go's `GOMAXPROCS` and pytest-xdist's `-n auto` all count N, so a runner starts
@@ -136,12 +136,32 @@ is nothing to outrun.
   as the child's bare SIGKILL (137). On Windows the job refuses the allocation that would cross the
   limit, and tman ends the tree on the job's notice. Swap does not count as room: a tree that could
   swap past its ceiling would still take that memory from the machine.
-- **Linux needs a systemd user manager** with the memory controller delegated to it — the only
-  way an unprivileged user can set a cgroup's `memory.max`. Without one, a run that sets
-  `limit-mem` is refused with exit 127 before it queues, naming what is missing (`loginctl
-  enable-linger` starts a manager for a user with no login session, such as a CI account). A run
-  nested inside a run with `limit-mem` stays in its parent's scope rather than making its own,
-  which would move it out from under the parent's limit; it says so on stderr.
+- **Linux needs a delegated cgroup.** An unprivileged process can set `memory.max` only on a
+  cgroup handed to it, so `limit-mem` takes one from whoever hands one out:
+  - **By default, the systemd user manager.** The command runs through `systemd-run --user
+    --scope` with `MemoryMax`, `MemorySwapMax=0` and `OOMPolicy=kill`. Without a user manager with
+    the memory controller delegated, the run is refused with exit 127 before it queues, naming what
+    is missing. `loginctl enable-linger` starts a manager for a user with no login session, such as
+    a CI account.
+  - **Or a cgroup you name**, for a container that owns its cgroup or a host where an admin
+    delegated one, in `~/.tman/tman.kdl`:
+
+    ```kdl
+    cgroup "/sys/fs/cgroup/tman"
+    ```
+
+    Each run gets its own `tman-<id>` cgroup there, with `memory.max`, `memory.swap.max 0` and
+    `memory.oom.group 1`. The command joins it before it runs — a shell writes its pid into the
+    cgroup and execs the command — so the pid tman watches is the command's own and nothing it
+    starts can start outside. Afterwards anything left in it is killed and the cgroup removed. The
+    kernel moves a process between cgroups only for a writer of `cgroup.procs` in the nearest
+    cgroup holding both, so **tman itself must run inside the delegated subtree**, as a container's
+    processes do; a cgroup delegated to you is no use to a tman in a login session or WSL's
+    `/non-systemd`. tman checks this, and the cgroup's memory controller and write access, before
+    the run queues, and refuses with exit 127 naming the one that fails.
+
+  A run nested inside a run with `limit-mem` stays in its parent's cgroup rather than making its
+  own, which would move it out from under the parent's limit; it says so on stderr.
 - **Windows has a window.** .NET cannot create a process suspended, so the child runs for the
   instant between its creation and tman putting it in the job. A process it started in that
   instant would be outside the job; a runtime or interpreter is still loading then, which is why

@@ -26,7 +26,8 @@ public static class Help
           --max-cpu P         kill above P% sustained CPU
           --limit-cpus N      run the tree on N CPUs, enforced by the kernel (affinity; nproc sees N)
           --limit-mem M       hard memory ceiling for the tree, enforced by the kernel; crossing it
-                              ends the tree (Linux: a systemd user scope; Windows: a Job Object)
+                              ends the tree (Linux: a systemd user scope, or the delegated cgroup
+                              ~/.tman/tman.kdl names; Windows: a Job Object)
           --max-parallel N    queue until one of this bucket's N slot files can be held
                               (bucket: name-or-command @ dir)
           --queue-timeout T   give up queueing after T

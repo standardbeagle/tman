@@ -58,6 +58,41 @@ public class ConfinementChoiceTests
         Assert.Contains($"bad {key}", e.Message);
     }
 
+    [Theory]
+    [InlineData("/sys/fs/cgroup/a/b", "/sys/fs/cgroup/a/c", "/sys/fs/cgroup/a")]
+    [InlineData("/sys/fs/cgroup/tman/runs", "/sys/fs/cgroup/tman", "/sys/fs/cgroup/tman")]
+    [InlineData("/sys/fs/cgroup/user.slice/x", "/sys/fs/cgroup/non-systemd", "/sys/fs/cgroup")]
+    // a shared prefix of a name is not a shared directory
+    [InlineData("/sys/fs/cgroup/tman", "/sys/fs/cgroup/tmanx", "/sys/fs/cgroup")]
+    public void NearestCommonDir_IsTheDeepestDirectoryHoldingBoth(string a, string b, string expected) =>
+        Assert.Equal(expected, Confinement.NearestCommonDir(a, b));
+
+    [UnixFact("reads permission bits through access(2)")]
+    public void MemCgroupRefusal_NamesWhatStopsTmanUsingTheConfiguredCgroup()
+    {
+        // a cgroup tree in miniature: tman in a/self, runs to go in a/runs, a the nearest of both
+        using var tree = new TempDir();
+        var root = tree.Mkdir("a/runs");
+        var own = tree.Mkdir("a/self");
+        var procs = tree.WriteFile("a/cgroup.procs", "");
+        tree.WriteFile("a/runs/cgroup.subtree_control", "");
+
+        Assert.Contains("is not a cgroup v2 directory", Confinement.MemCgroupRefusal(root, own));
+        tree.WriteFile("a/runs/cgroup.controllers", "cpu pids\n");
+        Assert.Contains("the memory controller is not enabled", Confinement.MemCgroupRefusal(root, own));
+        tree.WriteFile("a/runs/cgroup.controllers", "cpu memory pids\n");
+        Assert.Null(Confinement.MemCgroupRefusal(root, own));
+
+        File.SetUnixFileMode(procs, UnixFileMode.UserRead);
+        // root writes anything; the refusal is only observable for a user the bits bind
+        Assert.Throws<UnauthorizedAccessException>(() => File.OpenWrite(procs).Dispose());
+        var refusal = Confinement.MemCgroupRefusal(root, own);
+        Assert.Contains($"tman runs in {own}", refusal);
+        Assert.Contains($"write access to {procs}", refusal);
+
+        Assert.Contains("does not exist", Confinement.MemCgroupRefusal(Path.Combine(tree.Path, "gone"), own));
+    }
+
     [Fact]
     public void Limits_AreReadFromConfig_AndMergeLikeEveryOtherCap()
     {
@@ -91,7 +126,7 @@ public sealed class MemScopeFactAttribute : FactAttribute
     public MemScopeFactAttribute()
     {
         if (!OperatingSystem.IsLinux()) Skip = "limit-mem's systemd scope only exists on Linux";
-        else if (Confinement.Refusal(new Caps { LimitMemMb = 64 }) is { } refusal) Skip = refusal;
+        else if (Confinement.SystemdScopeRefusal() is { } refusal) Skip = refusal;
     }
 }
 
@@ -272,6 +307,100 @@ public class ConfinementRunTests : IDisposable
         var record = Assert.Single(Store.LoadAll());
         Assert.Equal(RunState.Culled, record.State);
         Assert.Contains("limit-mem 256MB", record.KillReason);
+    }
+
+    [Fact]
+    public void TheMachineConfig_NamesTheDelegatedCgroup()
+    {
+        Assert.Null(Config.MemCgroup());
+        _home.WriteFile("tman.kdl", "cgroup \"/sys/fs/cgroup/tman/\"\nqueue \"compile\" {\n    max-parallel 1\n}\n");
+        Assert.Equal("/sys/fs/cgroup/tman", Config.MemCgroup());
+        Assert.Equal(1, Config.Queue("compile").MaxParallel);
+
+        foreach (var (text, expected) in new[]
+                 {
+                     ("cgroup \"tman\"\n", "cgroup takes exactly one absolute directory"),
+                     ("cgroup\n", "cgroup takes exactly one absolute directory"),
+                     ("cgroup \"/a\"\ncgroup \"/b\"\n", "cgroup is declared twice"),
+                 })
+        {
+            _home.WriteFile("tman.kdl", text);
+            Assert.Contains(expected, Assert.Throws<FormatException>(() => Config.MemCgroup()).Message);
+        }
+    }
+
+    /// <summary>
+    /// Runs the real tman apphost the way it runs in a container that owns its cgroup: inside a
+    /// delegated cgroup D (made here by a systemd scope with Delegate=yes, the one delegation a test
+    /// can ask for unprivileged), with tman in the leaf D/self and the machine config naming the
+    /// sibling D/runs. D is the nearest cgroup holding both, and it is this user's — the layout that
+    /// lets tman move its child without systemd. tman itself never asks systemd for anything here.
+    /// </summary>
+    async Task<(int Exit, string Stderr)> TmanInDelegatedCgroup(params string[] argv)
+    {
+        const string setup = """
+            set -e
+            d=/sys/fs/cgroup$(cut -d: -f3 /proc/self/cgroup)
+            mkdir "$d/self" "$d/runs"
+            echo $$ > "$d/self/cgroup.procs"
+            echo +memory > "$d/cgroup.subtree_control"
+            printf 'cgroup "%s"\n' "$d/runs" > "$TMAN_HOME/tman.kdl"
+            set +e
+            "$0" "$@"
+            rc=$?
+            # read while the scope still exists: once it ends, systemd removes everything under it,
+            # and a leaf tman failed to remove would vanish with it
+            find "$d/runs" -mindepth 1 -type d > leftover-cgroups
+            exit $rc
+            """;
+        var psi = new ProcessStartInfo("systemd-run")
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            WorkingDirectory = _work.Path,
+        };
+        psi.Environment["TMAN_HOME"] = _home.Path;
+        psi.Environment.Remove(Runner.ParentIdEnvVar);
+        psi.Environment.Remove(Confinement.MemScopeEnvVar);
+        foreach (var a in new[] { "--user", "--scope", "--quiet", "-p", "Delegate=yes", "--", "sh", "-c", setup,
+                     Path.Combine(AppContext.BaseDirectory, "tman") }.Concat(argv))
+            psi.ArgumentList.Add(a);
+        using var p = Process.Start(psi)!;
+        var stderr = p.StandardError.ReadToEndAsync();
+        await p.StandardOutput.ReadToEndAsync();
+        await p.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(60));
+        return (p.ExitCode, await stderr);
+    }
+
+    [MemScopeFact]
+    public async Task LimitMem_InTheConfiguredCgroup_RunsTheChildInALeafOfItsOwn_AndRemovesIt()
+    {
+        var (exit, stderr) = await TmanInDelegatedCgroup("run", "--limit-mem", "96m", "--", "sh", "-c",
+            "d=/sys/fs/cgroup$(cut -d: -f3 /proc/self/cgroup); echo $d > cgroup; " +
+            "cat $d/memory.max $d/memory.swap.max $d/memory.oom.group > limits");
+
+        Assert.True(exit == 0, stderr);
+        var record = Assert.Single(Store.LoadAll());
+        var leaf = File.ReadAllText(Path.Combine(_work.Path, "cgroup")).Trim();
+        Assert.EndsWith($"/runs/tman-{record.Id}", leaf);
+        Assert.Equal(["100663296", "0", "1"], File.ReadAllLines(Path.Combine(_work.Path, "limits")));
+        Assert.Equal(RunState.Exited, record.State);
+        Assert.Equal("", File.ReadAllText(Path.Combine(_work.Path, "leftover-cgroups")));
+    }
+
+    [MemScopeFact]
+    public async Task LimitMem_InTheConfiguredCgroup_TheKernelEndsTheWholeTree_AndTheRunIsCulled()
+    {
+        Assert.NotNull(Confinement_FindOnPath("python3"));
+        var (exit, stderr) = await TmanInDelegatedCgroup("run", "--limit-mem", "64m", "--", "sh", "-c",
+            "sleep 60 & echo $! > sibling; python3 -c 'a = bytearray(400 * 1024 * 1024)'");
+
+        Assert.True(exit == Runner.ExitCulled, $"exit {exit}: {stderr}");
+        var record = Assert.Single(Store.LoadAll());
+        Assert.Equal(RunState.Culled, record.State);
+        Assert.Contains("limit-mem 64MB", record.KillReason);
+        var sibling = int.Parse(File.ReadAllText(Path.Combine(_work.Path, "sibling")));
+        Assert.False(Directory.Exists($"/proc/{sibling}"), "the OOM kill left the sleep sibling running");
     }
 
     static string? Confinement_FindOnPath(string program) =>

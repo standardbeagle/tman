@@ -15,9 +15,11 @@ below 1.0, behavior changes land in minor releases.
   `nproc` and runners' worker pools see N; tman spreads concurrent runs over the least-held CPUs.
   `limit-mem M` is a hard ceiling for the whole tree: on Linux a systemd user scope (`MemoryMax`,
   no swap, `OOMPolicy=kill`), on Windows a Job Object; crossing it ends the tree and the run exits
-  126. Both are refused on macOS, and `limit-mem` is refused on a Linux machine with no systemd
-  user manager, with exit 127 before the run queues. Available as flags, in `defaults`, and in
-  aliases.
+  126. Without systemd, `cgroup "/sys/fs/cgroup/..."` in `~/.tman/tman.kdl` names a delegated
+  cgroup — a container's own, or one an admin handed over — and tman makes each run's cgroup there
+  itself; tman must run inside that subtree. Both limits are refused on macOS, and `limit-mem` is
+  refused on a Linux machine with neither a systemd user manager nor a usable configured cgroup,
+  with exit 127 before the run queues. Available as flags, in `defaults`, and in aliases.
 - **`defaults` can name a queue.** `queue "compile"` in a `.tman.kdl` `defaults` block puts every
   run in the project in that machine-wide queue, including runs that no alias names: the PATH
   shims' `tman run -- go test`, the Claude Code hook's rewrite, and bare `tman run`. An alias's
