@@ -8,6 +8,8 @@ below 1.0, behavior changes land in minor releases.
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-10-05
+
 ### Added
 - **Kernel-enforced limits: `limit-cpus` and `limit-mem`.** Unlike `max-mem` and `max-cpu`,
   which sample the tree once a second and cull it, these are held by the kernel and cannot be
@@ -483,7 +485,8 @@ reaping; dedup locks; parallel gating; `.tman.kdl` folder aliases with repo-root
 binaries for linux-x64, linux-arm64, win-x64, osx-arm64, and osx-x64, distributed via npm, PyPI,
 PSGallery, and a shell installer.
 
-[Unreleased]: https://github.com/standardbeagle/tman/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/standardbeagle/tman/compare/v0.6.2...HEAD
+[0.6.2]: https://github.com/standardbeagle/tman/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/standardbeagle/tman/compare/v0.5.1...v0.6.1
 [0.5.1]: https://github.com/standardbeagle/tman/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/standardbeagle/tman/compare/v0.4.0...v0.5.0
