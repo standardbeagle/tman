@@ -160,6 +160,20 @@ is nothing to outrun.
     `/non-systemd`. tman checks this, and the cgroup's memory controller and write access, before
     the run queues, and refuses with exit 127 naming the one that fails.
 
+    In a container, the cgroup tree must be writable: Docker mounts it read-only unless the
+    container is `--privileged`, or has `--cap-add SYS_ADMIN` (with AppArmor not blocking mounts)
+    and remounts it. A cgroup that holds processes cannot hand controllers to its children, so
+    move the container's processes out of the root first:
+
+    ```sh
+    # docker run --cgroupns=private --cap-add SYS_ADMIN --security-opt apparmor=unconfined ...
+    mount -o remount,rw /sys/fs/cgroup
+    mkdir /sys/fs/cgroup/init
+    for p in $(cat /sys/fs/cgroup/cgroup.procs); do echo $p > /sys/fs/cgroup/init/cgroup.procs; done
+    echo +memory > /sys/fs/cgroup/cgroup.subtree_control
+    mkdir /sys/fs/cgroup/tman
+    ```
+
   A run nested inside a run with `limit-mem` stays in its parent's cgroup rather than making its
   own, which would move it out from under the parent's limit; it says so on stderr.
 - **Windows has a window.** .NET cannot create a process suspended, so the child runs for the
