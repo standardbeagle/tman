@@ -132,8 +132,11 @@ public class ProcUtilTests
     [LinuxFact("process state 'Z' is read from /proc")]
     public void Identify_OnLinux_AZombieChild_IsGone()
     {
-        // sh backgrounds a child that exits at once, then execs into a sleep that never reaps it
-        using var parent = Process.Start(new ProcessStartInfo("sh", new[] { "-c", "sleep 0 & echo $!; exec sleep 30" })
+        // sh backgrounds a child, then execs into a sleep that never reaps it. The child exits only
+        // once its parent IS that sleep: a child that exits first can be reaped by sh before the exec,
+        // leaving no zombie to read (it did under load, 2026-10-12).
+        using var parent = Process.Start(new ProcessStartInfo("sh", new[] { "-c",
+            "p=$$; (while [ \"$(cat /proc/$p/comm)\" != sleep ]; do :; done) & echo $!; exec sleep 30" })
         {
             RedirectStandardOutput = true,
         }) ?? throw new IOException("could not start sh");
