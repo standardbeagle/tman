@@ -229,6 +229,7 @@ public static class Runner
         var lastProgress = startedAt;
         var prevOutputBytes = 0L;
         var haveSample = TrySample(sampler, record.Pid, out var prevSample);
+        var firstJiffies = haveSample ? prevSample.CpuJiffies : -1;
         var prevSampleTick = prevTick;
         var sampleFailures = 0;
         var treeDiag = "unknown";
@@ -269,7 +270,11 @@ public static class Runner
                         if (sinceSample > 0)
                             cpuPct = (sample.CpuJiffies - prevSample.CpuJiffies)
                                 / (sinceSample * JiffiesPerSecond * Environment.ProcessorCount) * 100.0;
+                        var cores = Math.Round(cpuPct * Environment.ProcessorCount / 100.0, 1);
+                        if (cores > record.PeakCores) record.PeakCores = cores;
                     }
+                    if (firstJiffies < 0) firstJiffies = sample.CpuJiffies;
+                    record.CpuSeconds = (sample.CpuJiffies - firstJiffies) / (double)JiffiesPerSecond;
                     treeDiag = $"{sample.Procs} proc [{sample.States}]";
                     prevSample = sample;
                     prevSampleTick = now;

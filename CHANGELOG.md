@@ -8,6 +8,9 @@ below 1.0, behavior changes land in minor releases.
 
 ## [Unreleased]
 
+### Added
+- **Run records carry `CpuSeconds` and `PeakCores`.** Tree CPU seconds and the busiest interval in cores, from the samples the monitor already takes, so a scheduler can size a step's share from what it used last time.
+
 ## [0.6.2] - 2026-10-05
 
 ### Added

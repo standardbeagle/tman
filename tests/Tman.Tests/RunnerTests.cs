@@ -137,6 +137,22 @@ public class RunnerTests : IDisposable
         Assert.Contains("max-cpu", r.KillReason);
     }
 
+    [UnixFact("sleep is the supervised root; the busy tree is a scripted sampler")]
+    public async Task Record_CapturesTreeCpuSecondsAndPeakCores()
+    {
+        long jiffies = 0;
+        Func<int, TreeSample?> busy = _ =>
+            new TreeSample(CpuJiffies: jiffies += 200, IoBytes: 0, RssMb: 1, Procs: 2, States: "SR");
+        await Runner.RunAsync("sleep", new[] { "2.5" }, new Caps(), null, null, null, default, busy);
+        var b = Assert.Single(Store.LoadAll());
+        Assert.True(b.CpuSeconds > 0);
+        Assert.True(b.PeakCores > 0);
+
+        await Runner.RunAsync("sleep", new[] { "2.5" }, new Caps(), null, null);
+        var idle = Store.LoadAll().Single(r => r.Id != b.Id);
+        Assert.True(idle.CpuSeconds < 0.2, $"idle sleep recorded {idle.CpuSeconds}s");
+    }
+
     [UnixFact("the trickle of output comes from an sh loop")]
     public async Task PartialLineOutput_CountsAsActivity()
     {
