@@ -16,8 +16,9 @@ below 1.0, behavior changes land in minor releases.
   bucket's recent `PeakCores`/`PeakMemMb`; with no history, an alias's declared `cores`/`mem` (or
   the project's, in `defaults`), else the queue's `cores-default`/`mem-default`. A run larger than
   the whole budget still starts alone. The old slot-only queue form (`max-parallel`) is replaced.
-  Waiting parks on a run-record event rather than a poll; arrival order is kept, but a small run may
-  start ahead of a larger waiting one when it fits, and a run waiting past a bound is admitted next.
+  Waiting watches one admission-event file per queue, not a poll and not every run's heartbeat;
+  arrival order is kept, but a small run may start ahead of a larger waiting one when it fits, and a
+  run waiting past a bound is admitted next.
 - **Upgrade: a machine queue still written `max-parallel N` is refused.** It names the file, the
   queue, and the `cores`/`mem` form to write instead, because no machine config works on both this
   version and the last — the old parser refused `cores`/`mem`. Rewrite `~/.tman/tman.kdl`'s queues
@@ -26,10 +27,15 @@ below 1.0, behavior changes land in minor releases.
 - **A run joins the machine's `default` queue when nothing else names one.** If
   `~/.tman/tman.kdl` declares `queue "default"`, a run whose alias, `.tman.kdl` defaults and
   `--queue` name no other queue joins it. This gives parallel agent worktrees one shared limit,
-  where a per-directory `max-parallel` gives each worktree its own. `--no-queue` still opts a run
-  out. Before this, of 3,055 records on one host exactly one joined a queue.
+  where a per-directory `max-parallel` gives each worktree its own. `--no-queue`, or an alias's
+  `no-queue true`, still opts a run out. Before this, of 3,055 records on one host exactly one
+  joined a queue.
 
 ### Added
+- **An alias can opt out of every queue with `no-queue true`.** The `tman <alias>` and `./<alias>`
+  shim doors take no tman flags, so a dev server or watcher alias declares its own exemption rather
+  than joining the machine's `default` queue and holding an admission for its whole life. It is
+  refused together with `queue` or `exclusive`.
 - **`--exclusive` / `exclusive true`.** An alias (or `--exclusive`) can declare that it runs alone
   in its queue — a perf audit: it waits for admitted work to finish, then holds the queue until it
   exits.

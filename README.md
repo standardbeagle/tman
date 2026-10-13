@@ -325,8 +325,17 @@ defaults {
 
 That reaches the runs no alias names: the PATH shims' `tman run -- go test ./...`, the Claude Code
 hook's rewrite, and a bare `tman run`. An alias's own `queue` wins over it, and `--queue` wins over
-both. A long-lived run — a dev server, a watcher — would hold an admission for hours, so start it
-with `tman run --no-queue`; `--no-queue` together with `--queue` is refused.
+both. A long-lived run — a dev server, a watcher — would hold an admission for hours, so an alias can
+opt out with `no-queue true` (the `tman <alias>` and `./<alias>` shim doors take no tman flags), and
+`tman run --no-queue` does the same for a bare command; an alias cannot set `no-queue` with `queue`
+or `exclusive`, and `--no-queue` together with `--queue` is refused.
+
+```kdl
+alias "dev" {
+    command "vite"
+    no-queue true
+}
+```
 
 **When nothing names a queue, a run joins the machine's `default` queue** if `~/.tman/tman.kdl`
 declares one. That is what gives parallel agent worktrees one shared limit: a per-directory
@@ -341,10 +350,12 @@ queue is the only limit they all share. A machine that declares no `default` que
   whose tman died holds no place.
 - **Bucket first, then queue.** A run held up in its own project's bucket does not sit on a queue
   admission other projects are waiting for.
-- **Waiting is on a record event.** A waiter parks on the runs directory and wakes when a record
-  changes — an admission released, a waiter joining or leaving — not on a poll, so a busy queue
-  costs no wakeups. It says where it stands when it joins and once a minute after that, and gives up
-  after the queue's `queue-timeout`. `--queue-timeout` on the command line overrides it.
+- **Waiting is on an admission event.** A waiter watches one file per queue — the queue's admission
+  event — and wakes only when an admission is granted, an admission is released, or a waiter leaves
+  the line. A live run's or a hold's periodic heartbeat save is not such an event (the waiter's own
+  liveness is its pid, not the heartbeat), so a busy queue costs no wakeups, and the wait is not a
+  poll. It says where it stands when it joins and once a minute after that, and gives up after the
+  queue's `queue-timeout`. `--queue-timeout` on the command line overrides it.
 - **Cancellable.** Ctrl+C or `tman kill` ends a waiter as `killed` with exit 130, its child never
   started, and the next in line moves up.
 - **`tman hold`.** A program that starts heavy work of its own can book that cost without tman
