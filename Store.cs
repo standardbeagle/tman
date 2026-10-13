@@ -243,7 +243,7 @@ public static class Store
                 // (touched by whoever admits the run), is what wakes a queue's waiters. A periodic
                 // heartbeat save of a live run is not finished and so wakes nobody.
                 if (r is { Queue: { } queue, State: not (RunState.Running or RunState.Queued) })
-                    TouchQueue("queue:" + queue);
+                    TouchQueue(Admission.QueueKey(queue));
                 return;
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException

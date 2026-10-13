@@ -76,6 +76,11 @@ public static class Reaper
     public static bool KillRun(RunRecord r, string reason)
     {
         Store.RequestKill(r.Id, reason);
+        // a queued waiter parks on its queue's event file, so the request alone reaches a running
+        // child's runner but never a waiter: touch the queue so the waiter wakes now rather than at
+        // the backstop. Covers `tman kill <id|name|all>` and both --replace sites, which all kill
+        // through here.
+        if (r.Queue is { } queue) Store.TouchQueue(Admission.QueueKey(queue));
         if (!ProcUtil.KillTree(r.Pid, r.ChildStartUtc, r.ChildStartTicks)) return false;
         if (RunnerAlive(r)) return true;
         r.State = RunState.Killed;

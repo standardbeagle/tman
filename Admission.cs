@@ -192,7 +192,11 @@ public static class Admission
                 Store.Save(record);
             }
 
-            await wake.Wait(IdleBackstop, ct);
+            // never park past the remaining queue-timeout: a queue-timeout shorter than the
+            // backstop would otherwise be honoured up to ten seconds late, and a timeout does not
+            // touch the event file, so nothing else would wake the waiter to notice it
+            var remaining = queue.Timeout - Stopwatch.GetElapsedTime(since);
+            await wake.Wait(remaining < IdleBackstop ? remaining : IdleBackstop, ct);
         }
     }
 
