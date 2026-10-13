@@ -34,6 +34,7 @@ curl -fsSL https://raw.githubusercontent.com/standardbeagle/tman/main/install.sh
     <tr><td><code>tman probe --pid &lt;pid&gt; [--start-ticks &lt;ticks&gt;]</code></td><td>is a pid you recorded earlier still that process? exit 0 mine, 1 gone, 3 not mine (pid reused); read-only, <code>--start-ticks</code> is Linux only</td></tr>
     <tr><td><code>tman status [id|name|id-prefix] [--json]</code></td><td>summary counts, or one run's detail</td></tr>
     <tr><td><code>tman init [--shims] [--gitignore]</code></td><td>scaffold <code>.tman.kdl</code> (+ repo-root shims)</td></tr>
+    <tr><td><code>tman hold --cores N --mem M [--pid &lt;pid&gt;] [--queue &lt;name&gt;]</code></td><td>book the cost of work another program started into a machine queue, for as long as it lives, so a client such as an agent runner reserves admission without tman knowing what the work is. Without <code>--pid</code>, the hold lasts until it is killed (Ctrl+C). The queue defaults to the machine's <code>default</code></td></tr>
     <tr><td><code>tman hook pretooluse</code></td><td>Claude Code PreToolUse hook: route bare test/build commands through tman</td></tr>
   </table>
 
@@ -49,8 +50,8 @@ curl -fsSL https://raw.githubusercontent.com/standardbeagle/tman/main/install.sh
     <tr><td><code>--limit-cpus N</code></td><td>—</td><td>run the whole tree on N CPUs through an affinity mask the kernel enforces, so <code>nproc</code> sees N; Linux and Windows, refused on macOS</td></tr>
     <tr><td><code>--limit-mem M</code></td><td>—</td><td>memory ceiling the kernel enforces on the whole tree (a systemd user scope on Linux, a Job Object on Windows); crossing it ends the tree, exit 126; refused on macOS</td></tr>
     <tr><td><code>--max-parallel N</code></td><td>2</td><td>queue until one of the bucket's N slots can be held; a run that waits says so once on stderr, and once more when it gets a slot</td></tr>
-    <tr><td><code>--queue-timeout T</code></td><td>5m</td><td>give up waiting for a parallel slot</td></tr>
-    <tr><td><code>--queue Q</code></td><td>—</td><td>wait in the machine-wide named queue Q, admitted by measured cost (cores and memory); with no queue named anywhere, the machine's <code>default</code> queue if one is declared</td></tr>
+    <tr><td><code>--queue-timeout T</code></td><td>5m</td><td>give up waiting — for a bucket slot, or for a named queue's admission</td></tr>
+    <tr><td><code>--queue Q</code></td><td>—</td><td>wait in the machine-wide named queue Q, declared in <code>~/.tman/tman.kdl</code> as <code>queue "Q" &#123; cores "80%"; mem "80%" &#125;</code> and admitted by measured cost (cores and memory); with no queue named anywhere, the machine's <code>default</code> queue if one is declared</td></tr>
     <tr><td><code>--no-queue</code></td><td>off</td><td>join no queue, whatever <code>.tman.kdl</code> says — for a dev server or watcher; an alias can opt out without a flag with <code>no-queue true</code></td></tr>
     <tr><td><code>--exclusive</code></td><td>off</td><td>run alone in its queue: wait for admitted work to finish, then hold the queue until it exits</td></tr>
   </table>
@@ -164,7 +165,7 @@ alias "e2e" &#123;
 
 alias "dev" &#123;
     command "vite"
-    no-queue true     <span class="c">// a dev server holds no admission; the tman <alias> door takes no flags</span>
+    no-queue true     <span class="c">// a dev server holds no admission; the tman &lt;alias&gt; door takes no flags</span>
 &#125;</pre>
   <p>
     The parser reads a subset of KDL: nodes with string and number arguments, <code>//</code> and

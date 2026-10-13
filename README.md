@@ -101,7 +101,7 @@ tman init --shims --gitignore
 | `--limit-cpus N` | — | run the whole tree on N CPUs, enforced by the kernel — see [Kernel-enforced limits](#kernel-enforced-limits) |
 | `--limit-mem M` | — | memory ceiling (MB or `2g`) the kernel enforces on the whole tree; crossing it ends the tree → exit 126 |
 | `--max-parallel N` | 2 | queue until one of the bucket's N slots can be held; a run that has to wait says so once on stderr (with the queue timeout) and once more, `slot acquired after Xs`, when it gets through. While it waits it is a `queued` run: `tman list` shows it, `tman kill` ends it, and Ctrl+C ends it as `killed: cancelled while queued` with exit 130 — none of which starts its child |
-| `--queue-timeout T` | 5m | give up waiting for a slot; the run is recorded `killed: queue timeout …` and exits 130 |
+| `--queue-timeout T` | 5m | give up waiting — for a bucket slot, or for a [named queue](#named-queues)'s admission; the run is recorded `killed: queue timeout …` and exits 130 |
 | `--queue Q` | — | wait in the machine-wide [named queue](#named-queues) Q, admitted by measured cost; with no queue named anywhere, the machine's `default` queue if one is declared |
 | `--no-queue` | off | join no queue, even one the alias, `defaults`, or the machine's `default` names |
 | `--exclusive` | off | run alone in its queue: wait for admitted work to finish, then hold the queue until it exits |

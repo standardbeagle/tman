@@ -260,7 +260,8 @@ public static class Help
         sb.AppendLine($"  in:     {config.Dir}");
         sb.AppendLine($"  caps:   {Program.DescribeCaps(Config.EffectiveCaps(alias, new Caps(), config))}");
         if (alias.NoQueue) sb.AppendLine("  queue:  none (no-queue true)");
-        else if ((alias.Queue ?? config.DefaultQueue) is { } queue) sb.AppendLine($"  queue:  {queue}");
+        else if ((alias.Queue ?? config.DefaultQueue ?? Config.MachineDefaultQueue()) is { } queue)
+            sb.AppendLine($"  queue:  {queue}");
         sb.Append("Every arg, --help included, goes to the command.");
         return sb.ToString();
     }
