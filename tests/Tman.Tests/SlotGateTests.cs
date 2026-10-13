@@ -51,7 +51,12 @@ public class SlotGateTests : IDisposable
         })));
     }
 
-    /// <summary>Highest number of run records whose lifetimes overlapped at any instant.</summary>
+    /// <summary>
+    /// Highest number of run records whose lifetimes overlapped at any instant. A record's lifetime
+    /// is its start through its heartbeat; the end edge is ordered before the start edge at equal
+    /// timestamps so a run that ends exactly when another begins is not counted as overlapping it —
+    /// which is what the name lock does: it hands the name on the instant its holder lets go.
+    /// </summary>
     static int PeakOverlap(IEnumerable<RunRecord> runs)
     {
         var edges = runs
@@ -61,6 +66,45 @@ public class SlotGateTests : IDisposable
         int current = 0, peak = 0;
         foreach (var e in edges) peak = Math.Max(peak, current += e.Delta);
         return peak;
+    }
+
+    /// <summary>
+    /// Whether a round is good. A round is bad when it left no run record at all, or when two of
+    /// its records overlap: a.StartedUtc &lt; End(b) &amp;&amp; b.StartedUtc &lt; End(a), where End
+    /// is the later of a record's heartbeat and its start. End is taken as the later of the two
+    /// because a record whose heartbeat is not after its start — its child finished inside one clock
+    /// tick, or the wall clock stepped back — has no measurable width; falling back to its start
+    /// keeps it from reading as no run, or as an overlap of 0. Two runs one after the other are
+    /// good: the name is free again the moment the first lets go, so the round is not scored on a run
+    /// count. This is stated as a classifier so its cases can be built by hand rather than only
+    /// observed under load; PeakOverlap's edge sweep is for measuring how many ran at once, not this.
+    /// </summary>
+    static bool IsGoodRound(IReadOnlyCollection<RunRecord> runs)
+    {
+        if (runs.Count == 0) return false;
+        var records = runs.ToList();
+        for (var i = 0; i < records.Count; i++)
+            for (var j = i + 1; j < records.Count; j++)
+                if (records[i].StartedUtc < End(records[j]) && records[j].StartedUtc < End(records[i]))
+                    return false;
+        return true;
+    }
+
+    static DateTime End(RunRecord r) => r.HeartbeatUtc > r.StartedUtc ? r.HeartbeatUtc : r.StartedUtc;
+
+    static RunRecord Record(DateTime at, TimeSpan life)
+    {
+        var start = at;
+        return new RunRecord
+        {
+            Id = Guid.NewGuid().ToString("N")[..12],
+            Command = "sleep",
+            Args = [],
+            State = RunState.Exited,
+            Group = "g",
+            StartedUtc = start,
+            HeartbeatUtc = start + life,
+        };
     }
 
     [Fact]
@@ -360,7 +404,7 @@ public class SlotGateTests : IDisposable
         var caps = new Caps { QueueTimeout = TimeSpan.FromSeconds(30) };
         var lockPath = Store.LockPathFor(RunKey.For("dedup", Canon.ResolveCommand("sleep", Directory.GetCurrentDirectory()), _scope));
         var runsDir = Path.Combine(_home.Path, "runs");
-        var badRounds = 0;
+        var bad = new List<string>();
 
         for (var i = 0; i < rounds; i++)
         {
@@ -387,16 +431,73 @@ public class SlotGateTests : IDisposable
             foreach (var r in racers) r.Join();
             sweeper.Join();
 
-            // two runs of one name that overlap in time are the violation — two that merely both
-            // finished are not, since the name is free again the moment the first one releases it
-            // Exactly one, not at most one: the lock this round starts from is a dead runner's, so
-            // some racer has to get through it, and a round where nobody did would otherwise be
-            // counted as a round that admitted only one
-            if (PeakOverlap(Store.LoadAll()) != 1) badRounds++;
+            // a good round is one that left a record and no two records that overlap in time — two
+            // runs one after the other are not a violation, since the name is free again the moment
+            // the first releases it. A round the lock admitted nobody through left no record and is
+            // bad: the lock this round starts from is a dead runner's, so some racer has to get
+            // through it, and a round where nobody did must not pass as one that admitted somebody
+            var runs = Store.LoadAll().ToList();
+            if (!IsGoodRound(runs))
+                bad.Add($"round {i}: {Describe(runs)}");
             // records are per-round evidence; keeping them all would make every round scan the last
             foreach (var f in Directory.EnumerateFiles(runsDir, "*.json")) File.Delete(f);
         }
 
-        Assert.Equal(0, badRounds);
+        Assert.True(bad.Count == 0, $"{bad.Count} of {rounds} rounds were bad:\n{string.Join("\n", bad)}");
+    }
+
+    static string Describe(IEnumerable<RunRecord> runs) =>
+        string.Join("; ", runs.Select(r => $"{r.StartedUtc:O}..{r.HeartbeatUtc:O}"));
+
+    /// <summary>
+    /// The recorded gate failure: one run whose child finished inside one clock tick has no width
+    /// at all (heartbeat not after start), and the edge sweep that reads overlap orders the end edge
+    /// before the start edge at equal timestamps — so such a lone run once read as an overlap of 0
+    /// and the round was scored as "nobody got through". It is the one run that did.
+    /// </summary>
+    [Fact]
+    public void OneRunWhoseRecordHasNoWidth_IsTheOneRunThatGotThrough()
+    {
+        var at = new DateTime(2026, 10, 13, 0, 0, 0, DateTimeKind.Utc);
+        Assert.True(IsGoodRound([Record(at, TimeSpan.Zero)]));
+        Assert.True(IsGoodRound([Record(at, TimeSpan.FromSeconds(-1))]));
+    }
+
+    /// <summary>
+    /// A round that left no run record at all admitted nobody; it must stay a failure, or a round
+    /// where the lock admitted no one would pass as one that admitted exactly one.
+    /// </summary>
+    [Fact]
+    public void ARoundWithNoRecord_IsBad()
+    {
+        Assert.False(IsGoodRound([]));
+    }
+
+    /// <summary>
+    /// The violation the race exists to catch: two records whose lifetimes overlap. A no-width
+    /// record that falls inside another's lifetime is one of them, so the widthless record must be
+    /// measured by its start, not its heartbeat.
+    /// </summary>
+    [Fact]
+    public void TwoRunsOfOneNameThatOverlap_AreAViolation_HoweverNarrowOneIs()
+    {
+        var at = new DateTime(2026, 10, 13, 0, 0, 0, DateTimeKind.Utc);
+        Assert.False(IsGoodRound([Record(at, TimeSpan.FromSeconds(1)), Record(at, TimeSpan.FromSeconds(1))]));
+        Assert.False(IsGoodRound([Record(at, TimeSpan.FromSeconds(1)), Record(at + TimeSpan.FromMilliseconds(500), TimeSpan.Zero)]));
+        // a heartbeat-before-start record inside another's lifetime is a backward clock step's shape
+        Assert.False(IsGoodRound([Record(at, TimeSpan.FromSeconds(1)), Record(at + TimeSpan.FromMilliseconds(500), TimeSpan.FromMilliseconds(-200))]));
+    }
+
+    /// <summary>
+    /// Two runs one after the other are legal: the name is free again the moment the first releases
+    /// it, and a loaded host deschedules a racer past the winner. End == start is not an overlap.
+    /// </summary>
+    [Fact]
+    public void TwoRunsOfOneNameThatDidNotOverlap_AreNotAViolation()
+    {
+        var at = new DateTime(2026, 10, 13, 0, 0, 0, DateTimeKind.Utc);
+        Assert.True(IsGoodRound([Record(at, TimeSpan.FromSeconds(1)), Record(at + TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(1))]));
+        var adjacent = at + TimeSpan.FromSeconds(1);
+        Assert.True(IsGoodRound([Record(at, TimeSpan.FromSeconds(1)), Record(adjacent, TimeSpan.FromSeconds(1))]));
     }
 }
