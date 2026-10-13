@@ -189,13 +189,13 @@ public class AdmissionBudgetTests : IDisposable
             "a normal run started while an exclusive run held the queue");
     }
 
-    void Occupy(string id, double cores, long memMb)
+    void Occupy(string id, double cores, long memMb, string queue = "q")
     {
         var me = ProcUtil.OwnStart();
         Store.Save(new RunRecord
         {
             Id = id, Command = "/bin/sh", Args = [], Group = "hold@" + _home.Path, State = RunState.Running,
-            Queue = "q", AdmittedUtc = DateTime.UtcNow, AdmittedCores = cores, AdmittedMemMb = memMb,
+            Queue = queue, AdmittedUtc = DateTime.UtcNow, AdmittedCores = cores, AdmittedMemMb = memMb,
             QueuedUtc = DateTime.UtcNow, StartedUtc = DateTime.UtcNow, HeartbeatUtc = DateTime.UtcNow,
             Cwd = "/tmp", Pid = Environment.ProcessId, ChildStartUtc = me.Utc, ChildStartTicks = me.Ticks,
             RunnerPid = Environment.ProcessId, RunnerStartUtc = me.Utc, RunnerStartTicks = me.Ticks,
@@ -238,6 +238,37 @@ public class AdmissionBudgetTests : IDisposable
         {
             if (!hold.HasExited) hold.Kill(entireProcessTree: true);
         }
+    }
+
+    [UnixFact("runs a real tman apphost")]
+    public async Task AHoldThatWaited_RecordsHowLongItQueued()
+    {
+        _home.WriteFile("tman.kdl", "queue \"default\" {\n    cores 1\n    mem 1g\n}\n");
+        // the budget is held, so the hold below must wait before it is admitted
+        Occupy("occupy000001", cores: 1, memMb: 1024, queue: "default");
+        using var proj = new TempDir();
+        Directory.SetCurrentDirectory(proj.Path);
+
+        var psi = new ProcessStartInfo(AppHost.Path)
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            WorkingDirectory = proj.Path,
+        };
+        psi.Environment["TMAN_HOME"] = _home.Path;
+        psi.Environment.Remove(Runner.ParentIdEnvVar);
+        foreach (var a in new[] { "hold", "--cores", "1", "--mem", "1g" }) psi.ArgumentList.Add(a);
+        using var hold = AppHost.Start(psi);
+        var waiting = await Await(r => r.RunnerPid == hold.Id && r.Queue == "default" && r.AdmittedUtc is null);
+        Assert.Null(waiting.AdmittedUtc);
+        await Task.Delay(1_100);
+
+        Clear("occupy000001");
+        var admitted = await AwaitRecord(all => all.FirstOrDefault(r =>
+            r.RunnerPid == hold.Id && r.AdmittedUtc is not null));
+        Assert.True(admitted.QueuedSeconds is > 0,
+            $"a hold that waited should record its wait, was {admitted.QueuedSeconds}");
+        if (!hold.HasExited) hold.Kill(entireProcessTree: true);
     }
 
     [UnixFact("runs a real tman apphost")]
@@ -291,7 +322,8 @@ public class AdmissionBudgetTests : IDisposable
     public async Task ARunThatWaited_RecordsWhatItWasAdmittedWithAndHowLongItQueued()
     {
         _home.WriteFile("tman.kdl", "queue \"compile\" {\n    cores 4\n    mem 4g\n}\n");
-        Occupy("occupy000001", cores: 4, memMb: 4 * 1024);
+        // the whole budget is held, so the run must wait rather than be admitted at once
+        Occupy("occupy000001", cores: 4, memMb: 4 * 1024, queue: "compile");
         using var proj = new TempDir();
         Directory.SetCurrentDirectory(proj.Path);
 
@@ -305,7 +337,8 @@ public class AdmissionBudgetTests : IDisposable
         psi.Environment.Remove(Runner.ParentIdEnvVar);
         foreach (var a in new[] { "run", "--queue", "compile", "--", "sleep", "30" }) psi.ArgumentList.Add(a);
         using var run = AppHost.Start(psi);
-        await AwaitRecord(all => all.FirstOrDefault(r => r.RunnerPid == run.Id && r.State == RunState.Queued));
+        var waiting = await Await(r => r.RunnerPid == run.Id && r.Queue == "compile" && r.AdmittedUtc is null);
+        Assert.Null(waiting.AdmittedUtc);
         await Task.Delay(1_100);
 
         Clear("occupy000001");
@@ -364,6 +397,57 @@ public class AdmissionBudgetTests : IDisposable
             Program.Join(null, null, exclusive: true));
     }
 
+    // ---- (a) an alias's explicit opt-out exempts it even when the default queue is full ----
+
+    [UnixFact("runs the sleep binary through Program.Main")]
+    public async Task AnAliasThatOptsOut_StartsWhileTheMachineDefaultQueueIsFull()
+    {
+        _home.WriteFile("tman.kdl", "queue \"default\" {\n    cores 1\n    mem 1g\n}\n");
+        // the whole default queue's budget is held, so a run that joined it would have to wait
+        Occupy("occupy000001", cores: 1, memMb: 1024, queue: "default");
+        using var proj = new TempDir();
+        proj.WriteFile(Config.FileName, """
+            alias "dev" {
+                command "sleep"
+                args "30"
+                no-queue true
+            }
+            """);
+        Directory.SetCurrentDirectory(proj.Path);
+
+        // the alias and shim doors take no tman flags, so the opt-out must live in the config
+        var run = Task.Run(() => Program.Main(["dev"]));
+        var record = await Await(r => r is { State: RunState.Running } && r.Name == "dev");
+        Assert.Null(record.Queue);
+        Assert.Null(record.AdmittedUtc);
+
+        Assert.Equal(0, await Program.Main(["kill", record.Id]));
+        Assert.Equal(Runner.ExitKilled, await run.WaitAsync(TimeSpan.FromSeconds(10)));
+    }
+
+    [Fact]
+    public void AnAliasOptOut_IsRefusedWithAQueueOrExclusive()
+    {
+        using var proj = new TempDir();
+        proj.WriteFile(Config.FileName, """
+            alias "dev" {
+                command "sleep"
+                no-queue true
+                queue "compile"
+            }
+            """);
+        Assert.Contains("no-queue and queue", Assert.Throws<FormatException>(() => Config.Load(proj.Path)).Message);
+
+        proj.WriteFile(Config.FileName, """
+            alias "audit" {
+                command "sleep"
+                no-queue true
+                exclusive true
+            }
+            """);
+        Assert.Contains("no-queue and exclusive", Assert.Throws<FormatException>(() => Config.Load(proj.Path)).Message);
+    }
+
     // ---- (b) waiters do not wake each other ----
 
     [UnixFact("writes records this process's runner owns")]
@@ -374,6 +458,30 @@ public class AdmissionBudgetTests : IDisposable
         Occupy("occupy000001", cores: 2, memMb: 2 * 1024);
         Admission.ResetAttemptsForTest();
 
+        // the holder heartbeats like a live runner: its runner saves its record every second
+        // (Runner.MonitorTickMs), and every save of a running admitted run is a store event. A
+        // waiter that watched every *.json would be woken by each of these and make an attempt —
+        // about one per holder save, per waiter. A waiter that watches only its queue's admission
+        // events is not woken by them, so its attempt count stays flat while the line does not move.
+        using var beat = new CancellationTokenSource();
+        var beating = Task.Run(async () =>
+        {
+            try
+            {
+                while (!beat.IsCancellationRequested)
+                {
+                    var r = Store.Load("occupy000001");
+                    if (r is not null)
+                    {
+                        r.HeartbeatUtc = DateTime.UtcNow;
+                        Store.Save(r);
+                    }
+                    await Task.Delay(100, beat.Token);
+                }
+            }
+            catch (OperationCanceledException) { }
+        });
+
         using var cancel = new CancellationTokenSource(TimeSpan.FromSeconds(4));
         var a = Runner.NewRecord("go", ["test"], new Caps(), "a", null, "a@/a", "/tmp");
         var b = Runner.NewRecord("go", ["test"], new Caps(), "b", null, "b@/b", "/tmp");
@@ -381,12 +489,55 @@ public class AdmissionBudgetTests : IDisposable
         var wa = Admission.ClaimAdmission(a, q, cost, false, null, null, cancel.Token);
         var wb = Admission.ClaimAdmission(b, q, cost, false, null, null, cancel.Token);
         await Task.WhenAll(wa, wb);
+        beat.Cancel();
+        await beating;
 
         // a waiter that saves its own record each pass wakes the other, which saves and wakes it
         // back — over four seconds that is a spin of hundreds; a waiter that parks costs an attempt
         // only when the line actually changes
         var attempts = Interlocked.Read(ref Admission.AttemptsForTest);
         Assert.True(attempts < 40, $"two waiters made {attempts} admission attempts in 4s");
+    }
+
+    [UnixFact("writes records this process's runner owns")]
+    public async Task SeveralWaitersWokenByOneRelease_AdmitTheFirstInLineQuickly()
+    {
+        _home.WriteFile("tman.kdl", "queue \"q\" {\n    cores 1\n    mem 1g\n}\n");
+        var q = Config.Queue("q") with { Timeout = TimeSpan.FromSeconds(30) };
+        // a 1-core, 1 GiB run holds the whole budget
+        Occupy("occupy000001", cores: 1, memMb: 1024);
+
+        // five waiters line up behind it, each needing the whole budget, arriving in a known order
+        var waiters = new List<RunRecord>();
+        for (var i = 0; i < 5; i++)
+            waiters.Add(Wait($"waiter{i:D8}", cost: (1, 1024), joinedAgo: TimeSpan.FromSeconds(5 - i)));
+
+        using var cancel = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var claims = waiters.Select((w, i) =>
+            Admission.ClaimAdmission(w, q, new Admission.AdmissionCost(1, 1024), false, null, null, cancel.Token)).ToList();
+
+        // give them a moment to park, then release the budget while the gate lock is briefly held.
+        // A release with the gate contended is what a real one looks like: one waiter wins it and
+        // the rest must retry it, not park on the ten-second backstop while the first in line waits.
+        await Task.Delay(500);
+        var gate = Store.TryClaimLock(Store.GatePathFor(Admission.QueueKey("q")));
+        Assert.NotNull(gate);
+        var released = Stopwatch.GetTimestamp();
+        Clear("occupy000001");
+        await Task.Delay(300);
+        Store.ReleaseLock(gate!);
+
+        var admitted = await AwaitRecord(all => all.FirstOrDefault(r => r.Id == waiters[0].Id && r.AdmittedUtc is not null));
+        Assert.NotNull(admitted.AdmittedUtc);
+        // the first in line was admitted promptly after the release, not after the backstop
+        Assert.True(Stopwatch.GetElapsedTime(released) < TimeSpan.FromSeconds(5),
+            $"the first waiter took {Stopwatch.GetElapsedTime(released)} to be admitted after one release");
+        // the rest are still held by the newly admitted run: only one fits
+        Assert.Null(Store.Load(waiters[1].Id)!.AdmittedUtc);
+
+        await Program.Main(["kill", waiters[0].Id]);
+        cancel.Cancel();
+        try { await Task.WhenAll(claims); } catch (OperationCanceledException) { }
     }
 
     // ---- (b) order and release ----

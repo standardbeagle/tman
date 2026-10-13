@@ -75,6 +75,15 @@ public class NamedQueueConfigTests : IDisposable
         Assert.Contains("queue \"compile\"", ex.Message);
         Assert.Contains("cores", ex.Message);
         Assert.Contains("mem", ex.Message);
+
+        // the example the refusal names must itself parse and declare the queue: a message that
+        // tells every host to write a form Config refuses is worse than no message
+        var example = ex.Message[(ex.Message.IndexOf("queue \"compile\" {", StringComparison.Ordinal))..];
+        _home.WriteFile("tman.kdl", example);
+        var queue = Config.Queue("compile");
+        Assert.Equal("compile", queue.Name);
+        Assert.Equal(Host.Cores * 0.8, queue.Cores, precision: 3);
+        Assert.Equal((long)Math.Ceiling(Host.MemMb * 0.8), queue.MemMb);
     }
 
     [Fact]
