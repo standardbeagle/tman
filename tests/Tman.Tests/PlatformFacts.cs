@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Runtime.InteropServices;
 using Tman;
 using Xunit;
 
@@ -79,4 +81,109 @@ internal static class WindowsCommand
     /// </summary>
     public static string PowerShell(string script) =>
         "powershell -NoProfile -EncodedCommand " + Convert.ToBase64String(System.Text.Encoding.Unicode.GetBytes(script));
+}
+
+/// <summary>
+/// The built tman apphost beside the test assembly, started with SIGINT at the default disposition
+/// and unblocked — the state a process must be in to answer Ctrl+C, and the one it does not
+/// necessarily get: a child keeps an ignored SIGINT from its parent and a blocked one through the
+/// inherited signal mask. A test that delivers SIGINT to an apphost starts it here, so it depends on
+/// the apphost rather than on how the suite was started.
+/// </summary>
+/// <remarks>
+/// The disposition and the mask are process-wide (the mask, per the thread that forks the child),
+/// so one lock covers set, start and restore: two tests doing this at once would restore each
+/// other's state. Off Unix this is a plain start; the callers are Unix facts.
+/// </remarks>
+internal static class AppHost
+{
+    internal const int Sigint = 2;
+    internal const nint SigDfl = 0;
+    internal const nint SigIgn = 1;
+    internal const nint SigErr = -1;
+
+    const int SigSetBytes = 128;
+
+    // The `how` argument is the one platform-dependent value here: Linux numbers SIG_BLOCK=0,
+    // SIG_UNBLOCK=1, SIG_SETMASK=2; macOS numbers SIG_BLOCK=1, SIG_UNBLOCK=2, SIG_SETMASK=3 (its
+    // SIG_BLOCK and SIG_UNBLOCK are the other way round). Passing Linux's 1 for SIG_UNBLOCK on macOS
+    // would block SIGINT on the forking thread instead, and the apphost would inherit a blocked SIGINT.
+    static readonly int SigUnblock = Hows(OperatingSystem.IsMacOS()).Unblock;
+    static readonly int SigSetmask = Hows(OperatingSystem.IsMacOS()).Setmask;
+
+    /// <summary>The (SIG_UNBLOCK, SIG_SETMASK) `how` pair for the running OS, named so a test pins it.</summary>
+    internal static (int Unblock, int Setmask) Hows(bool isMacOS) => isMacOS ? (2, 3) : (1, 2);
+
+    static readonly object Gate = new();
+
+    /// <summary>Path of the apphost the test assembly was built beside.</summary>
+    internal static string Path => System.IO.Path.Combine(AppContext.BaseDirectory, "tman");
+
+    /// <summary>
+    /// Starts <paramref name="psi"/> with SIGINT at its default disposition and unblocked on the
+    /// calling thread, whatever this host inherited, then restores both. The default disposition is
+    /// set before the fork because a SIG_IGN survives exec; the mask is cleared on the forking thread
+    /// because that is the one the child inherits. A plain start off Unix, where the callers are
+    /// skipped. One lock covers set, start and restore: the disposition and the mask are process-wide.
+    /// </summary>
+    internal static Process Start(ProcessStartInfo psi)
+    {
+        if (!(OperatingSystem.IsLinux() || OperatingSystem.IsMacOS()))
+            return Process.Start(psi) ?? throw new InvalidOperationException("could not start apphost");
+
+        lock (Gate)
+        {
+            var prevMask = new byte[SigSetBytes];
+            Check("pthread_sigmask(SIG_SETMASK, NULL, oldset) reading the current mask",
+                pthread_sigmask(SigSetmask, null, prevMask));
+            var prevHandler = signal(Sigint, SigDfl);
+            try
+            {
+                var unblock = new byte[SigSetBytes];
+                unblock[0] = (byte)(1 << (Sigint - 1));
+                Check("pthread_sigmask(SIG_UNBLOCK, {SIGINT}, NULL) unblocking SIGINT",
+                    pthread_sigmask(SigUnblock, unblock, null));
+
+                // Read the mask back: a `how` value wrong for this OS blocks SIGINT instead of
+                // unblocking it, and the apphost would inherit that and never answer Ctrl+C. Fail here
+                // with its own message rather than at a test's 15 s limit.
+                var afterUnblock = new byte[SigSetBytes];
+                Check("pthread_sigmask(SIG_SETMASK, NULL, oldset) reading the mask back",
+                    pthread_sigmask(SigSetmask, null, afterUnblock));
+                if ((afterUnblock[0] & (1 << (Sigint - 1))) != 0)
+                    throw new InvalidOperationException(
+                        "pthread_sigmask did not unblock SIGINT on the forking thread (is SigUnblock correct for this OS?)");
+
+                return Process.Start(psi) ?? throw new InvalidOperationException("could not start apphost");
+            }
+            finally
+            {
+                Check("pthread_sigmask(SIG_SETMASK, oldset, NULL) restoring the signal mask",
+                    pthread_sigmask(SigSetmask, prevMask, null));
+                if (prevHandler != SigErr) signal(Sigint, prevHandler);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Sets this process's SIGINT to ignored, returning the handler to restore. For a test that pins
+    /// what an apphost does when its host inherited an ignored SIGINT.
+    /// </summary>
+    internal static nint IgnoreSigint() => signal(Sigint, SigIgn);
+
+    /// <summary>Restores the SIGINT handler <paramref name="previous"/> returned by <see cref="IgnoreSigint"/>.</summary>
+    internal static void RestoreSigint(nint previous) => signal(Sigint, previous);
+
+    /// <summary>Throws naming <paramref name="what"/> when a pthread_sigmask call returned non-zero.</summary>
+    static void Check(string what, int rc)
+    {
+        if (rc != 0)
+            throw new InvalidOperationException($"{what} failed with {rc} (errno {Marshal.GetLastPInvokeError()})");
+    }
+
+    [DllImport("libc", SetLastError = true)]
+    static extern nint signal(int signum, nint handler);
+
+    [DllImport("libc", SetLastError = true)]
+    static extern int pthread_sigmask(int how, byte[]? set, byte[]? oldset);
 }

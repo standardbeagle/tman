@@ -28,7 +28,7 @@ public class InterruptTests : IDisposable
     [UnixFact("delivers SIGINT with `kill` to an `sh -c` child")]
     public async Task Interrupt_ReportsKilled_EvenWhenTheChildExitsZero()
     {
-        var tmanPath = Path.Combine(AppContext.BaseDirectory, "tman");
+        var tmanPath = AppHost.Path;
         Assert.True(File.Exists(tmanPath), $"no tman apphost beside the test assembly at {tmanPath}");
 
         var psi = new ProcessStartInfo
@@ -45,7 +45,7 @@ public class InterruptTests : IDisposable
         foreach (var a in new[] { "run", "--", "sh", "-c", "trap 'kill $!; exit 0' INT; sleep 30 & wait" })
             psi.ArgumentList.Add(a);
 
-        using var tman = Process.Start(psi) ?? throw new InvalidOperationException("could not start tman");
+        using var tman = AppHost.Start(psi);
         var stdout = tman.StandardOutput.ReadToEndAsync();
         var stderr = tman.StandardError.ReadToEndAsync();
         try
@@ -73,6 +73,78 @@ public class InterruptTests : IDisposable
         {
             try { if (!tman.HasExited) tman.Kill(entireProcessTree: true); } catch { }
         }
+    }
+
+    /// <summary>
+    /// The recorded gate failure made deterministic: the test host ignores SIGINT, as a background
+    /// job does, and the apphost must still answer Ctrl+C. The apphost never sees this host's
+    /// disposition — the helper starts it with SIGINT at its default and unblocked — so the interrupt
+    /// depends on the apphost and not on how the suite was started.
+    /// </summary>
+    [UnixFact("delivers SIGINT with `kill` to an apphost started while this host ignored SIGINT")]
+    public async Task Interrupt_ReportsKilled_WhenTheTestHostInheritedAnIgnoredSigint()
+    {
+        var previous = AppHost.IgnoreSigint();
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = AppHost.Path,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                WorkingDirectory = _home.Path,
+            };
+            psi.Environment["TMAN_HOME"] = _home.Path;
+            foreach (var a in new[] { "run", "--", "sleep", "30" }) psi.ArgumentList.Add(a);
+
+            using var tman = AppHost.Start(psi);
+            var stdout = tman.StandardOutput.ReadToEndAsync();
+            var stderr = tman.StandardError.ReadToEndAsync();
+            try
+            {
+                var child = await AwaitLiveChildPid(tman);
+
+                using (var kill = Process.Start("kill", new[] { "-INT", child.ToString(), tman.Id.ToString() }))
+                {
+                    kill!.WaitForExit();
+                    Assert.Equal(0, kill.ExitCode);
+                }
+
+                Assert.True(tman.WaitForExit(15_000),
+                    "the apphost did not answer SIGINT while its host had SIGINT ignored");
+                tman.WaitForExit();
+
+                Assert.Equal(Runner.ExitKilled, tman.ExitCode);
+                Assert.Contains("interrupted", await stderr);
+                Assert.Equal("", await stdout);
+            }
+            finally
+            {
+                try { if (!tman.HasExited) tman.Kill(entireProcessTree: true); } catch { }
+            }
+        }
+        finally
+        {
+            AppHost.RestoreSigint(previous);
+        }
+    }
+
+    /// <summary>
+    /// Pins the one platform-dependent value AppHost.Start passes to pthread_sigmask. Linux numbers
+    /// SIG_UNBLOCK=1, SIG_SETMASK=2; macOS numbers SIG_UNBLOCK=2, SIG_SETMASK=3. Handing macOS the
+    /// Linux pair would block SIGINT on the forking thread instead of unblocking it, the apphost would
+    /// inherit the block and never answer Ctrl+C, and every SIGINT test would die at its 15 s limit.
+    /// </summary>
+    [UnixFact("pthread_sigmask's `how` values differ between Linux and macOS")]
+    public void TheSigHowValues_MatchTheRunningOperatingSystem()
+    {
+        // Both branches, so a future platform that falls into the wrong one is caught here rather
+        // than at a 15 s wait on the leg that runs it.
+        Assert.Equal((Unblock: 1, Setmask: 2), AppHost.Hows(isMacOS: false));
+        Assert.Equal((Unblock: 2, Setmask: 3), AppHost.Hows(isMacOS: true));
+        var expected = OperatingSystem.IsMacOS() ? (Unblock: 2, Setmask: 3) : (Unblock: 1, Setmask: 2);
+        Assert.Equal(expected, AppHost.Hows(OperatingSystem.IsMacOS()));
     }
 
     /// <summary>Waits for tman to record its child, so the test signals the real sh and not a pid it guessed.</summary>

@@ -125,7 +125,7 @@ public class QueuedRunTests : IDisposable
         _ = Sleep(OneSlot);
         await Await(r => r is { State: RunState.Running, ChildStartUtc: not null });
 
-        var psi = new ProcessStartInfo(Path.Combine(AppContext.BaseDirectory, "tman"))
+        var psi = new ProcessStartInfo(AppHost.Path)
         {
             RedirectStandardOutput = true,
             RedirectStandardError = true,
@@ -135,7 +135,7 @@ public class QueuedRunTests : IDisposable
         // the suite runs under tman: inherited, this would make the apphost a nested run, which never queues
         psi.Environment.Remove(Runner.ParentIdEnvVar);
         foreach (var a in new[] { "run", "--max-parallel", "1", "--", "sleep", "30" }) psi.ArgumentList.Add(a);
-        using var tman = Process.Start(psi)!;
+        using var tman = AppHost.Start(psi);
         var stderr = tman.StandardError.ReadToEndAsync();
         try
         {

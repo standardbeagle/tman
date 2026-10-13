@@ -131,7 +131,7 @@ public class NamedQueueRunTests : IDisposable
     /// <summary>A real tman, in a project directory of its own, running `sh -c script` in queue compile.</summary>
     Process Tman(string project, string script)
     {
-        var psi = new ProcessStartInfo(Path.Combine(AppContext.BaseDirectory, "tman"))
+        var psi = new ProcessStartInfo(AppHost.Path)
         {
             RedirectStandardOutput = true,
             RedirectStandardError = true,
@@ -141,7 +141,7 @@ public class NamedQueueRunTests : IDisposable
         // the suite runs under tman: inherited, this would make each one a nested run, which never queues
         psi.Environment.Remove(Runner.ParentIdEnvVar);
         foreach (var a in new[] { "run", "--queue", "compile", "--", "sh", "-c", script }) psi.ArgumentList.Add(a);
-        var p = Process.Start(psi)!;
+        var p = AppHost.Start(psi);
         _started.Add(p);
         return p;
     }
