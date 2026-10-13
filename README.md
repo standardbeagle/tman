@@ -299,6 +299,11 @@ yet, an alias's declared `cores`/`mem` (or the project's, in `defaults`), else t
 `cores-default`/`mem-default`. A run larger than the whole budget still starts, alone. On exit its
 admission is released; a runner that died is reaped by the ordinary sweep.
 
+The slot-counting form (`max-parallel`) is **replaced, not kept**: a machine queue that still writes
+it is refused, naming the file, the queue, and the `cores`/`mem` form to write, because no single
+`~/.tman/tman.kdl` works on both this version and the last. Rewrite the machine config's queues
+before installing this build.
+
 Any project then joins it by name, with `tman run --queue compile -- cargo build` or from an alias:
 
 ```kdl

@@ -18,6 +18,11 @@ below 1.0, behavior changes land in minor releases.
   the whole budget still starts alone. The old slot-only queue form (`max-parallel`) is replaced.
   Waiting parks on a run-record event rather than a poll; arrival order is kept, but a small run may
   start ahead of a larger waiting one when it fits, and a run waiting past a bound is admitted next.
+- **Upgrade: a machine queue still written `max-parallel N` is refused.** It names the file, the
+  queue, and the `cores`/`mem` form to write instead, because no machine config works on both this
+  version and the last — the old parser refused `cores`/`mem`. Rewrite `~/.tman/tman.kdl`'s queues
+  (and any managed dev-setup block that deploys them) **before** installing this build, or every run
+  that resolves the machine config is refused.
 - **A run joins the machine's `default` queue when nothing else names one.** If
   `~/.tman/tman.kdl` declares `queue "default"`, a run whose alias, `.tman.kdl` defaults and
   `--queue` name no other queue joins it. This gives parallel agent worktrees one shared limit,
