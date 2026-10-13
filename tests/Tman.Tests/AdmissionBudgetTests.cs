@@ -451,6 +451,28 @@ public class AdmissionBudgetTests : IDisposable
     // ---- (b) waiters do not wake each other ----
 
     [UnixFact("writes records this process's runner owns")]
+    public async Task AWaiterWhoseQueueTimeoutIsShorterThanTheBackstop_EndsOnTime()
+    {
+        _home.WriteFile("tman.kdl", "queue \"q\" {\n    cores 2\n    mem 2g\n}\n");
+        // the queue's timeout is about a second, far shorter than the ten-second backstop the waiter
+        // would otherwise park for: the park must not overrun the remaining queue-timeout
+        var q = Config.Queue("q") with { Timeout = TimeSpan.FromSeconds(1) };
+        // the whole budget is held, so the waiter never fits and must time out
+        Occupy("occupy000001", cores: 2, memMb: 2 * 1024);
+
+        var run = Runner.NewRecord("go", ["test"], new Caps(), "x", null, "x@/x", "/tmp");
+        var started = Stopwatch.GetTimestamp();
+        Assert.False(await Admission.ClaimAdmission(run, q, new Admission.AdmissionCost(1, 512), false, null, null, default));
+
+        var elapsed = Stopwatch.GetElapsedTime(started);
+        var ended = Store.Load(run.Id)!;
+        Assert.Equal(RunState.Killed, ended.State);
+        Assert.Contains("queue timeout", ended.KillReason);
+        Assert.True(elapsed < TimeSpan.FromSeconds(3),
+            $"the waiter took {elapsed} to honour a one-second queue-timeout");
+    }
+
+    [UnixFact("writes records this process's runner owns")]
     public async Task TwoWaitersBehindAFullBudget_DoNotWakeEachOther()
     {
         _home.WriteFile("tman.kdl", "queue \"q\" {\n    cores 2\n    mem 2g\n}\n");

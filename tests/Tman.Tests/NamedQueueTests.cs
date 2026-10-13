@@ -389,7 +389,7 @@ public class NamedQueueRunTests : IDisposable
             .Single(r => r.State == RunState.Queued && r.RunnerPid == Environment.ProcessId);
         Assert.Equal("compile", queued.Queue);
         Assert.Equal(0, await Program.Main(["kill", queued.Id]));
-        Assert.Equal(Runner.ExitKilled, await run.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.Equal(Runner.ExitKilled, await run.WaitAsync(TimeSpan.FromSeconds(3)));
     }
 
     [UnixFact("runs the true binary")]
@@ -466,6 +466,6 @@ public class NamedQueueRunTests : IDisposable
             .Single(r => r.State == RunState.Queued && r.RunnerPid == Environment.ProcessId);
         Assert.Equal("compile", queued.Queue);
         Assert.Equal(0, await Program.Main(["kill", queued.Id]));
-        Assert.Equal(Runner.ExitKilled, await run.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.Equal(Runner.ExitKilled, await run.WaitAsync(TimeSpan.FromSeconds(3)));
     }
 }
