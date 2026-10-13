@@ -8,6 +8,8 @@ below 1.0, behavior changes land in minor releases.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-13
+
 ### Changed
 - **Machine queues budget the host, not slots.** A queue declares `cores` and `mem` (absolute, or
   a fraction such as `"80%"`) in `~/.tman/tman.kdl`, and a run is admitted when the cost it is
@@ -535,7 +537,8 @@ reaping; dedup locks; parallel gating; `.tman.kdl` folder aliases with repo-root
 binaries for linux-x64, linux-arm64, win-x64, osx-arm64, and osx-x64, distributed via npm, PyPI,
 PSGallery, and a shell installer.
 
-[Unreleased]: https://github.com/standardbeagle/tman/compare/v0.6.2...HEAD
+[Unreleased]: https://github.com/standardbeagle/tman/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/standardbeagle/tman/compare/v0.6.2...v0.7.0
 [0.6.2]: https://github.com/standardbeagle/tman/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/standardbeagle/tman/compare/v0.5.1...v0.6.1
 [0.5.1]: https://github.com/standardbeagle/tman/compare/v0.5.0...v0.5.1
