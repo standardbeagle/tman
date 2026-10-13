@@ -535,7 +535,7 @@ public static class Store
             watcher.Renamed += onRenamed;
         }
 
-        void Signal() { if (_changed.CurrentCount == 0) _changed.Release(); }
+        internal void Signal() { if (_changed.CurrentCount == 0) _changed.Release(); }
 
         /// <summary>Waits for the next queue event, or the backstop, whichever comes first.</summary>
         public async Task Wait(TimeSpan backstop, CancellationToken ct)

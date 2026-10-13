@@ -259,16 +259,22 @@ public class AdmissionBudgetTests : IDisposable
         psi.Environment.Remove(Runner.ParentIdEnvVar);
         foreach (var a in new[] { "hold", "--cores", "1", "--mem", "1g" }) psi.ArgumentList.Add(a);
         using var hold = AppHost.Start(psi);
-        var waiting = await Await(r => r.RunnerPid == hold.Id && r.Queue == "default" && r.AdmittedUtc is null);
-        Assert.Null(waiting.AdmittedUtc);
-        await Task.Delay(1_100);
+        try
+        {
+            var waiting = await Await(r => r.RunnerPid == hold.Id && r.Queue == "default" && r.AdmittedUtc is null);
+            Assert.Null(waiting.AdmittedUtc);
+            await Task.Delay(1_100);
 
-        Clear("occupy000001");
-        var admitted = await AwaitRecord(all => all.FirstOrDefault(r =>
-            r.RunnerPid == hold.Id && r.AdmittedUtc is not null));
-        Assert.True(admitted.QueuedSeconds is > 0,
-            $"a hold that waited should record its wait, was {admitted.QueuedSeconds}");
-        if (!hold.HasExited) hold.Kill(entireProcessTree: true);
+            Clear("occupy000001");
+            var admitted = await AwaitRecord(all => all.FirstOrDefault(r =>
+                r.RunnerPid == hold.Id && r.AdmittedUtc is not null));
+            Assert.True(admitted.QueuedSeconds is > 0,
+                $"a hold that waited should record its wait, was {admitted.QueuedSeconds}");
+        }
+        finally
+        {
+            if (!hold.HasExited) hold.Kill(entireProcessTree: true);
+        }
     }
 
     [UnixFact("runs a real tman apphost")]
@@ -448,6 +454,34 @@ public class AdmissionBudgetTests : IDisposable
         Assert.Contains("no-queue and exclusive", Assert.Throws<FormatException>(() => Config.Load(proj.Path)).Message);
     }
 
+    [UnixFact("drives Program.Main")]
+    public async Task ExclusiveOnAnAliasThatOptsOut_IsRefused()
+    {
+        using var proj = new TempDir();
+        proj.WriteFile(Config.FileName, """
+            alias "dev" {
+                command "/bin/true"
+                no-queue true
+            }
+            """);
+        Directory.SetCurrentDirectory(proj.Path);
+
+        var err = new StringWriter();
+        var prev = Console.Error;
+        Console.SetError(err);
+        int code;
+        try { code = await Program.Main(["run", "--alias", "dev", "--exclusive"]); }
+        finally { Console.SetError(prev); }
+
+        // --exclusive cannot be silently dropped onto a queue the alias opted out of: refuse loudly
+        Assert.Equal(Runner.ExitNotFound, code);
+        Assert.Contains("dev", err.ToString());
+        Assert.Contains("no-queue", err.ToString());
+        Assert.Contains("--exclusive", err.ToString());
+        // nothing ran: no record for the alias was written
+        Assert.DoesNotContain(Store.LoadAll(), r => r.Name == "dev");
+    }
+
     // ---- (b) waiters do not wake each other ----
 
     [UnixFact("writes records this process's runner owns")]
@@ -470,6 +504,49 @@ public class AdmissionBudgetTests : IDisposable
         Assert.Contains("queue timeout", ended.KillReason);
         Assert.True(elapsed < TimeSpan.FromSeconds(3),
             $"the waiter took {elapsed} to honour a one-second queue-timeout");
+    }
+
+    [UnixFact("writes records this process's runner owns")]
+    public async Task AWaiterThatLosesTheGateLock_RetriesInsteadOfParkingForTheBackstop()
+    {
+        _home.WriteFile("tman.kdl", "queue \"q\" {\n    cores 1\n    mem 1g\n}\n");
+        var q = Config.Queue("q") with { Timeout = TimeSpan.FromSeconds(30) };
+        // the whole budget is held, so the waiter must not fit until the holder is cleared
+        Occupy("occupy000001", cores: 1, memMb: 1024);
+
+        var waiter = Runner.NewRecord("go", ["test"], new Caps(), "x", null, "x@/x", "/tmp");
+        var claim = Admission.ClaimAdmission(waiter, q, new Admission.AdmissionCost(1, 1024), false, null, null, default);
+
+        // let the waiter make its first, losing attempt and park
+        await Task.Delay(500);
+        // take the gate before freeing the budget: the release below is the event the waiter wakes
+        // on, and it must land while the gate is held by someone else, so the woken attempt loses it
+        var gate = Store.TryClaimLock(Store.GatePathFor(Admission.QueueKey("q")));
+        Assert.NotNull(gate);
+        // free the budget; its finished save is the queue event that wakes the parked waiter
+        Clear("occupy000001");
+        // hold the gate well past ClaimGate's bound, so the waiter's woken attempt times out on it
+        // and returns to park; the release below then touches no event
+        await Task.Delay(2_000);
+        var released = Stopwatch.GetTimestamp();
+        Store.ReleaseLock(gate!);
+
+        Assert.True(await claim.WaitAsync(TimeSpan.FromSeconds(3)),
+            "a waiter that lost the gate lock did not retry it and was not admitted within 3s");
+        Assert.True(Stopwatch.GetElapsedTime(released) < TimeSpan.FromSeconds(3),
+            $"the waiter took {Stopwatch.GetElapsedTime(released)} to retry the released gate");
+        Assert.NotNull(waiter.AdmittedUtc);
+    }
+
+    [Fact]
+    public void AQueueEventAfterTheWakeIsDisposed_IsIgnored()
+    {
+        var wake = Store.WatchQueue(Admission.QueueKey("disposed"));
+        wake.Dispose();
+        // the watcher delivers events on its own thread, and TryAdmit touches the queue's event file
+        // in the same breath that ClaimAdmission disposes the wake: a Signal that lands after Dispose
+        // must be ignored, not throw ObjectDisposedException out of a FileSystemWatcher handler
+        wake.Signal();
     }
 
     [UnixFact("writes records this process's runner owns")]
