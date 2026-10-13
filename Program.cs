@@ -137,6 +137,12 @@ public static partial class Program
             // a queue named on the command line overrides the alias's own opt-out; otherwise the
             // alias's no-queue stands, alongside the CLI --no-queue
             var aliasNoQueue = alias.NoQueue && queueName is null;
+            // --exclusive is a claim on a queue's shared limit, so it cannot be silently dropped
+            // onto an alias that opted out of every queue: refuse it and name both settings
+            if (aliasNoQueue && (alias.Exclusive || exclusive))
+                throw new FormatException(
+                    $"alias '{aliasName}' sets no-queue, so --exclusive cannot be given: " +
+                    "no-queue and exclusive cannot both be given");
             return await GatedRun(
                 alias.Command, args, caps, name ?? alias.Name, alias.Name, replace,
                 RunKey.ScopeDir(config), config.Dir, cwd: config.Dir,

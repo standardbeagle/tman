@@ -522,6 +522,7 @@ public static class Store
     {
         readonly FileSystemWatcher? _watcher;
         readonly SemaphoreSlim _changed = new(0);
+        volatile bool _disposed;
 
         internal QueueWake(FileSystemWatcher? watcher)
         {
@@ -535,17 +536,33 @@ public static class Store
             watcher.Renamed += onRenamed;
         }
 
-        internal void Signal() { if (_changed.CurrentCount == 0) _changed.Release(); }
+        /// <summary>
+        /// Wakes the waiter. Reached on the watcher's own thread, and a caller may dispose the wake
+        /// in the same breath as it touches the event file (TryAdmit touches, ClaimAdmission
+        /// returns and disposes), so a signal can land after <see cref="Dispose"/> has freed the
+        /// semaphore: that late signal is ignored, not thrown out of a FileSystemWatcher handler
+        /// nothing catches.
+        /// </summary>
+        internal void Signal()
+        {
+            if (_disposed) return;
+            try { if (_changed.CurrentCount == 0) _changed.Release(); }
+            catch (ObjectDisposedException) { }
+        }
 
         /// <summary>Waits for the next queue event, or the backstop, whichever comes first.</summary>
         public async Task Wait(TimeSpan backstop, CancellationToken ct)
         {
+            // a non-positive backstop would wait forever on a value SemaphoreSlim truncates to -1 ms
+            // (or throw above its bound); clamp so a caller's arithmetic slip cannot abort the run
+            if (backstop < TimeSpan.Zero) backstop = TimeSpan.Zero;
             try { await _changed.WaitAsync(backstop, ct); }
             catch (OperationCanceledException) { }
         }
 
         public void Dispose()
         {
+            _disposed = true;
             _watcher?.Dispose();
             _changed.Dispose();
         }

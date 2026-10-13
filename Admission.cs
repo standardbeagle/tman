@@ -167,7 +167,20 @@ public static class Admission
         {
             if ((Store.ReadKillRequest(record.Id) ?? (ct.IsCancellationRequested ? CancelledReason : null)) is { } stop)
             { EndQueued(record, stop); return false; }
-            if (TryAdmit(record, queue, cost, exclusive, aliasCores, aliasMemMb, gate)) return true;
+            var attempt = TryAdmit(record, queue, cost, exclusive, aliasCores, aliasMemMb, gate);
+            if (attempt == AdmitOutcome.Admitted) return true;
+            if (attempt == AdmitOutcome.GateBusy)
+            {
+                // the gate is held across Reaper.ReapOrphans and Store.LoadAll — two reads of the
+                // whole run store, tens of milliseconds with thousands of records — so a waiter
+                // woken by one release can lose the gate to another that was woken by the same
+                // event. It must retry the gate, paced, rather than park the backstop: no further
+                // event follows when nobody was admitted, so a park here would stall the line for
+                // ten seconds. The pace keeps the retry from becoming a spin when the host is full.
+                try { await Task.Delay(GateRetryPace, ct); }
+                catch (OperationCanceledException) { }
+                continue;
+            }
 
             var elapsed = Stopwatch.GetElapsedTime(since);
             if (elapsed >= queue.Timeout)
@@ -194,11 +207,32 @@ public static class Admission
 
             // never park past the remaining queue-timeout: a queue-timeout shorter than the
             // backstop would otherwise be honoured up to ten seconds late, and a timeout does not
-            // touch the event file, so nothing else would wake the waiter to notice it
-            var remaining = queue.Timeout - Stopwatch.GetElapsedTime(since);
+            // touch the event file, so nothing else would wake the waiter to notice it. The park is
+            // taken from the `elapsed` just checked, not a fresh clock read: the report branch above
+            // can run for tens of milliseconds, and a negative timeout would throw and abort the run.
+            var remaining = queue.Timeout - elapsed;
             await wake.Wait(remaining < IdleBackstop ? remaining : IdleBackstop, ct);
         }
     }
+
+    /// <summary>The verdict of one admission attempt under the queue's gate.</summary>
+    enum AdmitOutcome
+    {
+        /// <summary>The run's cost fit and it is now recorded as admitted.</summary>
+        Admitted,
+        /// <summary>The gate was held by another attempt; the caller should retry it.</summary>
+        GateBusy,
+        /// <summary>The gate was taken, but the run does not fit — wait for a real event.</summary>
+        NoRoom,
+    }
+
+    /// <summary>
+    /// How long a waiter waits between retries of a gate lock another attempt holds. Short enough
+    /// that a waiter that lost the gate to the winner of one release gains it promptly, long enough
+    /// that a full host does not turn the retry into a spin (or into a <see cref="Store"/> read per
+    /// free CPU cycle).
+    /// </summary>
+    static readonly TimeSpan GateRetryPace = TimeSpan.FromMilliseconds(250);
 
     /// <summary>
     /// How long a waiter parks on the store before re-checking anyway. Only a guard against a missed
@@ -210,17 +244,19 @@ public static class Admission
     /// One admission attempt under the queue's gate lock, so two runners cannot both read the same
     /// admitted set and both conclude they fit. Admission is ordering: only the run the line says is
     /// next may go ahead of a larger waiter, unless it is small enough to fit beside admitted work.
-    /// The gate is held for microseconds, so a loss is retried briefly rather than treated as a
-    /// reason to park: when one release wakes several waiters, each must still get its turn, or the
-    /// one the line admits would sleep to the backstop while the others did nothing.
+    /// The gate is not held for microseconds: the attempt reaps orphans and reads the whole run
+    /// store under it, tens of milliseconds with thousands of records, so when one release wakes
+    /// several waiters each must retry the gate rather than conclude its turn is over — the one the
+    /// line admits would otherwise sleep to the backstop while the others did nothing. A
+    /// <see cref="AdmitOutcome.GateBusy"/> says exactly that: retry, do not park.
     /// </summary>
-    static bool TryAdmit(
+    static AdmitOutcome TryAdmit(
         RunRecord record, NamedQueue queue, AdmissionCost cost, bool exclusive,
         double? aliasCores, long? aliasMemMb, string gate)
     {
         Interlocked.Increment(ref AttemptsForTest);
         using var held = ClaimGate(gate);
-        if (held is null) return false;
+        if (held is null) return AdmitOutcome.GateBusy;
         Reaper.ReapOrphans(quiet: true);
 
         var all = Store.LoadAll();
@@ -231,12 +267,12 @@ public static class Admission
         {
             // an exclusive run starts alone: it waits for admitted work to finish, and no run
             // starts while it holds the queue
-            if (costs.Count > 0) return false;
+            if (costs.Count > 0) return AdmitOutcome.NoRoom;
         }
         else
         {
             // a run may not start while an exclusive one is admitted, whatever its cost
-            if (ExclusiveHeld(queue.Name, all)) return false;
+            if (ExclusiveHeld(queue.Name, all)) return AdmitOutcome.NoRoom;
 
             // arrival order, unless a small run can slip into a gap a larger earlier waiter cannot
             // take: the earlier waiter's own cost is what the gap is judged against, so an equal or
@@ -248,15 +284,15 @@ public static class Admission
                 if (earlier.Count > 0)
                 {
                     var starving = earlier.Any(o => o.QueuedUtc is { } at && DateTime.UtcNow - at >= StarvationBound);
-                    if (starving) return false;
+                    if (starving) return AdmitOutcome.NoRoom;
                     var first = earlier.OrderBy(o => o.QueuedUtc).ThenBy(o => o.Id, StringComparer.Ordinal).First();
                     var firstCost = new AdmissionCost(first.AdmittedCores ?? 0, first.AdmittedMemMb ?? 0);
-                    if (Fits(firstCost, costs, queue) || !Fits(cost, costs, queue)) return false;
+                    if (Fits(firstCost, costs, queue) || !Fits(cost, costs, queue)) return AdmitOutcome.NoRoom;
                 }
             }
         }
 
-        if (!Fits(cost, costs, queue)) return false;
+        if (!Fits(cost, costs, queue)) return AdmitOutcome.NoRoom;
 
         record.State = RunState.Queued;
         record.AdmittedUtc = DateTime.UtcNow;
@@ -268,13 +304,15 @@ public static class Admission
         Store.Save(record);
         // an admission changes the admitted set, which can free a gap or a turn for another waiter
         Store.TouchQueue(gate);
-        return true;
+        return AdmitOutcome.Admitted;
     }
 
     /// <summary>
-    /// Claims the queue gate, retrying briefly while another runner holds it. The holder's work is
-    /// microseconds long, so a bounded spin wins it in practice; only a pathological hold returns
-    /// null, and a waiter that returns null parks and is woken by the next real admission event.
+    /// Claims the queue gate, retrying briefly while another runner holds it. The holder's work is a
+    /// reap and one store read — tens of milliseconds, not microseconds — so a bounded spin rarely
+    /// wins it against a waiter already inside; a loss is reported as <see cref="AdmitOutcome.GateBusy"/>
+    /// and the caller retries at its own pace rather than parking, because no event follows a lost
+    /// gate when nobody was admitted.
     /// </summary>
     static FileStream? ClaimGate(string gate)
     {

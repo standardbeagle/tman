@@ -49,6 +49,15 @@ below 1.0, behavior changes land in minor releases.
   them.
 - **Run records carry `CpuSeconds` and `PeakCores`.** Tree CPU seconds and the busiest interval in cores, from the samples the monitor already takes, so a scheduler can size a step's share from what it used last time.
 
+### Fixed
+- **A queue waiter that loses the gate lock retries it instead of parking ten seconds.** The gate
+  is held across the orphan reap and a read of the whole run store, so a waiter woken by one
+  release can lose the gate to another woken by the same event; it now retries, paced, rather than
+  sleeping to the backstop when no event follows a lost gate. A queue event delivered after the
+  waiter's wake is disposed no longer throws out of the file watcher — the late signal is ignored.
+  And `tman run --alias <a> --exclusive` on an alias with `no-queue true` is refused (exit 127,
+  naming the alias and both settings) instead of silently dropping `--exclusive`.
+
 ## [0.6.2] - 2026-10-05
 
 ### Added
