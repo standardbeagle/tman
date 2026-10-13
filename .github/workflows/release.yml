@@ -28,7 +28,17 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y clang zlib1g-dev
       - name: test
-        run: dotnet test tests/Tman.Tests/Tman.Tests.csproj
+        shell: bash
+        run: |
+          set +e
+          dotnet test tests/Tman.Tests/Tman.Tests.csproj \
+            --logger trx --results-directory .test-results
+          rc=$?
+          if [ "$rc" -ne 0 ]; then
+            echo "----- failed tests -----"
+            bash .github/scripts/failed-tests.sh .test-results
+          fi
+          exit "$rc"
       - name: publish native binary
         run: dotnet publish -c Release -r ${{ matrix.rid }} --self-contained
       - name: package

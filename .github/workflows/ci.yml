@@ -30,7 +30,17 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y clang zlib1g-dev
       - name: test
-        run: dotnet test tests/Tman.Tests/Tman.Tests.csproj --nologo
+        shell: bash
+        run: |
+          set +e
+          dotnet test tests/Tman.Tests/Tman.Tests.csproj --nologo \
+            --logger trx --results-directory .test-results
+          rc=$?
+          if [ "$rc" -ne 0 ]; then
+            echo "----- failed tests -----"
+            bash .github/scripts/failed-tests.sh .test-results
+          fi
+          exit "$rc"
       # AOT is where trim/reflection problems surface; a passing test run does not imply a
       # publishable binary, and finding that out at tag time is too late
       - name: publish native binary
