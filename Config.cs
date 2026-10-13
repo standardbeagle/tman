@@ -196,6 +196,12 @@ public static class Config
                     if (n.Args.Count != 1 || n.Arg(0) is not { Length: > 0 } declared)
                         throw new FormatException($"{path}: queue takes exactly one name, as in queue \"compile\" {{ cores \"80%\" mem \"80%\" }}");
                     var where = $"{path}, queue \"{declared}\"";
+                    // the slot-counting form is replaced, not kept: a machine that still writes
+                    // max-parallel would otherwise be read as a queue with no budget and refuse
+                    if (n.Child("max-parallel") is { } slots)
+                        throw new FormatException(
+                            $"{where}: max-parallel {slots.Arg(0)} counts slots and is no longer read; " +
+                            "a queue budgets the host instead, as in queue \"" + declared + "\" { cores \"80%\" mem \"80%\" }");
                     var caps = ReadCaps(n, where, child => child.Name is "cores" or "mem" or "cores-default" or "mem-default",
                         ["queue-timeout"]);
                     if (n.Child("cores") is not { } coresNode)

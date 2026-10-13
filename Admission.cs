@@ -6,8 +6,9 @@ namespace Tman;
 /// Waiting for admission, as a state of the run rather than a pause before it. A run that cannot be
 /// admitted at once saves itself as <see cref="RunState.Queued"/> under the id it will run with, so
 /// `tman list` shows it, `tman kill` reaches it, and Ctrl+C ends it with an outcome — none of which
-/// a waiter with no record could have. A run admitted at once never writes a queued record: the
-/// uncontended path, which is nearly every run, pays nothing for this.
+/// a waiter with no record could have. A queue waiter always writes that record once, before its
+/// first claim, so a run arriving after it sees the line; the write that admits it is the run's own
+/// record, so an uncontended run pays one save rather than a queued record plus an admission apart.
 /// </summary>
 public static class Admission
 {
@@ -181,13 +182,23 @@ public static class Admission
                 Console.Error.WriteLine(
                     $"tman: still queued for '{queue.Name}': position {Position(record, Store.LoadAll())}, waited {Canon.Duration(elapsed)}");
                 lastReport = Stopwatch.GetTimestamp();
+                // the heartbeat refresh rides the report, not every pass: a save is a store event
+                // that wakes the other waiters, so a waiter that saved each pass had every waiter
+                // waking every other one into a spin that took the gate lock and swept the store on
+                // each turn — waiting must cost nothing while the line does not move
+                record.HeartbeatUtc = DateTime.UtcNow;
+                Store.Save(record);
             }
 
-            record.HeartbeatUtc = DateTime.UtcNow;
-            Store.Save(record);
-            await Store.WaitForChange(PollInterval, ct);
+            await Store.WaitForChange(IdleBackstop, ct);
         }
     }
+
+    /// <summary>
+    /// How long a waiter parks on the store before re-checking anyway. Only a guard against a missed
+    /// file event — long enough that it is not a poll, short enough to notice a starvation bound.
+    /// </summary>
+    static readonly TimeSpan IdleBackstop = TimeSpan.FromSeconds(10);
 
     /// <summary>
     /// One admission attempt under the queue's gate lock, so two runners cannot both read the same

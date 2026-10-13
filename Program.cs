@@ -166,8 +166,17 @@ public static partial class Program
     /// </param>
     internal static QueueJoin? Join(string? name, TimeSpan? cliQueueTimeout, bool exclusive)
     {
-        var resolved = name ?? (exclusive ? null : Config.MachineDefaultQueue());
-        if (resolved is null) return null;
+        // an exclusive run names its own queue, or joins the machine's "default": exclusivity is a
+        // claim on the shared limit, and a run that holds a queue only if it happens to name one
+        // would run beside everything on a machine that declared the default for it
+        var resolved = name ?? Config.MachineDefaultQueue();
+        if (resolved is null)
+        {
+            if (exclusive)
+                throw new FormatException(
+                    "an exclusive run needs a queue: name one with --queue, or declare the machine's \"default\" queue in " + Config.MachineConfigPath);
+            return null;
+        }
         var queue = Config.Queue(resolved);
         if (cliQueueTimeout is { } timeout) queue = queue with { Timeout = timeout };
         return new QueueJoin(queue, exclusive);
@@ -281,11 +290,12 @@ public static partial class Program
             if (!nested && queue is not null)
             {
                 var cost = Admission.ExpectedCost(record, queue.Queue, expectedCores, expectedMemMb);
-                var admittedAt = DateTime.UtcNow;
                 if (!await Admission.ClaimAdmission(record, queue.Queue, cost, queue.Exclusive, expectedCores, expectedMemMb, interrupt.Token))
                     return Runner.ExitKilled;
-                // what it was admitted with and how long it queued, on the record that carries the run
-                record.QueuedSeconds = (admittedAt - (record.QueuedUtc ?? admittedAt)).TotalSeconds;
+                // how long it queued, from the arrival ClaimAdmission stamped to the admission it
+                // just recorded — read after the claim, not before, or the wait is always zero
+                if (record.AdmittedUtc is { } admittedUtc && record.QueuedUtc is { } joinedUtc)
+                    record.QueuedSeconds = (admittedUtc - joinedUtc).TotalSeconds;
             }
 
             // the same reasoning as the slot: a nested run is the parent's work, and the parent is
