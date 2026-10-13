@@ -538,6 +538,42 @@ public class AdmissionBudgetTests : IDisposable
         Assert.NotNull(waiter.AdmittedUtc);
     }
 
+    [UnixFact("writes records this process's runner owns")]
+    public async Task AWaiterBehindAHeldGate_StillHonoursItsQueueTimeout()
+    {
+        _home.WriteFile("tman.kdl", "queue \"q\" {\n    cores 2\n    mem 2g\n}\n");
+        // the queue-timeout is about a second: a waiter that keeps losing the gate lock must still
+        // end at it, not retry forever. The budget is free, so only the held gate can stall it.
+        var q = Config.Queue("q") with { Timeout = TimeSpan.FromSeconds(1) };
+        // hold the gate for the whole wait, so every attempt loses it and returns GateBusy
+        Store.EnsureDirs();
+        var gate = Store.TryClaimLock(Store.GatePathFor(Admission.QueueKey("q")));
+        Assert.NotNull(gate);
+        using var cancel = new CancellationTokenSource();
+        try
+        {
+            var run = Runner.NewRecord("go", ["test"], new Caps(), "x", null, "x@/x", "/tmp");
+            var started = Stopwatch.GetTimestamp();
+            var claim = Admission.ClaimAdmission(run, q, new Admission.AdmissionCost(1, 512), false, null, null, cancel.Token);
+            var completed = await Task.WhenAny(claim, Task.Delay(TimeSpan.FromSeconds(3)));
+            Assert.Same(claim, completed);
+            Assert.False(await claim);
+
+            var elapsed = Stopwatch.GetElapsedTime(started);
+            var ended = Store.Load(run.Id)!;
+            Assert.Equal(RunState.Killed, ended.State);
+            Assert.Contains("queue timeout", ended.KillReason);
+            Assert.True(elapsed < TimeSpan.FromSeconds(3),
+                $"the waiter took {elapsed} to honour a one-second queue-timeout behind a held gate");
+        }
+        finally
+        {
+            cancel.Cancel();
+            Store.ReleaseLock(gate!);
+            try { await Task.Delay(200); } catch (OperationCanceledException) { }
+        }
+    }
+
     [Fact]
     public void AQueueEventAfterTheWakeIsDisposed_IsIgnored()
     {
