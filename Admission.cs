@@ -3,18 +3,33 @@ using System.Diagnostics;
 namespace Tman;
 
 /// <summary>
-/// Waiting for a slot, as a state of the run rather than a pause before it. A run that cannot be
-/// admitted at once saves itself as <see cref="RunState.Queued"/> under the id it will run with,
-/// so `tman list` shows it, `tman kill` reaches it, and Ctrl+C ends it with an outcome — none of
-/// which a waiter with no record could have. A run admitted at once never writes a queued record:
-/// the uncontended path, which is nearly every run, pays nothing for this.
+/// Waiting for admission, as a state of the run rather than a pause before it. A run that cannot be
+/// admitted at once saves itself as <see cref="RunState.Queued"/> under the id it will run with, so
+/// `tman list` shows it, `tman kill` reaches it, and Ctrl+C ends it with an outcome — none of which
+/// a waiter with no record could have. A run admitted at once never writes a queued record: the
+/// uncontended path, which is nearly every run, pays nothing for this.
 /// </summary>
 public static class Admission
 {
-    /// <summary>How often a waiter retries, refreshes its heartbeat, and looks for a kill request.</summary>
+    /// <summary>How often a waiter refreshes its heartbeat and looks for a kill request.</summary>
     static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(1);
 
     public const string CancelledReason = "cancelled while queued";
+
+    /// <summary>
+    /// How long a run may wait before it is admitted next regardless of smaller arrivals: without
+    /// this, a stream of small runs that always fit would starve one large one forever. Settable so
+    /// a test can prove the bound without waiting minutes; production never changes it.
+    /// </summary>
+    internal static TimeSpan StarvationBound = TimeSpan.FromMinutes(5);
+
+    /// <summary>Admission attempts made by this process, so a test can prove waiters do not spin.</summary>
+    internal static long AttemptsForTest;
+
+    internal static void ResetAttemptsForTest() => Interlocked.Exchange(ref AttemptsForTest, 0);
+
+    /// <summary>The cost a run is admitted with: cores and memory it is expected to bear.</summary>
+    public readonly record struct AdmissionCost(double Cores, long MemMb);
 
     /// <summary>
     /// One of the bucket's <paramref name="maxParallel"/> slots, or null when the run ended while
@@ -52,47 +67,199 @@ public static class Admission
         return slot;
     }
 
-    /// <summary>The slot key a named queue's slots are claimed under, machine-wide.</summary>
+    /// <summary>The cost estimator's key: the run's bucket and what it runs, so like work sizes like.</summary>
+    public const int HistoryDepth = 20;
+
+    /// <summary>
+    /// The cost a run is expected to bear, in cores and memory:
+    /// <list type="number">
+    /// <item>a high percentile of the run's bucket's recent records, once there are any;</item>
+    /// <item>the alias's declared `cores`/`mem`, or the project's in `defaults`;</item>
+    /// <item>the queue's own defaults.</item>
+    /// </list>
+    /// The high percentile, not the mean, because admission is a ceiling: a run that once took 5 GB
+    /// must be sized at 5 GB, and one good sample must not halve a suite's claim.
+    /// </summary>
+    public static AdmissionCost ExpectedCost(RunRecord record, NamedQueue queue, double? aliasCores, long? aliasMemMb)
+    {
+        var history = Store.LoadAll()
+            .Where(r => r.Group == record.Group && r.Id != record.Id && r.IsFinished)
+            .OrderByDescending(r => r.StartedUtc)
+            .Take(HistoryDepth)
+            .ToList();
+        var cores = Percentile(history.Select(r => r.PeakCores).Where(v => v > 0).ToList());
+        var memMb = Percentile(history.Select(r => (double)r.PeakMemMb).Where(v => v > 0).ToList());
+        return new AdmissionCost(
+            cores > 0 ? cores : aliasCores ?? queue.DefaultCores,
+            memMb > 0 ? (long)Math.Ceiling(memMb) : aliasMemMb ?? queue.DefaultMemMb);
+    }
+
+    /// <summary>
+    /// The 90th percentile of a small sample, nearest-rank. Empty for no samples, so "no history"
+    /// and "history of runs too small to measure" are one answer: fall back to the declared default.
+    /// </summary>
+    static double Percentile(IReadOnlyList<double> values)
+    {
+        if (values.Count == 0) return 0;
+        var sorted = values.OrderBy(v => v).ToList();
+        var rank = (int)Math.Ceiling(0.9 * sorted.Count);
+        return sorted[Math.Clamp(rank - 1, 0, sorted.Count - 1)];
+    }
+
+    /// <summary>True when a run costing <paramref name="cost"/> fits beside what is admitted.</summary>
+    public static bool Fits(AdmissionCost cost, IEnumerable<AdmissionCost> admitted, NamedQueue queue)
+    {
+        double cores = 0;
+        long memMb = 0;
+        foreach (var a in admitted)
+        {
+            cores += a.Cores;
+            memMb += a.MemMb;
+        }
+        // a lone run is admitted even when it alone exceeds the budget, or a suite larger than the
+        // declared budget could never start; the budget is a bound on what runs *beside* it
+        if (cores == 0 && memMb == 0) return true;
+        return cores + cost.Cores <= queue.Cores && memMb + cost.MemMb <= queue.MemMb;
+    }
+
+    /// <summary>The live records holding an admission in <paramref name="queue"/>.</summary>
+    public static List<RunRecord> AdmittedRuns(string queue, IEnumerable<RunRecord> all) =>
+        all.Where(r => r.Queue == queue && r.AdmittedUtc is not null && !r.IsFinished).ToList();
+
+    /// <summary>True when <paramref name="queue"/> has a live admitted exclusive run holding it.</summary>
+    public static bool ExclusiveHeld(string queue, IEnumerable<RunRecord> all) =>
+        AdmittedRuns(queue, all).Any(r => r.Exclusive && Reaper.RunnerAlive(r));
+
+    /// <summary>
+    /// Waits for admission to <paramref name="queue"/> by cost: saves the record as queued, then
+    /// retries until the expected cost fits beside what is admitted, or the run is killed,
+    /// interrupted, or out of the queue's timeout — which end it as killed and return null. An
+    /// exclusive run waits for admitted work to finish and then holds new admissions until it exits;
+    /// a non-exclusive run never starts while an exclusive one is admitted. Arrival order is kept,
+    /// but a small run may start ahead of a larger waiting one when it fits, and a run waiting past
+    /// the starvation bound is admitted next whatever its size.
+    /// </summary>
+    public static async Task<bool> ClaimAdmission(
+        RunRecord record, NamedQueue queue, AdmissionCost cost, bool exclusive,
+        double? aliasCores, long? aliasMemMb, CancellationToken ct)
+    {
+        record.Queue = queue.Name;
+        record.QueuedUtc = DateTime.UtcNow;
+        record.AdmittedCores = cost.Cores;
+        record.AdmittedMemMb = cost.MemMb;
+        record.Exclusive = exclusive;
+
+        var gate = QueueKey(queue.Name);
+        var said = false;
+        long lastReport = Stopwatch.GetTimestamp();
+
+        record.State = RunState.Queued;
+        record.StartedUtc = record.HeartbeatUtc = DateTime.UtcNow;
+        Store.Save(record);
+
+        var since = Stopwatch.GetTimestamp();
+        while (true)
+        {
+            if ((Store.ReadKillRequest(record.Id) ?? (ct.IsCancellationRequested ? CancelledReason : null)) is { } stop)
+            { EndQueued(record, stop); return false; }
+            if (TryAdmit(record, queue, cost, exclusive, aliasCores, aliasMemMb, gate)) return true;
+
+            var elapsed = Stopwatch.GetElapsedTime(since);
+            if (elapsed >= queue.Timeout)
+            { EndQueued(record, $"queue timeout waiting for queue '{queue.Name}'"); return false; }
+
+            if (!said)
+            {
+                Console.Error.WriteLine(
+                    $"tman: queued for '{queue.Name}' (needs {cost.Cores:0.#} cores, {Canon.Mem(cost.MemMb)}; " +
+                    $"budget {queue.Cores:0.#} cores, {Canon.Mem(queue.MemMb)}, queue-timeout {Canon.Duration(queue.Timeout)})");
+                said = true;
+                lastReport = Stopwatch.GetTimestamp();
+            }
+            else if (Stopwatch.GetElapsedTime(lastReport) >= QueueReportInterval)
+            {
+                Console.Error.WriteLine(
+                    $"tman: still queued for '{queue.Name}': position {Position(record, Store.LoadAll())}, waited {Canon.Duration(elapsed)}");
+                lastReport = Stopwatch.GetTimestamp();
+            }
+
+            record.HeartbeatUtc = DateTime.UtcNow;
+            Store.Save(record);
+            await Store.WaitForChange(PollInterval, ct);
+        }
+    }
+
+    /// <summary>
+    /// One admission attempt under the queue's gate lock, so two runners cannot both read the same
+    /// admitted set and both conclude they fit. Admission is ordering: only the run the line says is
+    /// next may go ahead of a larger waiter, unless it is small enough to fit beside admitted work.
+    /// </summary>
+    static bool TryAdmit(
+        RunRecord record, NamedQueue queue, AdmissionCost cost, bool exclusive,
+        double? aliasCores, long? aliasMemMb, string gate)
+    {
+        Interlocked.Increment(ref AttemptsForTest);
+        using var held = Store.TryClaimLock(Store.GatePathFor(gate));
+        if (held is null) return false;
+        Reaper.ReapOrphans(quiet: true);
+
+        var all = Store.LoadAll();
+        var admitted = AdmittedRuns(queue.Name, all);
+        var costs = admitted.Select(r => new AdmissionCost(r.AdmittedCores ?? 0, r.AdmittedMemMb ?? 0)).ToList();
+
+        if (exclusive)
+        {
+            // an exclusive run starts alone: it waits for admitted work to finish, and no run
+            // starts while it holds the queue
+            if (costs.Count > 0) return false;
+        }
+        else
+        {
+            // a run may not start while an exclusive one is admitted, whatever its cost
+            if (ExclusiveHeld(queue.Name, all)) return false;
+
+            // arrival order, unless a small run can slip into a gap a larger earlier waiter cannot
+            // take: the earlier waiter's own cost is what the gap is judged against, so an equal or
+            // larger newcomer always queues behind it
+            var position = Position(record, all);
+            if (position is > 1)
+            {
+                var earlier = EarlierWaiters(record, all);
+                if (earlier.Count > 0)
+                {
+                    var starving = earlier.Any(o => o.QueuedUtc is { } at && DateTime.UtcNow - at >= StarvationBound);
+                    if (starving) return false;
+                    var first = earlier.OrderBy(o => o.QueuedUtc).ThenBy(o => o.Id, StringComparer.Ordinal).First();
+                    var firstCost = new AdmissionCost(first.AdmittedCores ?? 0, first.AdmittedMemMb ?? 0);
+                    if (Fits(firstCost, costs, queue) || !Fits(cost, costs, queue)) return false;
+                }
+            }
+        }
+
+        if (!Fits(cost, costs, queue)) return false;
+
+        record.State = RunState.Queued;
+        record.AdmittedUtc = DateTime.UtcNow;
+        record.HeartbeatUtc = DateTime.UtcNow;
+        Store.Save(record);
+        return true;
+    }
+
+    static List<RunRecord> EarlierWaiters(RunRecord run, IEnumerable<RunRecord> all)
+    {
+        var joined = run.QueuedUtc!.Value;
+        return all.Where(o =>
+            o is { State: RunState.Queued, AdmittedUtc: null, QueuedUtc: { } at }
+            && o.Queue == run.Queue
+            && (at < joined || (at == joined && string.CompareOrdinal(o.Id, run.Id) < 0))
+            && Reaper.RunnerAlive(o)).ToList();
+    }
+
+    /// <summary>The slot key a named queue's gate is claimed under, machine-wide.</summary>
     internal static string QueueKey(string queue) => "queue:" + queue;
 
     /// <summary>How often a named queue's waiter says where it stands.</summary>
     static readonly TimeSpan QueueReportInterval = TimeSpan.FromMinutes(1);
-
-    /// <summary>
-    /// One of <paramref name="queue"/>'s slots, taken in arrival order across every tman on the
-    /// machine, or null when the run ended while queued. The record is saved in line before the
-    /// first claim, so a run arriving after this one sees it; and a run claims only while nobody
-    /// earlier is still waiting. A run that saves its record after another has looked is behind it —
-    /// arrival is arrival as the store sees it.
-    /// </summary>
-    public static async Task<FileStream?> ClaimQueueSlot(RunRecord record, NamedQueue queue, CancellationToken ct)
-    {
-        record.Queue = queue.Name;
-        record.QueuedUtc = DateTime.UtcNow;
-        var key = QueueKey(queue.Name);
-        var waited = false;
-        var lastReport = TimeSpan.Zero;
-        var since = Stopwatch.GetTimestamp();
-        var slot = await Wait(record, queue.Timeout, ct, $"queue '{queue.Name}'",
-            tryClaim: () =>
-            {
-                Reaper.ReapOrphans(quiet: true);
-                return Position(record, Store.LoadAll()) == 1 ? Store.TryAcquireSlot(key, queue.MaxParallel) : null;
-            },
-            waiting: elapsed =>
-            {
-                if (waited && elapsed - lastReport < QueueReportInterval) return;
-                var position = Position(record, Store.LoadAll());
-                Console.Error.WriteLine(waited
-                    ? $"tman: still queued for '{queue.Name}': position {position}, waited {Canon.Duration(elapsed)}"
-                    : $"tman: queued for '{queue.Name}' at position {position} (max-parallel {queue.MaxParallel}, queue-timeout {Canon.Duration(queue.Timeout)})");
-                waited = true;
-                lastReport = elapsed;
-            });
-        if (slot is not null && waited)
-            Console.Error.WriteLine($"tman: admitted from queue '{queue.Name}' after {Canon.Duration(Stopwatch.GetElapsedTime(since))}");
-        return slot;
-    }
 
     /// <summary>
     /// Where <paramref name="run"/> stands in its named queue's line: 1 + the live waiters that
@@ -101,9 +268,9 @@ public static class Admission
     /// </summary>
     public static int? Position(RunRecord run, IEnumerable<RunRecord> all)
     {
-        if (run is not { State: RunState.Queued, Queue: { } queue, QueuedUtc: { } joined }) return null;
+        if (run is not { State: RunState.Queued, AdmittedUtc: null, Queue: { } queue, QueuedUtc: { } joined }) return null;
         return 1 + all.Count(o =>
-            o is { State: RunState.Queued, QueuedUtc: { } at }
+            o is { State: RunState.Queued, AdmittedUtc: null, QueuedUtc: { } at }
             && o.Queue == queue
             && (at < joined || (at == joined && string.CompareOrdinal(o.Id, run.Id) < 0))
             && Reaper.RunnerAlive(o));

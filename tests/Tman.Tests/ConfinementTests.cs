@@ -326,9 +326,9 @@ public class ConfinementRunTests : IDisposable
     public void TheMachineConfig_NamesTheDelegatedCgroup()
     {
         Assert.Null(Config.MemCgroup());
-        _home.WriteFile("tman.kdl", "cgroup \"/sys/fs/cgroup/tman/\"\nqueue \"compile\" {\n    max-parallel 1\n}\n");
+        _home.WriteFile("tman.kdl", "cgroup \"/sys/fs/cgroup/tman/\"\nqueue \"compile\" {\n    cores 4\n    mem 4g\n}\n");
         Assert.Equal("/sys/fs/cgroup/tman", Config.MemCgroup());
-        Assert.Equal(1, Config.Queue("compile").MaxParallel);
+        Assert.Equal(4, Config.Queue("compile").Cores);
 
         foreach (var (text, expected) in new[]
                  {

@@ -31,10 +31,13 @@ public static class Help
           --max-parallel N    queue until one of this bucket's N slot files can be held
                               (bucket: name-or-command @ dir)
           --queue-timeout T   give up queueing after T
-          --queue Q           also wait in named queue Q, shared by every project on this machine
-                              and declared in ~/.tman/tman.kdl; admitted in arrival order.
-                              Without it, the alias's queue, else the .tman.kdl defaults' queue
-          --no-queue          join no named queue, whatever .tman.kdl says (a dev server, a watch)
+          --queue Q           wait in machine queue Q, shared by every project on this machine
+                              and declared in ~/.tman/tman.kdl; admitted by measured cost (cores
+                              and memory) rather than slot count. Without it, the alias's queue,
+                              else the .tman.kdl defaults' queue, else the machine's "default"
+          --no-queue          join no queue, whatever .tman.kdl says (a dev server, a watch)
+          --exclusive         run alone in the queue: wait for admitted work, then hold the queue
+                              until this run exits (a perf audit)
         """;
 
     const string Sweep = """
@@ -133,6 +136,23 @@ public static class Help
               --shims             a ./<alias> script for each alias in the .tman.kdl on disk, which
                                   runs it through tman; an existing different file is left alone
               --gitignore         ignore .tman/ and the shims in .gitignore
+            """),
+        new("hold",
+            ["tman hold --cores N --mem M [--pid <pid>] [--queue <name>]"],
+            "reserve a queue admission for work tman did not start",
+            """
+            Books the cost of a process tree another program started into a machine queue, for as
+            long as that tree lives. A client that launches heavy work of its own — an agent runner,
+            a build daemon — runs `tman hold --cores 3 --mem 4g --pid $pid` and the machine admits it
+            beside everything else without tman needing to know what it is. Without --pid, the hold
+            lasts until it is killed (Ctrl+C). The queue defaults to the machine's "default".
+
+              --cores N           cores the held work is expected to use
+              --mem M             memory the held work is expected to use (4096, 4g)
+              --pid P             release when pid P exits; without it, hold until killed
+              --queue Q           the machine queue to hold in (default: "default")
+
+            exit: 0 when the held pid exited, 130 when cancelled or refused.
             """),
         new("probe",
             ["tman probe --pid <pid> [--start-ticks <ticks>]"],

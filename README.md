@@ -83,6 +83,7 @@ tman init --shims --gitignore
 | `tman clean` | run the housekeeping sweep now and report what it did |
 | `tman status [id\|name\|id-prefix] [--json]` | summary counts, or one run's detail |
 | `tman init [--shims] [--gitignore]` | scaffold `.tman.kdl` + shims (aliases it cannot detect are left commented out, so `./test` fails loudly instead of faking a pass); shims are named after the aliases in the config on disk, so re-running it in a project that already has one shims that file's aliases; `--gitignore` ignores `.tman/` and the shims, and skips an alias whose name is already a directory, so `/test` never hides a `test/` tree |
+| `tman hold --cores N --mem M [--pid <pid>] [--queue <name>]` | book the cost of work another program started into a machine queue, for as long as it lives, so a client such as an agent runner reserves admission without tman knowing what the work is. Without `--pid`, the hold lasts until it is killed (Ctrl+C). The queue defaults to the machine's `default` |
 | `tman probe --pid <pid> [--start-ticks <ticks>]` | is a pid you recorded earlier still that process? Exit 0 mine, 1 gone, 3 not mine (the OS reused the pid); the verdict is also printed. `--start-ticks` is Linux only, read from field 22 of `/proc/<pid>/stat` when you record the pid; without it a live pid counts as yours. Read-only: it never signals or kills, and does not run the housekeeping sweep |
 | `tman help [<command>\|<alias>]`, `tman <command> --help` | the overview, one command's usage, flags and exit codes, or what an alias runs and where (`-h` works too). Help changes nothing — it creates no files and runs no sweep — and every command refuses an argument it does not take with exit 127, rather than skipping it and doing its job. `tman <alias> --help` is not tman's: an alias passes every arg to its command, so that asks the alias's own tool |
 | `tman hook pretooluse` | [Claude Code hook](#claude-code-hook): routes bare test/build commands through tman, and never blocks |
@@ -101,8 +102,9 @@ tman init --shims --gitignore
 | `--limit-mem M` | — | memory ceiling (MB or `2g`) the kernel enforces on the whole tree; crossing it ends the tree → exit 126 |
 | `--max-parallel N` | 2 | queue until one of the bucket's N slots can be held; a run that has to wait says so once on stderr (with the queue timeout) and once more, `slot acquired after Xs`, when it gets through. While it waits it is a `queued` run: `tman list` shows it, `tman kill` ends it, and Ctrl+C ends it as `killed: cancelled while queued` with exit 130 — none of which starts its child |
 | `--queue-timeout T` | 5m | give up waiting for a slot; the run is recorded `killed: queue timeout …` and exits 130 |
-| `--queue Q` | — | after its bucket admits it, also wait in the machine-wide [named queue](#named-queues) Q, in arrival order |
-| `--no-queue` | off | join no named queue, even one the alias or `defaults` names |
+| `--queue Q` | — | wait in the machine-wide [named queue](#named-queues) Q, admitted by measured cost; with no queue named anywhere, the machine's `default` queue if one is declared |
+| `--no-queue` | off | join no queue, even one the alias, `defaults`, or the machine's `default` names |
+| `--exclusive` | off | run alone in its queue: wait for admitted work to finish, then hold the queue until it exits |
 
 Cap precedence: CLI flags > alias block > `defaults` block > built-ins.
 
@@ -279,14 +281,23 @@ supervised tree (`TMAN_RUN_ID` set) is the same work as its parent and claims no
 A bucket never sees another checkout, which is the point — until several projects compete for the
 same machine. Three Rust and two C++ checkouts each building with every core is the case a
 **named queue** is for. It is declared once for the machine in `~/.tman/tman.kdl` (beside the run
-store, so `TMAN_HOME` moves it too):
+store, so `TMAN_HOME` moves it too), and it budgets the host in **cores and memory** rather than
+counting slots:
 
 ```kdl
 queue "compile" {
-    max-parallel 1
+    cores 6          // or a fraction of the host: cores "80%"
+    mem "36g"        // or a fraction of the host: mem "80%"
     queue-timeout "8h"   // optional; 8h by default
 }
 ```
+
+A run is admitted when the cost it is **expected** to bear fits beside what is already admitted, so
+a 5 GB / 3-core full suite and a 120 MB single test are not the same claim on the machine. Expected
+cost is a high percentile of the run's bucket's recent `PeakCores` and `PeakMemMb`; with no history
+yet, an alias's declared `cores`/`mem` (or the project's, in `defaults`), else the queue's
+`cores-default`/`mem-default`. A run larger than the whole budget still starts, alone. On exit its
+admission is released; a runner that died is reaped by the ordinary sweep.
 
 Any project then joins it by name, with `tman run --queue compile -- cargo build` or from an alias:
 
@@ -295,6 +306,7 @@ alias "build" {
     command "cargo"
     args "build"
     queue "compile"
+    exclusive true    // a perf audit: run alone, holding the queue until it exits
 }
 ```
 
@@ -308,23 +320,33 @@ defaults {
 
 That reaches the runs no alias names: the PATH shims' `tman run -- go test ./...`, the Claude Code
 hook's rewrite, and a bare `tman run`. An alias's own `queue` wins over it, and `--queue` wins over
-both. A long-lived run — a dev server, a watcher — would hold a slot for hours, so start it with
-`tman run --no-queue`; `--no-queue` together with `--queue` is refused.
+both. A long-lived run — a dev server, a watcher — would hold an admission for hours, so start it
+with `tman run --no-queue`; `--no-queue` together with `--queue` is refused.
 
-- **Arrival order.** A run saves itself as `queued` in the queue's line before its first claim,
-  and claims a slot only while nobody who joined earlier is still waiting. `tman list` shows each
-  waiter's place as `queued #1`, `queued #2`, and `tman status` shows it as `queue: compile
-  (position 2)`. A waiter whose tman died holds no place. Arrival is arrival as the store sees it:
-  two runs that join within the same instant are ordered by id.
+**When nothing names a queue, a run joins the machine's `default` queue** if `~/.tman/tman.kdl`
+declares one. That is what gives parallel agent worktrees one shared limit: a per-directory
+`max-parallel` is counted per directory, so every worktree gets its own copy, and the machine-wide
+queue is the only limit they all share. A machine that declares no `default` queue is unchanged.
+
+- **Arrival order, with gaps filled.** A run saves itself as `queued` in the queue's line before its
+  first claim, and claims a place only while nobody who joined earlier is still waiting. A small run
+  may start ahead of a larger waiting one when its cost fits the gap; a run waiting past a bound is
+  admitted next whatever its size, so nothing starves. `tman list` shows each waiter's place as
+  `queued #1`, `queued #2`, and `tman status` shows it as `queue: compile (position 2)`. A waiter
+  whose tman died holds no place.
 - **Bucket first, then queue.** A run held up in its own project's bucket does not sit on a queue
-  slot other projects are waiting for.
-- **Waiting is said, and bounded.** A waiter says where it stands when it joins and once a minute
-  after that, and gives up after the queue's `queue-timeout` — not the project's, which sizes its
-  bucket's wait. `--queue-timeout` on the command line overrides both.
+  admission other projects are waiting for.
+- **Waiting is on a record event.** A waiter parks on the runs directory and wakes when a record
+  changes — an admission released, a waiter joining or leaving — not on a poll, so a busy queue
+  costs no wakeups. It says where it stands when it joins and once a minute after that, and gives up
+  after the queue's `queue-timeout`. `--queue-timeout` on the command line overrides it.
 - **Cancellable.** Ctrl+C or `tman kill` ends a waiter as `killed` with exit 130, its child never
   started, and the next in line moves up.
+- **`tman hold`.** A program that starts heavy work of its own can book that cost without tman
+  knowing what it is: `tman hold --cores 3 --mem 4g --pid $pid` reserves an admission in the queue
+  until that pid exits. See [Commands](#commands).
 - A queue nobody declared is refused with exit 127, naming the machine config. Nested runs join no
-  queue, like they claim no bucket slot. The queue is read only when a run names one.
+  queue, like they claim no bucket slot. The queue is read only when a run joins one.
 
 ## .tman.kdl
 
@@ -505,7 +527,7 @@ in place. Removing one is never safe while tman is running — a run that opened
 earlier would take the lock as the sweep dropped it and end up holding a file with no name, while
 the next run created a fresh one — so nothing in tman removes them. `~/.tman/runs` keeps one
 `.lock` per bucket it has seen for the name dedup, plus one per parallel slot that bucket has ever
-handed out.
+handed out, plus one admission gate per queue.
 
 **The bound, stated plainly:** each is ~50 bytes but occupies one filesystem block, so budget about
 4 KB per bucket. A development machine reuses a handful of buckets and settles at a few dozen

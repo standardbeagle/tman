@@ -9,6 +9,9 @@ public sealed class KdlNode
     public string? Arg(int i) => i < Args.Count ? Args[i].AsString() : null;
     public KdlNode? Child(string name) => Children.Find(c => c.Name == name);
 
+    /// <summary>The single argument read as a bool; null when there is not exactly one, or it is not one.</summary>
+    public bool? AsBool() => Args.Count == 1 ? Args[0].AsBool() : null;
+
     public IEnumerable<KdlNode> All(string name)
     {
         foreach (var c in Children)

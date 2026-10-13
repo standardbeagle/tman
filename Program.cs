@@ -38,6 +38,7 @@ public static partial class Program
                 case "init": return CmdInit(rest);
                 case "hook": return CmdHook(rest);
                 case "probe": return CmdProbe(rest);
+                case "hold": return await CmdHold(rest);
                 case "--version" or "-v": Console.WriteLine($"tman {Version}"); return 0;
                 default:
                     {
@@ -79,7 +80,9 @@ public static partial class Program
         var args = alias.Args.Concat(extraArgs).ToArray();
         var caps = Config.EffectiveCaps(alias, new Caps(), config);
         return await GatedRun(alias.Command, args, caps, alias.Name, alias.Name, replace: false,
-            RunKey.ScopeDir(config), config.Dir, cwd: config.Dir, queue: JoinedQueue(alias.Queue ?? config.DefaultQueue, null));
+            RunKey.ScopeDir(config), config.Dir, cwd: config.Dir,
+            queue: Join(alias.Queue ?? config.DefaultQueue, null, alias.Exclusive),
+            expectedCores: alias.ExpectedCores ?? config.ExpectedCores, expectedMemMb: alias.ExpectedMemMb ?? config.ExpectedMemMb);
     }
 
     static async Task<int> CmdRun(string[] argv, string? _)
@@ -87,7 +90,7 @@ public static partial class Program
         Reaper.Sweep(Retention());
 
         string? name = null, aliasName = null, queueName = null;
-        bool replace = false, noQueue = false;
+        bool replace = false, noQueue = false, exclusive = false;
         var cliCaps = new Caps();
         var cmdArgs = new List<string>();
         var i = 0;
@@ -107,6 +110,7 @@ public static partial class Program
                     case "--replace": replace = true; break;
                     case "--queue": queueName = Next(); break;
                     case "--no-queue": noQueue = true; break;
+                    case "--exclusive": exclusive = true; break;
                     case "--max-time" or "--stall" or "--max-mem" or "--max-cpu" or "--max-parallel" or "--limit-cpus"
                         or "--limit-mem" or "--queue-timeout":
                         cliCaps = Caps.With(cliCaps, a[2..], Next(), a);
@@ -119,6 +123,8 @@ public static partial class Program
         }
         if (noQueue && queueName is not null)
             throw new FormatException("--queue and --no-queue cannot both be given");
+        if (noQueue && exclusive)
+            throw new FormatException("--exclusive needs a queue; --no-queue and --exclusive cannot both be given");
 
         if (aliasName is not null)
         {
@@ -131,7 +137,9 @@ public static partial class Program
             return await GatedRun(
                 alias.Command, args, caps, name ?? alias.Name, alias.Name, replace,
                 RunKey.ScopeDir(config), config.Dir, cwd: config.Dir,
-                queue: JoinedQueue(noQueue ? null : queueName ?? alias.Queue ?? config.DefaultQueue, cliCaps.QueueTimeout));
+                queue: noQueue ? null : Join(queueName ?? alias.Queue ?? config.DefaultQueue,
+                    cliCaps.QueueTimeout, alias.Exclusive || exclusive),
+                expectedCores: alias.ExpectedCores ?? config.ExpectedCores, expectedMemMb: alias.ExpectedMemMb ?? config.ExpectedMemMb);
         }
 
         if (cmdArgs.Count == 0) throw new FormatException("run requires a command");
@@ -140,20 +148,29 @@ public static partial class Program
             var caps = Config.EffectiveCaps(null, cliCaps, config);
             return await GatedRun(
                 cmdArgs[0], cmdArgs[1..].ToArray(), caps, name, null, replace,
-                RunKey.ScopeDir(config), config?.Dir, queue: JoinedQueue(noQueue ? null : queueName ?? config?.DefaultQueue, cliCaps.QueueTimeout));
+                RunKey.ScopeDir(config), config?.Dir,
+                queue: noQueue ? null : Join(queueName ?? config?.DefaultQueue, cliCaps.QueueTimeout, exclusive),
+                expectedCores: config?.ExpectedCores, expectedMemMb: config?.ExpectedMemMb);
         }
     }
 
     /// <summary>
-    /// The named queue a run joins, as the machine config declares it, or null for none. Its wait is
-    /// the queue's own timeout unless `--queue-timeout` was given on the command line: a project's
-    /// `queue-timeout` sizes its bucket's wait, and is no judge of a line shared across projects.
+    /// What queue a run joins. A name is resolved against the machine config: a machine that declares
+    /// a "default" queue makes every run whose alias, defaults and `--queue` name no other join it,
+    /// which is what gives parallel worktrees one shared limit instead of a per-directory
+    /// `max-parallel`. `--no-queue` and an alias's opt-out pass null and join nothing.
     /// </summary>
-    static NamedQueue? JoinedQueue(string? name, TimeSpan? cliQueueTimeout)
+    /// <param name="cliQueueTimeout">
+    /// `--queue-timeout` overrides the queue's own: a project's `queue-timeout` sizes its bucket's
+    /// wait, and is no judge of a line shared across projects.
+    /// </param>
+    internal static QueueJoin? Join(string? name, TimeSpan? cliQueueTimeout, bool exclusive)
     {
-        if (name is null) return null;
-        var queue = Config.Queue(name);
-        return cliQueueTimeout is { } timeout ? queue with { Timeout = timeout } : queue;
+        var resolved = name ?? (exclusive ? null : Config.MachineDefaultQueue());
+        if (resolved is null) return null;
+        var queue = Config.Queue(resolved);
+        if (cliQueueTimeout is { } timeout) queue = queue with { Timeout = timeout };
+        return new QueueJoin(queue, exclusive);
     }
 
     /// <param name="logDir">
@@ -169,10 +186,14 @@ public static partial class Program
     /// </param>
     const string ReplacedReason = "replaced by newer run";
 
-    /// <param name="queue">The named queue this run joins after its bucket admits it, or null.</param>
+    /// <summary>A queue a run joins, with the exclusivity it brings.</summary>
+    public sealed record QueueJoin(NamedQueue Queue, bool Exclusive);
+
+    /// <param name="queue">The queue this run joins after its bucket admits it, or null.</param>
     internal static async Task<int> GatedRun(
         string command, string[] args, Caps caps, string? name, string? alias, bool replace,
-        string scopeDir, string? logDir = null, string? cwd = null, NamedQueue? queue = null)
+        string scopeDir, string? logDir = null, string? cwd = null, QueueJoin? queue = null,
+        double? expectedCores = null, long? expectedMemMb = null)
     {
         // before any waiting: a run this machine can never confine must not sit in a queue first
         if (Confinement.Refusal(caps) is { } refusal) throw new FormatException(refusal);
@@ -247,7 +268,7 @@ public static partial class Program
         Console.CancelKeyPress += onCancel;
 
         var record = Runner.NewRecord(command, args, caps, name, alias, group, cwd);
-        FileStream? slotFile = null, queueSlot = null;
+        FileStream? slotFile = null;
         try
         {
             // bucket first, then queue: a run held up in its own project must not sit on a slot of
@@ -259,8 +280,12 @@ public static partial class Program
             }
             if (!nested && queue is not null)
             {
-                queueSlot = await Admission.ClaimQueueSlot(record, queue, interrupt.Token);
-                if (queueSlot is null) return Runner.ExitKilled;
+                var cost = Admission.ExpectedCost(record, queue.Queue, expectedCores, expectedMemMb);
+                var admittedAt = DateTime.UtcNow;
+                if (!await Admission.ClaimAdmission(record, queue.Queue, cost, queue.Exclusive, expectedCores, expectedMemMb, interrupt.Token))
+                    return Runner.ExitKilled;
+                // what it was admitted with and how long it queued, on the record that carries the run
+                record.QueuedSeconds = (admittedAt - (record.QueuedUtc ?? admittedAt)).TotalSeconds;
             }
 
             // the same reasoning as the slot: a nested run is the parent's work, and the parent is
@@ -271,7 +296,6 @@ public static partial class Program
         finally
         {
             Console.CancelKeyPress -= onCancel;
-            if (queueSlot is not null) Store.ReleaseLock(queueSlot);
             if (slotFile is not null) Store.ReleaseLock(slotFile);
             if (lockFile is not null) Store.ReleaseLock(lockFile);
         }
@@ -318,6 +342,111 @@ public static partial class Program
                 $"{Canon.Mem(r.PeakMemMb),-9}{Canon.CommandLine(r.Command, r.Args)}");
         }
         return 0;
+    }
+
+    /// <summary>
+    /// `tman hold`: reserve an admission in a machine queue for the lifetime of work tman did not
+    /// start. A client that launches a heavy process tree of its own — an agent runner, the
+    /// worktrack daemon — runs `tman hold --cores N --mem M --pid P` and tman books that cost in the
+    /// queue until P exits, so the work is admitted beside everything else on the machine without
+    /// tman needing to know what it is. Without `--pid`, the hold lasts until it is killed.
+    /// </summary>
+    static async Task<int> CmdHold(string[] argv)
+    {
+        const string usage = "usage: tman hold --cores N --mem M [--pid <pid>] [--queue <name>]";
+        double? cores = null;
+        long? memMb = null;
+        int? pid = null;
+        string? queueName = null;
+        for (var i = 0; i < argv.Length; i++)
+        {
+            string Next() => ++i < argv.Length ? argv[i] : throw new FormatException(usage);
+            switch (argv[i])
+            {
+                case "--cores":
+                    cores = double.TryParse(Next(), System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out var c) && c > 0 ? c : null;
+                    if (cores is null) throw new FormatException(usage);
+                    break;
+                case "--mem":
+                    memMb = Caps.ParseMemMb(Next());
+                    if (memMb is not (> 0)) throw new FormatException(usage);
+                    break;
+                case "--pid":
+                    pid = int.TryParse(Next(), out var p) && p > 0 ? p : throw new FormatException(usage);
+                    break;
+                case "--queue": queueName = Next(); break;
+                default:
+                    throw new FormatException(usage);
+            }
+        }
+        if (cores is null || memMb is null) throw new FormatException(usage);
+
+        var join = Join(queueName, null, exclusive: false)
+            ?? throw new FormatException("no machine queue to hold: declare one in the machine config, or pass --queue");
+
+        Reaper.Sweep(Retention());
+        var own = ProcUtil.OwnStart();
+        var record = new RunRecord
+        {
+            Id = Guid.NewGuid().ToString("N")[..12],
+            Name = "hold",
+            Command = "hold",
+            Args = pid is { } target ? [$"--pid={target}"] : [],
+            RunnerPid = Environment.ProcessId,
+            RunnerStartUtc = own.Utc,
+            RunnerStartTicks = own.Ticks,
+            Pid = Environment.ProcessId,
+            ChildStartUtc = own.Utc,
+            ChildStartTicks = own.Ticks,
+            Cwd = Canon.Dir(Directory.GetCurrentDirectory()),
+            ProjectRoot = Scope.CurrentProjectRoot(),
+            AgentSession = Scope.CurrentSession(),
+            Group = RunKey.For("hold", "hold", RunKey.ScopeDir(Config.Load())),
+            Caps = new Caps(),
+            State = RunState.Queued,
+        };
+
+        using var interrupt = new CancellationTokenSource();
+        ConsoleCancelEventHandler onCancel = (_, e) => { e.Cancel = true; interrupt.Cancel(); };
+        Console.CancelKeyPress += onCancel;
+        try
+        {
+            var cost = new Admission.AdmissionCost(cores.Value, memMb.Value);
+            if (!await Admission.ClaimAdmission(record, join.Queue, cost, join.Exclusive, cores, memMb, interrupt.Token))
+                return Runner.ExitKilled;
+            record.State = RunState.Running;
+            Store.Save(record);
+            Console.Error.WriteLine(
+                $"tman: holding {cost.Cores:0.#} cores, {Canon.Mem(cost.MemMb)} in queue '{join.Queue.Name}'" +
+                (pid is { } heldPid ? $" for pid {heldPid}" : "") + "; Ctrl+C releases");
+
+            while (!interrupt.IsCancellationRequested)
+            {
+                if (pid is { } held && ProcUtil.Probe(held, null) != ProcessIdentity.Mine)
+                {
+                    record.State = RunState.Exited;
+                    record.ExitCode = 0;
+                    break;
+                }
+                try { await Task.Delay(500, interrupt.Token); }
+                catch (OperationCanceledException) { break; }
+                record.HeartbeatUtc = DateTime.UtcNow;
+                Store.Save(record);
+            }
+            if (interrupt.IsCancellationRequested && record.State == RunState.Running)
+            {
+                record.State = RunState.Killed;
+                record.KillReason = "cancelled";
+            }
+            record.HeartbeatUtc = DateTime.UtcNow;
+            Store.Save(record);
+            return record.State == RunState.Exited ? 0 : Runner.ExitKilled;
+        }
+        finally
+        {
+            Console.CancelKeyPress -= onCancel;
+        }
     }
 
     /// <summary>
@@ -476,6 +605,10 @@ public static partial class Program
         Row("bucket", r.Group);
         Row("queue", r.Queue is null ? null
             : Admission.Position(r, Store.LoadAll()) is { } position ? $"{r.Queue} (position {position})" : r.Queue);
+        Row("admitted", r.AdmittedUtc is null ? null
+            : $"{r.AdmittedCores:0.#} cores, {Canon.Mem(r.AdmittedMemMb ?? 0)}" +
+              (r.Exclusive ? ", exclusive" : "") +
+              (r.QueuedSeconds is { } qs ? $" (queued {Canon.Duration(TimeSpan.FromSeconds(qs))})" : ""));
         Row("parent", r.ParentId);
         Row("pid", $"{PidLabel(r)} (runner {r.RunnerPid})");
         Row(r.State == RunState.Queued ? "waiting" : "started", $"{r.StartedUtc:u} ({Canon.Duration(now - r.StartedUtc)} ago)");

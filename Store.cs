@@ -77,6 +77,26 @@ public sealed class RunRecord
     /// </summary>
     public DateTime? QueuedUtc { get; set; }
 
+    /// <summary>
+    /// When the queue admitted this run — the instant it stopped waiting and its admission was
+    /// counted. Null while it is still waiting, which is how a queued record is told from one that
+    /// is merely holding the queue: a run with <see cref="RunState.Queued"/> and no AdmittedUtc is
+    /// in line; with one, it is admitted and running. Null for a run that joined no queue.
+    /// </summary>
+    public DateTime? AdmittedUtc { get; set; }
+
+    /// <summary>The cores this run was admitted with — its expected cost, from history or a default.</summary>
+    public double? AdmittedCores { get; set; }
+
+    /// <summary>The memory in MiB this run was admitted with.</summary>
+    public long? AdmittedMemMb { get; set; }
+
+    /// <summary>True when this run may never run beside another admitted run (a perf audit).</summary>
+    public bool Exclusive { get; set; }
+
+    /// <summary>How long the run waited in its queue before admission; null when it never queued.</summary>
+    public double? QueuedSeconds { get; set; }
+
     public bool IsNested => ParentId is not null;
 
     /// <summary>True once the run reached a terminal state and can be pruned.</summary>
@@ -162,6 +182,16 @@ public static class Store
     /// </summary>
     public static string SlotPathFor(string runKey, int slot) =>
         Path.Combine(RunsDir, $"{RunKey.LockStem(runKey)}-slot{slot}.lock");
+
+    /// <summary>
+    /// The serializing lock a queue's admission decision is made under. Holding it while the
+    /// admitted set is read and the run either recorded as admitted or left waiting is what keeps
+    /// two runners from both reading the same set and both concluding they fit. Claimed transiently,
+    /// never held for the run's life — admission is carried by the record, so a dead runner's
+    /// admission is reaped by the sweep rather than wedging the queue on an abandoned handle.
+    /// </summary>
+    public static string GatePathFor(string runKey) =>
+        Path.Combine(RunsDir, $"{RunKey.LockStem(runKey)}-gate.lock");
 
     /// <summary>
     /// How many times a rename refused by another writer replacing the same record is re-attempted
@@ -432,4 +462,58 @@ public static class Store
     /// </summary>
     public static void ReleaseLock(FileStream lockFile) => lockFile.Dispose();
 
+    /// <summary>
+    /// Waits until a run record changes on disk — an admission released, or a waiter joining or
+    /// leaving — or <paramref name="backstop"/> passes. Every queue waiter parks here rather than on
+    /// a poll, so the common case (the queue is busy) costs no wakeups: the runner that finishes is
+    /// the one that writes a record, and its write is the event every waiter is woken by. The
+    /// backstop is only a guard against a missed event, and is long enough that it is not a poll.
+    /// </summary>
+    public static async Task WaitForChange(TimeSpan backstop, CancellationToken ct)
+    {
+        using var watcher = TryWatch();
+        if (watcher is null)
+        {
+            // no watcher available: fall back to sleeping the backstop, which still re-checks promptly
+            try { await Task.Delay(backstop, ct); } catch (OperationCanceledException) { }
+            return;
+        }
+        var changed = new SemaphoreSlim(0);
+        FileSystemEventHandler onChanged = (_, _) => { if (changed.CurrentCount == 0) changed.Release(); };
+        RenamedEventHandler onRenamed = (_, _) => { if (changed.CurrentCount == 0) changed.Release(); };
+        watcher.Changed += onChanged;
+        watcher.Created += onChanged;
+        watcher.Deleted += onChanged;
+        watcher.Renamed += onRenamed;
+        try
+        {
+            await changed.WaitAsync(backstop, ct);
+        }
+        catch (OperationCanceledException) { }
+        finally
+        {
+            watcher.Changed -= onChanged;
+            watcher.Created -= onChanged;
+            watcher.Deleted -= onChanged;
+            watcher.Renamed -= onRenamed;
+            changed.Dispose();
+        }
+    }
+
+    static FileSystemWatcher? TryWatch()
+    {
+        try
+        {
+            EnsureDirs();
+            return new FileSystemWatcher(RunsDir, "*.json")
+            {
+                NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.CreationTime,
+                EnableRaisingEvents = true,
+            };
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+            return null;
+        }
+    }
 }

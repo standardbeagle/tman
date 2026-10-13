@@ -8,7 +8,32 @@ below 1.0, behavior changes land in minor releases.
 
 ## [Unreleased]
 
+### Changed
+- **Machine queues budget the host, not slots.** A queue declares `cores` and `mem` (absolute, or
+  a fraction such as `"80%"`) in `~/.tman/tman.kdl`, and a run is admitted when the cost it is
+  *expected* to bear fits beside what is already admitted — a 5 GB / 3-core suite and a 120 MB
+  single test are no longer the same claim. Expected cost is a high percentile of the run's
+  bucket's recent `PeakCores`/`PeakMemMb`; with no history, an alias's declared `cores`/`mem` (or
+  the project's, in `defaults`), else the queue's `cores-default`/`mem-default`. A run larger than
+  the whole budget still starts alone. The old slot-only queue form (`max-parallel`) is replaced.
+  Waiting parks on a run-record event rather than a poll; arrival order is kept, but a small run may
+  start ahead of a larger waiting one when it fits, and a run waiting past a bound is admitted next.
+- **A run joins the machine's `default` queue when nothing else names one.** If
+  `~/.tman/tman.kdl` declares `queue "default"`, a run whose alias, `.tman.kdl` defaults and
+  `--queue` name no other queue joins it. This gives parallel agent worktrees one shared limit,
+  where a per-directory `max-parallel` gives each worktree its own. `--no-queue` still opts a run
+  out. Before this, of 3,055 records on one host exactly one joined a queue.
+
 ### Added
+- **`--exclusive` / `exclusive true`.** An alias (or `--exclusive`) can declare that it runs alone
+  in its queue — a perf audit: it waits for admitted work to finish, then holds the queue until it
+  exits.
+- **`tman hold --cores N --mem M [--pid P] [--queue Q]`.** Reserve a queue admission for the
+  lifetime of a process tree tman did not start, so a client such as an agent runner books the cost
+  it is about to incur without tman knowing what the work is.
+- **Run records carry what they were admitted with.** `AdmittedCores`, `AdmittedMemMb`, `Exclusive`
+  and `QueuedSeconds` say the cost a run was admitted at and how long it queued; `tman status` shows
+  them.
 - **Run records carry `CpuSeconds` and `PeakCores`.** Tree CPU seconds and the busiest interval in cores, from the samples the monitor already takes, so a scheduler can size a step's share from what it used last time.
 
 ## [0.6.2] - 2026-10-05
