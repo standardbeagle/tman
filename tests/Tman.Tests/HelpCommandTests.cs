@@ -152,6 +152,56 @@ public class HelpCommandTests : IDisposable
         Assert.Contains("max-time 10m", printed);
     }
 
+    [Fact]
+    public async Task HelpForAnAlias_NamesTheMachineDefaultQueueItWillJoin()
+    {
+        // a machine that declares a "default" queue admits every run that names none, so an alias
+        // with no queue of its own waits there; the help must say so, not that it joins no queue
+        Directory.CreateDirectory(_home);
+        File.WriteAllText(Path.Combine(_home, "tman.kdl"), """
+            queue "default" {
+                cores "80%"
+                mem "80%"
+            }
+            """);
+        File.WriteAllText(Path.Combine(_cwd, Config.FileName), """
+            alias "test" {
+                command "dotnet"
+                args "test" "tests/X.csproj"
+            }
+            """);
+
+        var (exit, printed, _) = await Tman("help", "test");
+
+        Assert.Equal(0, exit);
+        Assert.Contains("queue:  default", printed);
+    }
+
+    [Fact]
+    public async Task HelpForAnAlias_SaysItJoinsNoQueueWhenItOptedOut()
+    {
+        // no-queue true is an opt-out: even a machine "default" queue is not joined, and help says so
+        Directory.CreateDirectory(_home);
+        File.WriteAllText(Path.Combine(_home, "tman.kdl"), """
+            queue "default" {
+                cores "80%"
+                mem "80%"
+            }
+            """);
+        File.WriteAllText(Path.Combine(_cwd, Config.FileName), """
+            alias "dev" {
+                command "vite"
+                no-queue true
+            }
+            """);
+
+        var (exit, printed, _) = await Tman("help", "dev");
+
+        Assert.Equal(0, exit);
+        Assert.Contains("queue:  none (no-queue true)", printed);
+        Assert.DoesNotContain("queue:  default", printed);
+    }
+
     [UnixFact("the alias's command is sh, echoing what it was given")]
     public async Task AnAliasesHelpFlag_GoesToItsCommand()
     {
