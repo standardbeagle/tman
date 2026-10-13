@@ -239,6 +239,11 @@ public static class Store
             try
             {
                 rename(tmp, PathFor(r.Id));
+                // a finished queue member releases its admission: that, and an admission granted
+                // (touched by whoever admits the run), is what wakes a queue's waiters. A periodic
+                // heartbeat save of a live run is not finished and so wakes nobody.
+                if (r is { Queue: { } queue, State: not (RunState.Running or RunState.Queued) })
+                    TouchQueue("queue:" + queue);
                 return;
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException
@@ -463,57 +468,86 @@ public static class Store
     public static void ReleaseLock(FileStream lockFile) => lockFile.Dispose();
 
     /// <summary>
-    /// Waits until a run record changes on disk — an admission released, or a waiter joining or
-    /// leaving — or <paramref name="backstop"/> passes. Every queue waiter parks here rather than on
-    /// a poll, so the common case (the queue is busy) costs no wakeups: the runner that finishes is
-    /// the one that writes a record, and its write is the event every waiter is woken by. The
-    /// backstop is only a guard against a missed event, and is long enough that it is not a poll.
+    /// Waits until the queue's admission events change, or <paramref name="backstop"/> passes. Every
+    /// waiter in <paramref name="gate"/>'s queue watches this one file and nothing else, so a live
+    /// run's periodic heartbeat save — which is written whether or not it holds an admission — does
+    /// not wake a waiter that is already waiting for that admission: only an admission granted, an
+    /// admission released, or a waiter leaving the line does. The backstop is only a guard against a
+    /// missed filesystem event, and is long enough that it is not a poll.
     /// </summary>
-    public static async Task WaitForChange(TimeSpan backstop, CancellationToken ct)
-    {
-        using var watcher = TryWatch();
-        if (watcher is null)
-        {
-            // no watcher available: fall back to sleeping the backstop, which still re-checks promptly
-            try { await Task.Delay(backstop, ct); } catch (OperationCanceledException) { }
-            return;
-        }
-        var changed = new SemaphoreSlim(0);
-        FileSystemEventHandler onChanged = (_, _) => { if (changed.CurrentCount == 0) changed.Release(); };
-        RenamedEventHandler onRenamed = (_, _) => { if (changed.CurrentCount == 0) changed.Release(); };
-        watcher.Changed += onChanged;
-        watcher.Created += onChanged;
-        watcher.Deleted += onChanged;
-        watcher.Renamed += onRenamed;
-        try
-        {
-            await changed.WaitAsync(backstop, ct);
-        }
-        catch (OperationCanceledException) { }
-        finally
-        {
-            watcher.Changed -= onChanged;
-            watcher.Created -= onChanged;
-            watcher.Deleted -= onChanged;
-            watcher.Renamed -= onRenamed;
-            changed.Dispose();
-        }
-    }
-
-    static FileSystemWatcher? TryWatch()
+    public static QueueWake WatchQueue(string gate)
     {
         try
         {
             EnsureDirs();
-            return new FileSystemWatcher(RunsDir, "*.json")
+            var watcher = new FileSystemWatcher(RunsDir, EventFileName(gate))
             {
                 NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.CreationTime,
                 EnableRaisingEvents = true,
             };
+            return new QueueWake(watcher);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
         {
-            return null;
+            // no watcher available: still waits the backstop, which is not a poll
+            return new QueueWake(null);
+        }
+    }
+
+    /// <summary>
+    /// Touches a queue's event file, so waiters watching it are woken to re-check admission. Call it
+    /// only for a change that can alter admission — an admission granted or released, or a waiter
+    /// leaving the line — never for a record's periodic heartbeat, which cannot.
+    /// </summary>
+    public static void TouchQueue(string gate)
+    {
+        try
+        {
+            EnsureDirs();
+            var path = EventPathFor(gate);
+            File.WriteAllText(path, DateTime.UtcNow.Ticks.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+    }
+
+    static string EventFileName(string gate) => RunKey.LockStem(gate) + "-gate.evt";
+
+    static string EventPathFor(string gate) => Path.Combine(RunsDir, EventFileName(gate));
+
+    /// <summary>
+    /// A waiter's handle on its queue's event file. A watcher that could not be created still waits
+    /// the backstop, so callers never branch on availability.
+    /// </summary>
+    public sealed class QueueWake : IDisposable
+    {
+        readonly FileSystemWatcher? _watcher;
+        readonly SemaphoreSlim _changed = new(0);
+
+        internal QueueWake(FileSystemWatcher? watcher)
+        {
+            _watcher = watcher;
+            if (watcher is null) return;
+            FileSystemEventHandler onChanged = (_, _) => Signal();
+            RenamedEventHandler onRenamed = (_, _) => Signal();
+            watcher.Changed += onChanged;
+            watcher.Created += onChanged;
+            watcher.Deleted += onChanged;
+            watcher.Renamed += onRenamed;
+        }
+
+        void Signal() { if (_changed.CurrentCount == 0) _changed.Release(); }
+
+        /// <summary>Waits for the next queue event, or the backstop, whichever comes first.</summary>
+        public async Task Wait(TimeSpan backstop, CancellationToken ct)
+        {
+            try { await _changed.WaitAsync(backstop, ct); }
+            catch (OperationCanceledException) { }
+        }
+
+        public void Dispose()
+        {
+            _watcher?.Dispose();
+            _changed.Dispose();
         }
     }
 }

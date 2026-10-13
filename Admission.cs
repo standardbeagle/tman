@@ -6,9 +6,9 @@ namespace Tman;
 /// Waiting for admission, as a state of the run rather than a pause before it. A run that cannot be
 /// admitted at once saves itself as <see cref="RunState.Queued"/> under the id it will run with, so
 /// `tman list` shows it, `tman kill` reaches it, and Ctrl+C ends it with an outcome — none of which
-/// a waiter with no record could have. A queue waiter always writes that record once, before its
-/// first claim, so a run arriving after it sees the line; the write that admits it is the run's own
-/// record, so an uncontended run pays one save rather than a queued record plus an admission apart.
+/// a waiter with no record could have. A queue waiter writes that record once, before its first
+/// claim, so a run arriving after it sees the line; the write that admits it is the run's own
+/// record, so a run that is admitted at once pays the queued save and the admitting one.
 /// </summary>
 public static class Admission
 {
@@ -158,6 +158,10 @@ public static class Admission
         record.StartedUtc = record.HeartbeatUtc = DateTime.UtcNow;
         Store.Save(record);
 
+        // the watcher is armed once, before the first attempt, and kept for the whole wait. A
+        // release that lands between an attempt and parking is therefore not lost: the event file
+        // already carries it, and the wait returns at once rather than sleeping the backstop.
+        using var wake = Store.WatchQueue(gate);
         var since = Stopwatch.GetTimestamp();
         while (true)
         {
@@ -182,15 +186,13 @@ public static class Admission
                 Console.Error.WriteLine(
                     $"tman: still queued for '{queue.Name}': position {Position(record, Store.LoadAll())}, waited {Canon.Duration(elapsed)}");
                 lastReport = Stopwatch.GetTimestamp();
-                // the heartbeat refresh rides the report, not every pass: a save is a store event
-                // that wakes the other waiters, so a waiter that saved each pass had every waiter
-                // waking every other one into a spin that took the gate lock and swept the store on
-                // each turn — waiting must cost nothing while the line does not move
+                // the heartbeat rides the report, and a queued heartbeat is not an admission event,
+                // so it wakes nobody: waiting costs nothing while the line does not move
                 record.HeartbeatUtc = DateTime.UtcNow;
                 Store.Save(record);
             }
 
-            await Store.WaitForChange(IdleBackstop, ct);
+            await wake.Wait(IdleBackstop, ct);
         }
     }
 
@@ -204,13 +206,16 @@ public static class Admission
     /// One admission attempt under the queue's gate lock, so two runners cannot both read the same
     /// admitted set and both conclude they fit. Admission is ordering: only the run the line says is
     /// next may go ahead of a larger waiter, unless it is small enough to fit beside admitted work.
+    /// The gate is held for microseconds, so a loss is retried briefly rather than treated as a
+    /// reason to park: when one release wakes several waiters, each must still get its turn, or the
+    /// one the line admits would sleep to the backstop while the others did nothing.
     /// </summary>
     static bool TryAdmit(
         RunRecord record, NamedQueue queue, AdmissionCost cost, bool exclusive,
         double? aliasCores, long? aliasMemMb, string gate)
     {
         Interlocked.Increment(ref AttemptsForTest);
-        using var held = Store.TryClaimLock(Store.GatePathFor(gate));
+        using var held = ClaimGate(gate);
         if (held is null) return false;
         Reaper.ReapOrphans(quiet: true);
 
@@ -251,9 +256,32 @@ public static class Admission
 
         record.State = RunState.Queued;
         record.AdmittedUtc = DateTime.UtcNow;
+        // the wait is stamped in the same save that admits the run, so every door that claims an
+        // admission — a run, a hold — records it in the write that books the cost
+        if (record.QueuedUtc is { } joined)
+            record.QueuedSeconds = (record.AdmittedUtc.Value - joined).TotalSeconds;
         record.HeartbeatUtc = DateTime.UtcNow;
         Store.Save(record);
+        // an admission changes the admitted set, which can free a gap or a turn for another waiter
+        Store.TouchQueue(gate);
         return true;
+    }
+
+    /// <summary>
+    /// Claims the queue gate, retrying briefly while another runner holds it. The holder's work is
+    /// microseconds long, so a bounded spin wins it in practice; only a pathological hold returns
+    /// null, and a waiter that returns null parks and is woken by the next real admission event.
+    /// </summary>
+    static FileStream? ClaimGate(string gate)
+    {
+        var deadline = Stopwatch.GetTimestamp() + (long)(Stopwatch.Frequency * 0.5);
+        for (;;)
+        {
+            var held = Store.TryClaimLock(Store.GatePathFor(gate));
+            if (held is not null) return held;
+            if (Stopwatch.GetTimestamp() >= deadline) return null;
+            Thread.Sleep(2);
+        }
     }
 
     static List<RunRecord> EarlierWaiters(RunRecord run, IEnumerable<RunRecord> all)
@@ -325,6 +353,8 @@ public static class Admission
         record.State = RunState.Killed;
         record.KillReason = reason;
         record.HeartbeatUtc = DateTime.UtcNow;
+        // the save is a finished record, so Store.Save touches the queue event: a waiter leaving
+        // the line frees a place for whoever was behind it
         Store.Save(record);
         return null;
     }

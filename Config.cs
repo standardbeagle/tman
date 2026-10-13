@@ -10,7 +10,9 @@ public sealed record AliasDef(
     bool Exclusive = false,
     /// <summary>The alias's declared expected cost, used when the bucket has no history yet.</summary>
     double? ExpectedCores = null,
-    long? ExpectedMemMb = null);
+    long? ExpectedMemMb = null,
+    /// <summary>True when the alias joins no queue at all — a dev server or a watch (see README).</summary>
+    bool NoQueue = false);
 
 /// <summary>
 /// A queue declared once for the whole machine, which any project's runs can join by name. It
@@ -112,7 +114,7 @@ public static class Config
         if (n.Args.Count != 1 || n.Arg(0) is not { Length: > 0 } name)
             throw new FormatException($"{path}: alias takes exactly one name, as in alias \"test\" {{ ... }}");
         var where = $"{path}, alias \"{name}\"";
-        var caps = ReadCaps(n, where, child => child.Name is "command" or "args" or "queue" or "exclusive" or "cores" or "mem");
+        var caps = ReadCaps(n, where, child => child.Name is "command" or "args" or "queue" or "exclusive" or "cores" or "mem" or "no-queue");
 
         var commandNode = n.Child("command")
             ?? throw new FormatException($"alias \"{name}\" in {path} is missing a command");
@@ -120,9 +122,15 @@ public static class Config
             throw new FormatException($"{where}: command takes exactly one program; put its arguments under args");
         var args = n.Child("args")?.Args.Select(a => a.AsString() ?? "").ToArray() ?? [];
         var exclusive = n.Child("exclusive") is { } ex && ReadBool(ex, $"{where}: exclusive");
+        var noQueue = n.Child("no-queue") is { } nq && ReadBool(nq, $"{where}: no-queue");
+        var queueName = ReadQueueName(n, where);
+        if (noQueue && queueName is not null)
+            throw new FormatException($"{where}: no-queue and queue name a queue and its absence; give only one");
+        if (noQueue && exclusive)
+            throw new FormatException($"{where}: no-queue and exclusive cannot both be given");
         return new AliasDef(
-            name, command, args, caps, ReadQueueName(n, where), exclusive,
-            ReadExpectedCores(n, where), ReadExpectedMem(n, where));
+            name, command, args, caps, queueName, exclusive,
+            ReadExpectedCores(n, where), ReadExpectedMem(n, where), noQueue);
     }
 
     static bool ReadBool(KdlNode node, string where)
@@ -163,7 +171,7 @@ public static class Config
         return machine.Queues.TryGetValue(name, out var queue)
             ? queue
             : throw new FormatException(
-                $"queue \"{name}\" is not declared in {MachineConfigPath}; declare it there, e.g. queue \"{name}\" {{ cores \"80%\" mem \"80%\" }}");
+                $"queue \"{name}\" is not declared in {MachineConfigPath}; declare it there, e.g. queue \"{name}\" {{ cores \"80%\"; mem \"80%\" }}");
     }
 
     /// <summary>
@@ -194,14 +202,14 @@ public static class Config
             {
                 case "queue":
                     if (n.Args.Count != 1 || n.Arg(0) is not { Length: > 0 } declared)
-                        throw new FormatException($"{path}: queue takes exactly one name, as in queue \"compile\" {{ cores \"80%\" mem \"80%\" }}");
+                        throw new FormatException($"{path}: queue takes exactly one name, as in queue \"compile\" {{ cores \"80%\"; mem \"80%\" }}");
                     var where = $"{path}, queue \"{declared}\"";
                     // the slot-counting form is replaced, not kept: a machine that still writes
                     // max-parallel would otherwise be read as a queue with no budget and refuse
                     if (n.Child("max-parallel") is { } slots)
                         throw new FormatException(
                             $"{where}: max-parallel {slots.Arg(0)} counts slots and is no longer read; " +
-                            "a queue budgets the host instead, as in queue \"" + declared + "\" { cores \"80%\" mem \"80%\" }");
+                            "a queue budgets the host instead, as in queue \"" + declared + "\" { cores \"80%\"; mem \"80%\" }");
                     var caps = ReadCaps(n, where, child => child.Name is "cores" or "mem" or "cores-default" or "mem-default",
                         ["queue-timeout"]);
                     if (n.Child("cores") is not { } coresNode)

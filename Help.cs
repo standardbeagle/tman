@@ -35,7 +35,8 @@ public static class Help
                               and declared in ~/.tman/tman.kdl; admitted by measured cost (cores
                               and memory) rather than slot count. Without it, the alias's queue,
                               else the .tman.kdl defaults' queue, else the machine's "default"
-          --no-queue          join no queue, whatever .tman.kdl says (a dev server, a watch)
+          --no-queue          join no queue, whatever .tman.kdl says (a dev server, a watch);
+                              an alias whose block sets `no-queue true` does the same without a flag
           --exclusive         run alone in the queue: wait for admitted work, then hold the queue
                               until this run exits (a perf audit)
         """;
@@ -258,7 +259,8 @@ public static class Help
         sb.AppendLine($"  runs:   {Canon.CommandLine(alias.Command, alias.Args, full: true)} [args...]");
         sb.AppendLine($"  in:     {config.Dir}");
         sb.AppendLine($"  caps:   {Program.DescribeCaps(Config.EffectiveCaps(alias, new Caps(), config))}");
-        if ((alias.Queue ?? config.DefaultQueue) is { } queue) sb.AppendLine($"  queue:  {queue}");
+        if (alias.NoQueue) sb.AppendLine("  queue:  none (no-queue true)");
+        else if ((alias.Queue ?? config.DefaultQueue) is { } queue) sb.AppendLine($"  queue:  {queue}");
         sb.Append("Every arg, --help included, goes to the command.");
         return sb.ToString();
     }

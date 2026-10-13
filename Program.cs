@@ -81,7 +81,7 @@ public static partial class Program
         var caps = Config.EffectiveCaps(alias, new Caps(), config);
         return await GatedRun(alias.Command, args, caps, alias.Name, alias.Name, replace: false,
             RunKey.ScopeDir(config), config.Dir, cwd: config.Dir,
-            queue: Join(alias.Queue ?? config.DefaultQueue, null, alias.Exclusive),
+            queue: alias.NoQueue ? null : Join(alias.Queue ?? config.DefaultQueue, null, alias.Exclusive),
             expectedCores: alias.ExpectedCores ?? config.ExpectedCores, expectedMemMb: alias.ExpectedMemMb ?? config.ExpectedMemMb);
     }
 
@@ -134,10 +134,13 @@ public static partial class Program
                 throw new FormatException($"alias '{aliasName}' not defined in {config.FilePath}");
             var args = alias.Args.Concat(cmdArgs).ToArray();
             var caps = Config.EffectiveCaps(alias, cliCaps, config);
+            // a queue named on the command line overrides the alias's own opt-out; otherwise the
+            // alias's no-queue stands, alongside the CLI --no-queue
+            var aliasNoQueue = alias.NoQueue && queueName is null;
             return await GatedRun(
                 alias.Command, args, caps, name ?? alias.Name, alias.Name, replace,
                 RunKey.ScopeDir(config), config.Dir, cwd: config.Dir,
-                queue: noQueue ? null : Join(queueName ?? alias.Queue ?? config.DefaultQueue,
+                queue: noQueue || aliasNoQueue ? null : Join(queueName ?? alias.Queue ?? config.DefaultQueue,
                     cliCaps.QueueTimeout, alias.Exclusive || exclusive),
                 expectedCores: alias.ExpectedCores ?? config.ExpectedCores, expectedMemMb: alias.ExpectedMemMb ?? config.ExpectedMemMb);
         }
@@ -158,7 +161,8 @@ public static partial class Program
     /// What queue a run joins. A name is resolved against the machine config: a machine that declares
     /// a "default" queue makes every run whose alias, defaults and `--queue` name no other join it,
     /// which is what gives parallel worktrees one shared limit instead of a per-directory
-    /// `max-parallel`. `--no-queue` and an alias's opt-out pass null and join nothing.
+    /// `max-parallel`. There are two opt-outs: `--no-queue`, and an alias's `no-queue true`, which the
+    /// alias and `tman run --alias` doors cannot pass a flag for; both join nothing.
     /// </summary>
     /// <param name="cliQueueTimeout">
     /// `--queue-timeout` overrides the queue's own: a project's `queue-timeout` sizes its bucket's
@@ -292,10 +296,6 @@ public static partial class Program
                 var cost = Admission.ExpectedCost(record, queue.Queue, expectedCores, expectedMemMb);
                 if (!await Admission.ClaimAdmission(record, queue.Queue, cost, queue.Exclusive, expectedCores, expectedMemMb, interrupt.Token))
                     return Runner.ExitKilled;
-                // how long it queued, from the arrival ClaimAdmission stamped to the admission it
-                // just recorded — read after the claim, not before, or the wait is always zero
-                if (record.AdmittedUtc is { } admittedUtc && record.QueuedUtc is { } joinedUtc)
-                    record.QueuedSeconds = (admittedUtc - joinedUtc).TotalSeconds;
             }
 
             // the same reasoning as the slot: a nested run is the parent's work, and the parent is
@@ -356,8 +356,8 @@ public static partial class Program
 
     /// <summary>
     /// `tman hold`: reserve an admission in a machine queue for the lifetime of work tman did not
-    /// start. A client that launches a heavy process tree of its own — an agent runner, the
-    /// worktrack daemon — runs `tman hold --cores N --mem M --pid P` and tman books that cost in the
+    /// start. A client that launches a heavy process tree of its own — an agent runner, a build
+    /// daemon — runs `tman hold --cores N --mem M --pid P` and tman books that cost in the
     /// queue until P exits, so the work is admitted beside everything else on the machine without
     /// tman needing to know what it is. Without `--pid`, the hold lasts until it is killed.
     /// </summary>
