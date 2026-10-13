@@ -169,18 +169,6 @@ public static class Admission
             { EndQueued(record, stop); return false; }
             var attempt = TryAdmit(record, queue, cost, exclusive, aliasCores, aliasMemMb, gate);
             if (attempt == AdmitOutcome.Admitted) return true;
-            if (attempt == AdmitOutcome.GateBusy)
-            {
-                // the gate is held across Reaper.ReapOrphans and Store.LoadAll — two reads of the
-                // whole run store, tens of milliseconds with thousands of records — so a waiter
-                // woken by one release can lose the gate to another that was woken by the same
-                // event. It must retry the gate, paced, rather than park the backstop: no further
-                // event follows when nobody was admitted, so a park here would stall the line for
-                // ten seconds. The pace keeps the retry from becoming a spin when the host is full.
-                try { await Task.Delay(GateRetryPace, ct); }
-                catch (OperationCanceledException) { }
-                continue;
-            }
 
             var elapsed = Stopwatch.GetElapsedTime(since);
             if (elapsed >= queue.Timeout)
@@ -211,7 +199,21 @@ public static class Admission
             // taken from the `elapsed` just checked, not a fresh clock read: the report branch above
             // can run for tens of milliseconds, and a negative timeout would throw and abort the run.
             var remaining = queue.Timeout - elapsed;
-            await wake.Wait(remaining < IdleBackstop ? remaining : IdleBackstop, ct);
+            if (attempt == AdmitOutcome.GateBusy)
+            {
+                // the gate is held across Reaper.ReapOrphans and Store.LoadAll — two reads of the
+                // whole run store, tens of milliseconds with thousands of records — so a waiter
+                // woken by one release can lose the gate to another that was woken by the same
+                // event. It must retry the gate, paced, rather than park the backstop: no further
+                // event follows when nobody was admitted, so a park here would stall the line for
+                // ten seconds. The pace keeps the retry from becoming a spin when the host is full,
+                // and the timeout check above still ends it at its queue-timeout if the gate stays
+                // held (a suspended or I/O-hung holder).
+                try { await Task.Delay(remaining < GateRetryPace ? remaining : GateRetryPace, ct); }
+                catch (OperationCanceledException) { }
+            }
+            else
+                await wake.Wait(remaining < IdleBackstop ? remaining : IdleBackstop, ct);
         }
     }
 
