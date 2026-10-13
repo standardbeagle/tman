@@ -351,13 +351,17 @@ queue is the only limit they all share. A machine that declares no `default` que
 - **Bucket first, then queue.** A run held up in its own project's bucket does not sit on a queue
   admission other projects are waiting for.
 - **Waiting is on an admission event.** A waiter watches one file per queue — the queue's admission
-  event — and wakes only when an admission is granted, an admission is released, or a waiter leaves
-  the line. A live run's or a hold's periodic heartbeat save is not such an event (the waiter's own
-  liveness is its pid, not the heartbeat), so a busy queue costs no wakeups, and the wait is not a
-  poll. It says where it stands when it joins and once a minute after that, and gives up after the
-  queue's `queue-timeout`. `--queue-timeout` on the command line overrides it.
+  event — and wakes when an admission is granted, an admission is released, a waiter leaves the line,
+  or a kill request is left for a run in that queue. A live run's or a hold's periodic heartbeat save
+  is not such an event (the waiter's own liveness is its pid, not the heartbeat), so a busy queue
+  costs no wakeups, and the wait is not a poll. It re-checks on its own every 10 s, which is what
+  notices a dead runner and the starvation bound. It says where it stands when it joins and once a
+  minute after that, and gives up after the queue's `queue-timeout`. `--queue-timeout` on the command
+  line overrides it.
 - **Cancellable.** Ctrl+C or `tman kill` ends a waiter as `killed` with exit 130, its child never
-  started, and the next in line moves up.
+  started, and the next in line moves up. A kill or a `queue-timeout` runs out within about a second,
+  both because a kill touches the queue's event file and because the waiter never parks past the
+  queue-timeout left to it.
 - **`tman hold`.** A program that starts heavy work of its own can book that cost without tman
   knowing what it is: `tman hold --cores 3 --mem 4g --pid $pid` reserves an admission in the queue
   until that pid exits. See [Commands](#commands).

@@ -17,8 +17,10 @@ below 1.0, behavior changes land in minor releases.
   the project's, in `defaults`), else the queue's `cores-default`/`mem-default`. A run larger than
   the whole budget still starts alone. The old slot-only queue form (`max-parallel`) is replaced.
   Waiting watches one admission-event file per queue, not a poll and not every run's heartbeat;
-  arrival order is kept, but a small run may start ahead of a larger waiting one when it fits, and a
-  run waiting past a bound is admitted next.
+  a waiter wakes when an admission is granted or released, when a waiter leaves the line, or when a
+  kill request touches its queue, and re-checks on its own every 10 s, so a kill or a `queue-timeout`
+  ends a queued run within about a second. Arrival order is kept, but a small run may start ahead of
+  a larger waiting one when it fits, and a run waiting past a bound is admitted next.
 - **Upgrade: a machine queue still written `max-parallel N` is refused.** It names the file, the
   queue, and the `cores`/`mem` form to write instead, because no machine config works on both this
   version and the last — the old parser refused `cores`/`mem`. Rewrite `~/.tman/tman.kdl`'s queues
