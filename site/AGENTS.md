@@ -8,6 +8,14 @@ astro dev --background
 
 Manage the background server with `astro dev stop`, `astro dev status`, and `astro dev logs`.
 
+## Verifying a change
+
+Run `tman site` after editing anything under `site/`, before committing. It builds the site with
+`npm --prefix site run build`, so a change that breaks the Astro compile fails here instead of
+landing red. `npm test` in `site/` only runs vitest and never compiles a page, which is how a broken
+`docs.astro` reached main. In a fresh worktree with no `site/node_modules`, run `npm ci --prefix site`
+once first; `tman site` fails with npm's own message until then.
+
 ## Documentation
 
 Full documentation: https://docs.astro.build

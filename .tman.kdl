@@ -19,3 +19,12 @@ alias "build" {
     args "build" "tests/Tman.Tests/Tman.Tests.csproj"
     max-time "15m"
 }
+
+// Compiles the Astro site so a change under site/ is caught before it lands; `npm test`
+// there only runs vitest and never compiles a page. Needs `npm ci --prefix site` once in
+// a fresh worktree (site/node_modules is gitignored).
+alias "site" {
+    command "npm"
+    args "--prefix" "site" "run" "build"
+    max-time "10m"
+}
