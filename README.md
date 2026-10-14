@@ -345,7 +345,10 @@ queue is the only limit they all share. A machine that declares no `default` que
 - **Arrival order, with gaps filled.** A run saves itself as `queued` in the queue's line before its
   first claim, and claims a place only while nobody who joined earlier is still waiting. A small run
   may start ahead of a larger waiting one when its cost fits the gap; a run waiting past a bound is
-  admitted next whatever its size, so nothing starves. `tman list` shows each waiter's place as
+  admitted next whatever its size, so nothing starves — unless it cannot fit beside the admitted
+  `tman hold` bookings. A hold ends when its owner's work ends, and that work may be waiting in the
+  same queue, so such a run lets smaller runs keep filling the gaps and reserves the budget only once
+  the holds leave it room. `tman list` shows each waiter's place as
   `queued #1`, `queued #2`, and `tman status` shows it as `queue: compile (position 2)`. A waiter
   whose tman died holds no place.
 - **Bucket first, then queue.** A run held up in its own project's bucket does not sit on a queue

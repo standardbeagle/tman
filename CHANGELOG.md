@@ -8,6 +8,14 @@ below 1.0, behavior changes land in minor releases.
 
 ## [Unreleased]
 
+### Fixed
+- **A run too large to fit beside a hold no longer blocks the queue.** A run waiting past the
+  starvation bound stopped every later arrival, even when the admitted `tman hold` bookings left it
+  no room: a hold ends with its owner's work, which may be waiting in the same queue, so the host
+  idled until an owner gave up (an 8-core suite beside two agent holds blocked every run for 37
+  minutes). Such a run now lets smaller runs fill the gaps, and reserves the budget once the holds
+  leave it room.
+
 ## [0.7.0] - 2026-10-13
 
 ### Changed
