@@ -237,6 +237,32 @@ public class AdmissionBudgetTests : IDisposable
         finally { Admission.MeasureHost = prev; }
     }
 
+    [UnixFact("writes records this process's runner owns")]
+    public async Task AHold_IsAdmittedWhileAnExclusiveRunHoldsTheQueue_AheadOfWaitingFiniteRuns()
+    {
+        _home.WriteFile("tman.kdl", "queue \"q\" {\n    cores 4\n    mem 4g\n}\n");
+        var q = Config.Queue("q") with { Timeout = TimeSpan.FromMilliseconds(700) };
+        var prev = Admission.MeasureHost;
+        try
+        {
+            Admission.MeasureHost = () => new Host.Usage(0, 0);
+            var audit = Runner.NewRecord("audit", [], new Caps(), "audit", null, "audit@/a", "/tmp");
+            Assert.True(await Admission.ClaimAdmission(audit, q, new Admission.AdmissionCost(1, 512), exclusive: true, null, null, default));
+
+            // a finite run waiting on the exclusive one cannot start, so it keeps no place ahead of a hold
+            Wait("finitewait01", (1, 512), joinedAgo: TimeSpan.FromSeconds(1));
+            var hold = Runner.NewRecord("hold", [], new Caps(), "hold", null, "hold@/h", "/tmp");
+            hold.Hold = true;
+            Assert.True(await Admission.ClaimAdmission(hold, q, new Admission.AdmissionCost(1, 512), false, null, null, default),
+                "a hold waited on an exclusive run");
+
+            var finite = Runner.NewRecord("test", [], new Caps(), "test", null, "test@/b", "/tmp");
+            Assert.False(await Admission.ClaimAdmission(finite, q, new Admission.AdmissionCost(1, 512), false, null, null, default),
+                "a finite run started while an exclusive run held the queue");
+        }
+        finally { Admission.MeasureHost = prev; }
+    }
+
     void Occupy(string id, double cores, long memMb, string queue = "q", bool hold = false)
     {
         var me = ProcUtil.OwnStart();

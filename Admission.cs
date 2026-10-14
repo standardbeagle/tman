@@ -174,8 +174,8 @@ public static class Admission
     /// retries until the expected cost fits beside what is admitted, or the run is killed,
     /// interrupted, or out of the queue's timeout — which end it as killed and return null. An
     /// exclusive run waits for admitted finite runs to finish — not for holds or outside load — and
-    /// then holds new admissions until it exits; a non-exclusive run never starts while an exclusive
-    /// one is admitted. Arrival order is kept,
+    /// then holds finite admissions until it exits; a finite run never starts while an exclusive one
+    /// is admitted, and a hold still does. Arrival order is kept,
     /// but a small run may start ahead of a larger waiting one when it fits, and a run waiting past
     /// the starvation bound is admitted next whatever its size: it starts once no finite run is
     /// admitted, even beside holds and outside load.
@@ -321,8 +321,10 @@ public static class Admission
         }
         else
         {
-            // a run may not start while an exclusive one is admitted, whatever its cost
-            if (ExclusiveHeld(queue.Name, all)) return AdmitOutcome.NoRoom;
+            // a finite run may not start while an exclusive one is admitted, whatever its cost; a
+            // hold may, since the work it books runs as finite tman runs, which wait
+            var exclusiveHeld = ExclusiveHeld(queue.Name, all);
+            if (exclusiveHeld && !record.Hold) return AdmitOutcome.NoRoom;
 
             // arrival order, unless a small run can slip into a gap a larger earlier waiter cannot
             // take: the earlier waiter's own cost is what the gap is judged against, so an equal or
@@ -331,6 +333,9 @@ public static class Admission
             if (position is > 1)
             {
                 var earlier = EarlierWaiters(record, all);
+                // while an exclusive run holds the queue only a hold can start, so a finite waiter
+                // keeps no place ahead of one
+                if (exclusiveHeld) earlier = earlier.Where(o => o.Hold).ToList();
                 if (earlier.Count > 0)
                 {
                     // a starving waiter reserves the budget: it starts once the finite runs
