@@ -19,10 +19,9 @@ public static class Admission
 
     /// <summary>
     /// How long a run may wait before it is admitted next regardless of smaller arrivals: without
-    /// this, a stream of small runs that always fit would starve one large one forever. The bound
-    /// reserves the budget only while the run would fit beside the admitted holds: holds end when
-    /// their owner's work ends, not when the queue stops admitting, so no reservation can admit a
-    /// run too large to sit beside them. Settable so
+    /// this, a stream of small runs that always fit would starve one large one forever. A run past
+    /// the bound reserves the budget and starts once no finite run is admitted, whatever holds and
+    /// load outside the queue remain, since neither ends because the queue waits. Settable so
     /// a test can prove the bound without waiting minutes; production never changes it.
     /// </summary>
     internal static TimeSpan StarvationBound = TimeSpan.FromMinutes(5);
@@ -167,8 +166,8 @@ public static class Admission
     /// exclusive run waits for admitted work to finish and then holds new admissions until it exits;
     /// a non-exclusive run never starts while an exclusive one is admitted. Arrival order is kept,
     /// but a small run may start ahead of a larger waiting one when it fits, and a run waiting past
-    /// the starvation bound is admitted next whatever its size — unless it cannot fit beside the
-    /// admitted holds, which no amount of waiting frees.
+    /// the starvation bound is admitted next whatever its size: it starts once no finite run is
+    /// admitted, even beside holds and outside load.
     /// </summary>
     public static async Task<bool> ClaimAdmission(
         RunRecord record, NamedQueue queue, AdmissionCost cost, bool exclusive,
@@ -319,15 +318,9 @@ public static class Admission
                 var earlier = EarlierWaiters(record, all);
                 if (earlier.Count > 0)
                 {
-                    // a starving waiter reserves the budget only when the admitted runs ending
-                    // can admit it: one that does not fit beside the holds alone would reserve
-                    // until a hold's owner gave up, and that owner's work may be this arrival
-                    var holds = admitted.Where(r => r.Hold)
-                        .Select(r => new AdmissionCost(r.AdmittedCores ?? 0, r.AdmittedMemMb ?? 0)).ToList();
-                    var reserving = earlier.Any(o =>
-                        o.QueuedUtc is { } at && DateTime.UtcNow - at >= StarvationBound
-                        && Fits(new AdmissionCost(o.AdmittedCores ?? 0, o.AdmittedMemMb ?? 0), holds, queue));
-                    if (reserving) return AdmitOutcome.NoRoom;
+                    // a starving waiter reserves the budget: it starts once the finite runs
+                    // drain, whatever holds and outside load remain (see below)
+                    if (earlier.Any(Starving)) return AdmitOutcome.NoRoom;
                     var first = earlier.OrderBy(o => o.QueuedUtc).ThenBy(o => o.Id, StringComparer.Ordinal).First();
                     var firstCost = new AdmissionCost(first.AdmittedCores ?? 0, first.AdmittedMemMb ?? 0);
                     if (Fits(firstCost, costs, queue) || !Fits(cost, costs, queue)) return AdmitOutcome.NoRoom;
@@ -335,7 +328,12 @@ public static class Admission
             }
         }
 
-        if (!Fits(cost, costs, queue)) return AdmitOutcome.NoRoom;
+        // a starving run starts once no finite run is admitted: holds end with their owners' work
+        // (which may be queued behind it) and outside load ends on its own clock, so waiting for
+        // either to make room would hold it, and everyone behind it, forever. The lone-run rule in
+        // Fits is the same guarantee for an empty queue.
+        var onlyUndrainable = admitted.All(r => r.Hold);
+        if (!(Starving(record) && onlyUndrainable) && !Fits(cost, costs, queue)) return AdmitOutcome.NoRoom;
 
         record.State = RunState.Queued;
         record.AdmittedUtc = DateTime.UtcNow;
@@ -368,6 +366,10 @@ public static class Admission
             Thread.Sleep(2);
         }
     }
+
+    /// <summary>True when <paramref name="run"/> has waited in line past <see cref="StarvationBound"/>.</summary>
+    static bool Starving(RunRecord run) =>
+        run.QueuedUtc is { } at && DateTime.UtcNow - at >= StarvationBound;
 
     static List<RunRecord> EarlierWaiters(RunRecord run, IEnumerable<RunRecord> all)
     {
