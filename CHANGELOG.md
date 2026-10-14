@@ -8,6 +8,8 @@ below 1.0, behavior changes land in minor releases.
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-10-14
+
 ### Fixed
 - **A run too large to fit beside a hold no longer blocks the queue.** A run waiting past the
   starvation bound stopped every later arrival, even when the admitted `tman hold` bookings left it
@@ -545,7 +547,8 @@ reaping; dedup locks; parallel gating; `.tman.kdl` folder aliases with repo-root
 binaries for linux-x64, linux-arm64, win-x64, osx-arm64, and osx-x64, distributed via npm, PyPI,
 PSGallery, and a shell installer.
 
-[Unreleased]: https://github.com/standardbeagle/tman/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/standardbeagle/tman/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/standardbeagle/tman/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/standardbeagle/tman/compare/v0.6.2...v0.7.0
 [0.6.2]: https://github.com/standardbeagle/tman/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/standardbeagle/tman/compare/v0.5.1...v0.6.1
