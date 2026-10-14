@@ -8,6 +8,13 @@ below 1.0, behavior changes land in minor releases.
 
 ## [Unreleased]
 
+### Fixed
+- **An exclusive run no longer waits on `tman hold` bookings.** It starts once no ordinary run is
+  admitted, whatever holds and load outside the queue remain — the rule 0.7.3 gave a starving
+  waiter. While it holds the queue ordinary runs still wait, and holds are admitted, since a
+  hold's own work runs as ordinary runs. A hold lasts about an hour, so with three agent slots an
+  `exclusive true` perf audit waited until its queue-timeout.
+
 ## [0.7.4] - 2026-10-14
 
 ### Fixed
