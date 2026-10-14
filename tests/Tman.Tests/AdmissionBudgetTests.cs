@@ -189,13 +189,13 @@ public class AdmissionBudgetTests : IDisposable
             "a normal run started while an exclusive run held the queue");
     }
 
-    void Occupy(string id, double cores, long memMb, string queue = "q")
+    void Occupy(string id, double cores, long memMb, string queue = "q", bool hold = false)
     {
         var me = ProcUtil.OwnStart();
         Store.Save(new RunRecord
         {
             Id = id, Command = "/bin/sh", Args = [], Group = "hold@" + _home.Path, State = RunState.Running,
-            Queue = queue, AdmittedUtc = DateTime.UtcNow, AdmittedCores = cores, AdmittedMemMb = memMb,
+            Hold = hold, Queue = queue, AdmittedUtc = DateTime.UtcNow, AdmittedCores = cores, AdmittedMemMb = memMb,
             QueuedUtc = DateTime.UtcNow, StartedUtc = DateTime.UtcNow, HeartbeatUtc = DateTime.UtcNow,
             Cwd = "/tmp", Pid = Environment.ProcessId, ChildStartUtc = me.Utc, ChildStartTicks = me.Ticks,
             RunnerPid = Environment.ProcessId, RunnerStartUtc = me.Utc, RunnerStartTicks = me.Ticks,
@@ -714,6 +714,38 @@ public class AdmissionBudgetTests : IDisposable
             // once the earlier waiter can be admitted, it is
             Clear("occupy000001");
             Assert.True(await Admission.ClaimAdmission(large, q, new Admission.AdmissionCost(4, 4 * 1024), false, null, null, default));
+            Assert.NotNull(large.AdmittedUtc);
+        }
+        finally { Admission.StarvationBound = prev; }
+    }
+
+    [UnixFact("writes records this process's runner owns")]
+    public async Task AStarvingRunThatCannotFitBesideAHold_DoesNotBlockSmallerArrivals()
+    {
+        _home.WriteFile("tman.kdl", "queue \"q\" {\n    cores 8\n    mem 8g\n}\n");
+        var prev = Admission.StarvationBound;
+        Admission.StarvationBound = TimeSpan.FromMilliseconds(100);
+        try
+        {
+            var q = Config.Queue("q") with { Timeout = TimeSpan.FromMilliseconds(700) };
+            // a hold books work tman did not start (an agent turn), whose own tests may be the
+            // arrivals below: reserving the budget for the head cannot make the hold end, so a
+            // reservation here would only idle the host until the hold's owner gave up
+            Occupy("agenthold001", cores: 1, memMb: 512, hold: true);
+            var large = Wait("largewaiting1", cost: (8, 8 * 1024), joinedAgo: TimeSpan.FromSeconds(1));
+
+            var small = Runner.NewRecord("go", ["test"], new Caps(), "small", null, "small@/s", "/tmp");
+            Assert.True(await Admission.ClaimAdmission(small, q, new Admission.AdmissionCost(1, 512), false, null, null, default),
+                "a run that fits was held behind a head no admitted run's end can admit");
+
+            // once the hold ends the head can be admitted when finite work drains, so it reserves
+            // the budget again: a later arrival waits, and the head is admitted when the small run ends
+            Clear("agenthold001");
+            var later = Runner.NewRecord("go", ["test"], new Caps(), "later", null, "later@/s", "/tmp");
+            Assert.False(await Admission.ClaimAdmission(later, q, new Admission.AdmissionCost(1, 512), false, null, null, default),
+                "a later arrival was admitted ahead of a starving head that finite work can admit");
+            Clear(small.Id);
+            Assert.True(await Admission.ClaimAdmission(large, q, new Admission.AdmissionCost(8, 8 * 1024), false, null, null, default));
             Assert.NotNull(large.AdmittedUtc);
         }
         finally { Admission.StarvationBound = prev; }

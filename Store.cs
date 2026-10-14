@@ -94,6 +94,12 @@ public sealed class RunRecord
     /// <summary>True when this run may never run beside another admitted run (a perf audit).</summary>
     public bool Exclusive { get; set; }
 
+    /// <summary>
+    /// True when the admission was booked by `tman hold` for work tman did not start. Its end is
+    /// not the queue's to wait for: the held work may itself be waiting in this queue.
+    /// </summary>
+    public bool Hold { get; set; }
+
     /// <summary>How long the run waited in its queue before admission; null when it never queued.</summary>
     public double? QueuedSeconds { get; set; }
 
