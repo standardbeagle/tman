@@ -8,6 +8,8 @@ below 1.0, behavior changes land in minor releases.
 
 ## [Unreleased]
 
+## [0.7.4] - 2026-10-14
+
 ### Fixed
 - **The queue books cores at what a run averages, not what it peaks at.** A test run that spikes
   to 3.7 cores for a few seconds but uses 47 CPU-seconds over 78 s of wall averages 0.6, yet was
@@ -572,7 +574,8 @@ reaping; dedup locks; parallel gating; `.tman.kdl` folder aliases with repo-root
 binaries for linux-x64, linux-arm64, win-x64, osx-arm64, and osx-x64, distributed via npm, PyPI,
 PSGallery, and a shell installer.
 
-[Unreleased]: https://github.com/standardbeagle/tman/compare/v0.7.3...HEAD
+[Unreleased]: https://github.com/standardbeagle/tman/compare/v0.7.4...HEAD
+[0.7.4]: https://github.com/standardbeagle/tman/compare/v0.7.3...v0.7.4
 [0.7.3]: https://github.com/standardbeagle/tman/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/standardbeagle/tman/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/standardbeagle/tman/compare/v0.7.0...v0.7.1
