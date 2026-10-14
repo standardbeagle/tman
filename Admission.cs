@@ -86,8 +86,11 @@ public static class Admission
     /// <item>the alias's declared `cores`/`mem`, or the project's in `defaults`;</item>
     /// <item>the queue's own defaults.</item>
     /// </list>
-    /// The high percentile, not the mean, because admission is a ceiling: a run that once took 5 GB
-    /// must be sized at 5 GB, and one good sample must not halve a suite's claim.
+    /// Memory books the peak: overrunning it kills a run, so a run that once took 5 GB is sized at
+    /// 5 GB. Cores book the p90 of each run's mean (CPU-seconds over the child's wall time), because
+    /// overrunning CPU only slows a run, and a build that fans out for a few seconds averages far
+    /// less than it peaks; the queue's unattributed-load accounting corrects real oversubscription.
+    /// A run with no CPU-seconds or no measurable wall time stands in with its peak cores.
     /// </summary>
     public static AdmissionCost ExpectedCost(RunRecord record, NamedQueue queue, double? aliasCores, long? aliasMemMb)
     {
@@ -96,11 +99,18 @@ public static class Admission
             .OrderByDescending(r => r.StartedUtc)
             .Take(HistoryDepth)
             .ToList();
-        var cores = Percentile(history.Select(r => r.PeakCores).Where(v => v > 0).ToList());
+        var cores = Percentile(history.Select(BookedCores).Where(v => v > 0).ToList());
         var memMb = Percentile(history.Select(r => (double)r.PeakMemMb).Where(v => v > 0).ToList());
         return new AdmissionCost(
             cores > 0 ? cores : aliasCores ?? queue.DefaultCores,
             memMb > 0 ? (long)Math.Ceiling(memMb) : aliasMemMb ?? queue.DefaultMemMb);
+    }
+
+    /// <summary>A finished run's mean cores; its peak when it has no CPU-seconds or no wall time to divide by.</summary>
+    static double BookedCores(RunRecord r)
+    {
+        var wallSeconds = r.ChildStartUtc is { } start ? (r.HeartbeatUtc - start).TotalSeconds : 0;
+        return r.CpuSeconds > 0 && wallSeconds > 0 ? r.CpuSeconds / wallSeconds : r.PeakCores;
     }
 
     /// <summary>
