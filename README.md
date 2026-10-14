@@ -81,7 +81,7 @@ tman init --shims --gitignore
 | `tman list [--all]` | list live runs — running, and queued for a slot (pid `-`) — or all records; PROJECT is the run's project root, the scope `kill all` works within |
 | `tman kill <id\|name\|all>` | kill run(s), queued ones included. `all` means *your* runs: the same project root (nearest `.tman.kdl` above the cwd, else the cwd) and, when both sides have one, the same agent session (`CLAUDE_CODE_SESSION_ID`); other projects' and sessions' runs are left alone and counted, so one agent cannot stop its siblings' runs. A run named by id or name is killed wherever it is, with its owner printed when that is outside your scope. `kill all --everywhere` lifts the scope but needs a controlling terminal (`/dev/tty`); without one it refuses with exit 77 and names the command a person runs — a queued run ends without ever starting its child; the killed run ends `killed: killed via tman kill` and its `tman` exits 130. `kill` leaves the reason in `~/.tman/runs/<id>.kill` before killing, and the run's own runner writes the outcome from it, so the two never race to save the record. An unknown flag refuses the command with exit 127 rather than being skipped; exits 1 when part of a run's tree could not be killed |
 | `tman clean` | run the housekeeping sweep now and report what it did |
-| `tman status [id\|name\|id-prefix] [--json]` | summary counts, or one run's detail |
+| `tman status [id\|name\|id-prefix] [--json]` | summary counts and the host's unattributed load, or one run's detail |
 | `tman init [--shims] [--gitignore]` | scaffold `.tman.kdl` + shims (aliases it cannot detect are left commented out, so `./test` fails loudly instead of faking a pass); shims are named after the aliases in the config on disk, so re-running it in a project that already has one shims that file's aliases; `--gitignore` ignores `.tman/` and the shims, and skips an alias whose name is already a directory, so `/test` never hides a `test/` tree |
 | `tman hold --cores N --mem M [--pid <pid>] [--queue <name>]` | book the cost of work another program started into a machine queue, for as long as it lives, so a client such as an agent runner reserves admission without tman knowing what the work is. Without `--pid`, the hold lasts until it is killed (Ctrl+C). The queue defaults to the machine's `default` |
 | `tman probe --pid <pid> [--start-ticks <ticks>]` | is a pid you recorded earlier still that process? Exit 0 mine, 1 gone, 3 not mine (the OS reused the pid); the verdict is also printed. `--start-ticks` is Linux only, read from field 22 of `/proc/<pid>/stat` when you record the pid; without it a live pid counts as yours. Read-only: it never signals or kills, and does not run the housekeeping sweep |
@@ -351,6 +351,16 @@ queue is the only limit they all share. A machine that declares no `default` que
   the holds leave it room. `tman list` shows each waiter's place as
   `queued #1`, `queued #2`, and `tman status` shows it as `queue: compile (position 2)`. A waiter
   whose tman died holds no place.
+- **Load outside the queue counts.** Booked costs miss work that left a run's tree (a `dotnet` build
+  server reparented to init) and work tman never started (an agent CLI, a headless browser), so
+  beside admitted work the queue also books the host's **unattributed load**: busy cores from
+  `/proc/stat` less each admitted run's measured tree cores (its booked cores until it has a
+  sample), and `MemTotal − MemAvailable` less the admitted runs' booked memory. The host is read
+  only when an admission is attempted — the window is the span since the last reading any tman on
+  the machine took, averaged with that reading, and a 250 ms window is measured on the spot when
+  none is under 30 s old. With nothing admitted the head still starts, whatever the host is doing.
+  `tman status` prints it as `unattributed: 4.2 cores, 3.1GB`. Only Linux is measured today; on
+  macOS and Windows it reads `not measured on this platform` and counts as none.
 - **Bucket first, then queue.** A run held up in its own project's bucket does not sit on a queue
   admission other projects are waiting for.
 - **Waiting is on an admission event.** A waiter watches one file per queue — the queue's admission

@@ -8,6 +8,14 @@ below 1.0, behavior changes land in minor releases.
 
 ## [Unreleased]
 
+### Fixed
+- **The machine queue counts load it did not admit.** Admission summed only the booked cost of
+  admitted runs, so work outside every run's tree — build servers reparented to init, agent CLIs,
+  headless browsers — never counted, and the queue kept admitting onto a full host (8 cores, ~5.9
+  booked, load average 26-37). Beside admitted work the queue now also books the host's measured
+  use less what its admitted runs account for, and `tman status` shows it as `unattributed`. With
+  nothing admitted the head still starts. Linux only; macOS and Windows report it as not measured.
+
 ## [0.7.1] - 2026-10-14
 
 ### Fixed
