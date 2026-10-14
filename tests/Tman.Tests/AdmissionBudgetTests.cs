@@ -136,6 +136,28 @@ public class AdmissionBudgetTests : IDisposable
     }
 
     [Fact]
+    public void ExpectedCost_BooksCoresAtTheMeanOfEachRun_MemoryAtThePeak()
+    {
+        _home.WriteFile("tman.kdl", "queue \"q\" {\n    cores 8\n    mem 64g\n}\n");
+        var q = Config.Queue("q");
+        // runs that spiked to 4 cores for a moment but used 47 CPU-seconds over 78 s of wall (0.6 cores)
+        for (var i = 0; i < 5; i++)
+        {
+            var r = Finished("spiky" + i, "test@/m", cores: 4, memMb: 3 * 1024);
+            r.ChildStartUtc = r.StartedUtc;
+            r.HeartbeatUtc = r.StartedUtc.AddSeconds(78);
+            r.CpuSeconds = 47;
+            Store.Save(r);
+        }
+
+        var cost = Admission.ExpectedCost(
+            Runner.NewRecord("go", ["test"], new Caps(), "test", null, "test@/m", "/m"), q, null, null);
+
+        Assert.InRange(cost.Cores, 0.55, 0.65);
+        Assert.Equal(3 * 1024, cost.MemMb);
+    }
+
+    [Fact]
     public void ExpectedCost_FallsBackToTheAliasThenTheQueue_WithNoHistory()
     {
         _home.WriteFile("tman.kdl", "queue \"q\" {\n    cores 8\n    mem 64g\n    cores-default 2\n    mem-default 3g\n}\n");
