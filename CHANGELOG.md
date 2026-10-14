@@ -8,6 +8,12 @@ below 1.0, behavior changes land in minor releases.
 
 ## [Unreleased]
 
+### Fixed
+- **The queue books cores at what a run averages, not what it peaks at.** A test run that spikes
+  to 3.7 cores for a few seconds but uses 47 CPU-seconds over 78 s of wall averages 0.6, yet was
+  booked at 3.7, so runs queued for tens of minutes beside a mostly idle host. Cores are now the
+  p90 of each past run's mean cores; memory still books the peak, since overrunning it kills a run.
+
 ## [0.7.3] - 2026-10-14
 
 ### Fixed
