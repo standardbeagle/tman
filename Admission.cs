@@ -19,7 +19,10 @@ public static class Admission
 
     /// <summary>
     /// How long a run may wait before it is admitted next regardless of smaller arrivals: without
-    /// this, a stream of small runs that always fit would starve one large one forever. Settable so
+    /// this, a stream of small runs that always fit would starve one large one forever. The bound
+    /// reserves the budget only while the run would fit beside the admitted holds: holds end when
+    /// their owner's work ends, not when the queue stops admitting, so no reservation can admit a
+    /// run too large to sit beside them. Settable so
     /// a test can prove the bound without waiting minutes; production never changes it.
     /// </summary>
     internal static TimeSpan StarvationBound = TimeSpan.FromMinutes(5);
@@ -138,7 +141,8 @@ public static class Admission
     /// exclusive run waits for admitted work to finish and then holds new admissions until it exits;
     /// a non-exclusive run never starts while an exclusive one is admitted. Arrival order is kept,
     /// but a small run may start ahead of a larger waiting one when it fits, and a run waiting past
-    /// the starvation bound is admitted next whatever its size.
+    /// the starvation bound is admitted next whatever its size — unless it cannot fit beside the
+    /// admitted holds, which no amount of waiting frees.
     /// </summary>
     public static async Task<bool> ClaimAdmission(
         RunRecord record, NamedQueue queue, AdmissionCost cost, bool exclusive,
@@ -285,8 +289,15 @@ public static class Admission
                 var earlier = EarlierWaiters(record, all);
                 if (earlier.Count > 0)
                 {
-                    var starving = earlier.Any(o => o.QueuedUtc is { } at && DateTime.UtcNow - at >= StarvationBound);
-                    if (starving) return AdmitOutcome.NoRoom;
+                    // a starving waiter reserves the budget only when the admitted runs ending
+                    // can admit it: one that does not fit beside the holds alone would reserve
+                    // until a hold's owner gave up, and that owner's work may be this arrival
+                    var holds = admitted.Where(r => r.Hold)
+                        .Select(r => new AdmissionCost(r.AdmittedCores ?? 0, r.AdmittedMemMb ?? 0)).ToList();
+                    var reserving = earlier.Any(o =>
+                        o.QueuedUtc is { } at && DateTime.UtcNow - at >= StarvationBound
+                        && Fits(new AdmissionCost(o.AdmittedCores ?? 0, o.AdmittedMemMb ?? 0), holds, queue));
+                    if (reserving) return AdmitOutcome.NoRoom;
                     var first = earlier.OrderBy(o => o.QueuedUtc).ThenBy(o => o.Id, StringComparer.Ordinal).First();
                     var firstCost = new AdmissionCost(first.AdmittedCores ?? 0, first.AdmittedMemMb ?? 0);
                     if (Fits(firstCost, costs, queue) || !Fits(cost, costs, queue)) return AdmitOutcome.NoRoom;

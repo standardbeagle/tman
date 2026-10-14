@@ -421,6 +421,7 @@ public static partial class Program
             Group = RunKey.For("hold", "hold", RunKey.ScopeDir(Config.Load())),
             Caps = new Caps(),
             State = RunState.Queued,
+            Hold = true,
         };
 
         using var interrupt = new CancellationTokenSource();

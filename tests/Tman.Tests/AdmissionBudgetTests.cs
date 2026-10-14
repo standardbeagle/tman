@@ -233,6 +233,7 @@ public class AdmissionBudgetTests : IDisposable
             Assert.Equal(1, rec.AdmittedCores);
             Assert.Equal(1024, rec.AdmittedMemMb);
             Assert.Equal("hold", rec.Command);
+            Assert.True(rec.Hold, "a hold's booking must say so, or a starving run reserves against it");
         }
         finally
         {
