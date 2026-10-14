@@ -721,35 +721,41 @@ public class AdmissionBudgetTests : IDisposable
     }
 
     [UnixFact("writes records this process's runner owns")]
-    public async Task AStarvingRunThatCannotFitBesideAHold_DoesNotBlockSmallerArrivals()
+    public async Task AStarvingRun_StartsOnceOnlyHoldsAndOutsideLoadRemain()
     {
         _home.WriteFile("tman.kdl", "queue \"q\" {\n    cores 8\n    mem 8g\n}\n");
-        var prev = Admission.StarvationBound;
+        var prevBound = Admission.StarvationBound;
+        var prevHost = Admission.MeasureHost;
         Admission.StarvationBound = TimeSpan.FromMilliseconds(100);
         try
         {
             var q = Config.Queue("q") with { Timeout = TimeSpan.FromMilliseconds(700) };
-            // a hold books work tman did not start (an agent turn), whose own tests may be the
-            // arrivals below: reserving the budget for the head cannot make the hold end, so a
-            // reservation here would only idle the host until the hold's owner gave up
+            // neither a hold (an agent turn, whose own tests may be queued here) nor load outside
+            // the queue (detached build servers) ends because the queue waits, so a starving head
+            // that waited for them to make room would never start and would block everyone
+            // behind it: build1 2026-10-14, a 7.5-core suite beside one hold and ~4 cores of
+            // outside load held five runs for 25 minutes
+            Admission.MeasureHost = () => new Host.Usage(6, 1024);
             Occupy("agenthold001", cores: 1, memMb: 512, hold: true);
+            Occupy("finiterun001", cores: 1, memMb: 512);
             var large = Wait("largewaiting1", cost: (8, 8 * 1024), joinedAgo: TimeSpan.FromSeconds(1));
 
+            // while a finite run is admitted the head reserves the queue: it will end, and then the head goes
             var small = Runner.NewRecord("go", ["test"], new Caps(), "small", null, "small@/s", "/tmp");
-            Assert.True(await Admission.ClaimAdmission(small, q, new Admission.AdmissionCost(1, 512), false, null, null, default),
-                "a run that fits was held behind a head no admitted run's end can admit");
+            Assert.False(await Admission.ClaimAdmission(small, q, new Admission.AdmissionCost(1, 512), false, null, null, default),
+                "a smaller arrival was admitted ahead of a starving head");
 
-            // once the hold ends the head can be admitted when finite work drains, so it reserves
-            // the budget again: a later arrival waits, and the head is admitted when the small run ends
-            Clear("agenthold001");
-            var later = Runner.NewRecord("go", ["test"], new Caps(), "later", null, "later@/s", "/tmp");
-            Assert.False(await Admission.ClaimAdmission(later, q, new Admission.AdmissionCost(1, 512), false, null, null, default),
-                "a later arrival was admitted ahead of a starving head that finite work can admit");
-            Clear(small.Id);
-            Assert.True(await Admission.ClaimAdmission(large, q, new Admission.AdmissionCost(8, 8 * 1024), false, null, null, default));
+            // once only the hold and outside load remain, the head starts though it does not fit
+            Clear("finiterun001");
+            Assert.True(await Admission.ClaimAdmission(large, q, new Admission.AdmissionCost(8, 8 * 1024), false, null, null, default),
+                "a starving head waited on a hold and outside load, which the queue cannot drain");
             Assert.NotNull(large.AdmittedUtc);
         }
-        finally { Admission.StarvationBound = prev; }
+        finally
+        {
+            Admission.StarvationBound = prevBound;
+            Admission.MeasureHost = prevHost;
+        }
     }
 
     // ---- load no admitted run accounts for counts against the budget ----
