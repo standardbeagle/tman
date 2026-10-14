@@ -119,7 +119,8 @@ public static class Help
             ["tman status [<id|name|id-prefix>] [--json]"],
             "summary or run detail",
             """
-            With no run named: how many runs are live, and how many records are in each state.
+            With no run named: how many runs are live, how many records are in each state, and
+            the host load no admitted run accounts for (unattributed).
             With a run named: the live run, or else the most recent record, that matches it.
 
               --json              the run's record as JSON

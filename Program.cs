@@ -581,6 +581,10 @@ public static partial class Program
         {
             var counts = Store.LoadAll().GroupBy(r => r.State).ToDictionary(g => g.Key, g => g.Count());
             Console.WriteLine($"live: {live.Count}");
+            var admitted = live.Where(r => r.AdmittedUtc is not null);
+            Console.WriteLine(Admission.UnattributedLoad(admitted) is { } outside
+                ? $"unattributed: {outside.Cores:0.#} cores, {Canon.Mem(outside.MemMb)} (host load no admitted run accounts for)"
+                : "unattributed: not measured on this platform");
             foreach (var (state, count) in counts.OrderBy(kv => kv.Key.ToString()))
                 Console.WriteLine($"{StateLabel(state)}: {count}");
             return 0;
