@@ -211,6 +211,32 @@ public class AdmissionBudgetTests : IDisposable
             "a normal run started while an exclusive run held the queue");
     }
 
+    [UnixFact("writes records this process's runner owns")]
+    public async Task AnExclusiveRun_StartsBesideAdmittedHolds_ButWaitsForAFiniteRun()
+    {
+        _home.WriteFile("tman.kdl", "queue \"q\" {\n    cores 4\n    mem 4g\n}\n");
+        var q = Config.Queue("q") with { Timeout = TimeSpan.FromMilliseconds(700) };
+        var prev = Admission.MeasureHost;
+        try
+        {
+            // a hold is an agent turn booked for an hour; its real work runs as finite tman runs,
+            // which wait. Load outside the queue fills the host, and still does not refuse it.
+            Admission.MeasureHost = () => new Host.Usage(4, 4 * 1024);
+            Occupy("holdocc00001", cores: 1, memMb: 512, hold: true);
+            Occupy("finiteocc001", cores: 1, memMb: 512);
+            var cost = new Admission.AdmissionCost(1, 512);
+
+            var audit = Runner.NewRecord("audit", [], new Caps(), "audit", null, "audit@/a", "/tmp");
+            Assert.False(await Admission.ClaimAdmission(audit, q, cost, exclusive: true, null, null, default),
+                "an exclusive run started beside an admitted finite run");
+
+            Clear("finiteocc001");
+            Assert.True(await Admission.ClaimAdmission(audit, q, cost, exclusive: true, null, null, default),
+                "an exclusive run waited on a hold");
+        }
+        finally { Admission.MeasureHost = prev; }
+    }
+
     void Occupy(string id, double cores, long memMb, string queue = "q", bool hold = false)
     {
         var me = ProcUtil.OwnStart();

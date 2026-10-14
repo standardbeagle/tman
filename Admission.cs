@@ -173,8 +173,9 @@ public static class Admission
     /// Waits for admission to <paramref name="queue"/> by cost: saves the record as queued, then
     /// retries until the expected cost fits beside what is admitted, or the run is killed,
     /// interrupted, or out of the queue's timeout — which end it as killed and return null. An
-    /// exclusive run waits for admitted work to finish and then holds new admissions until it exits;
-    /// a non-exclusive run never starts while an exclusive one is admitted. Arrival order is kept,
+    /// exclusive run waits for admitted finite runs to finish — not for holds or outside load — and
+    /// then holds new admissions until it exits; a non-exclusive run never starts while an exclusive
+    /// one is admitted. Arrival order is kept,
     /// but a small run may start ahead of a larger waiting one when it fits, and a run waiting past
     /// the starvation bound is admitted next whatever its size: it starts once no finite run is
     /// admitted, even beside holds and outside load.
@@ -308,11 +309,15 @@ public static class Admission
         // queue forever
         if (costs.Count > 0 && UnattributedLoad(admitted) is { } outside) costs.Add(outside);
 
+        // holds end with their owners' work, which runs as finite tman runs queued behind whoever
+        // waits, and outside load ends on its own clock: waiting for either to make room would
+        // hold a run that reserves the queue, and everyone behind it, forever
+        var onlyUndrainable = admitted.All(r => r.Hold);
         if (exclusive)
         {
-            // an exclusive run starts alone: it waits for admitted work to finish, and no run
-            // starts while it holds the queue
-            if (costs.Count > 0) return AdmitOutcome.NoRoom;
+            // an exclusive run starts once no finite run is admitted, whatever holds and outside
+            // load remain, and no finite run starts while it holds the queue
+            if (!onlyUndrainable) return AdmitOutcome.NoRoom;
         }
         else
         {
@@ -338,12 +343,9 @@ public static class Admission
             }
         }
 
-        // a starving run starts once no finite run is admitted: holds end with their owners' work
-        // (which may be queued behind it) and outside load ends on its own clock, so waiting for
-        // either to make room would hold it, and everyone behind it, forever. The lone-run rule in
-        // Fits is the same guarantee for an empty queue.
-        var onlyUndrainable = admitted.All(r => r.Hold);
-        if (!(Starving(record) && onlyUndrainable) && !Fits(cost, costs, queue)) return AdmitOutcome.NoRoom;
+        // a starving or exclusive run starts once no finite run is admitted (see above); the
+        // lone-run rule in Fits is the same guarantee for an empty queue
+        if (!((exclusive || Starving(record)) && onlyUndrainable) && !Fits(cost, costs, queue)) return AdmitOutcome.NoRoom;
 
         record.State = RunState.Queued;
         record.AdmittedUtc = DateTime.UtcNow;
