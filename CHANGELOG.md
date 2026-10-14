@@ -8,6 +8,15 @@ below 1.0, behavior changes land in minor releases.
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-10-14
+
+### Fixed
+- **A run that waited past the starvation bound no longer waits forever on holds and outside
+  load.** It reserves the queue and starts as soon as no ordinary run is admitted, even when
+  `tman hold` bookings or load outside the queue leave it no room, since neither ends because
+  the queue waits. In 0.7.2 a 7.5-core suite beside one hold and about 4 cores of outside load
+  blocked five runs for 25 minutes.
+
 ## [0.7.2] - 2026-10-14
 
 ### Fixed
@@ -557,7 +566,8 @@ reaping; dedup locks; parallel gating; `.tman.kdl` folder aliases with repo-root
 binaries for linux-x64, linux-arm64, win-x64, osx-arm64, and osx-x64, distributed via npm, PyPI,
 PSGallery, and a shell installer.
 
-[Unreleased]: https://github.com/standardbeagle/tman/compare/v0.7.2...HEAD
+[Unreleased]: https://github.com/standardbeagle/tman/compare/v0.7.3...HEAD
+[0.7.3]: https://github.com/standardbeagle/tman/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/standardbeagle/tman/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/standardbeagle/tman/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/standardbeagle/tman/compare/v0.6.2...v0.7.0
