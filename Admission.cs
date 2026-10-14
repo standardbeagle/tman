@@ -27,6 +27,12 @@ public static class Admission
     /// </summary>
     internal static TimeSpan StarvationBound = TimeSpan.FromMinutes(5);
 
+    /// <summary>
+    /// Reads what the whole host is using. Settable so a test can fake the host's load; production
+    /// never changes it.
+    /// </summary>
+    internal static Func<Host.Usage?> MeasureHost = () => null;
+
     /// <summary>Admission attempts made by this process, so a test can prove waiters do not spin.</summary>
     internal static long AttemptsForTest;
 

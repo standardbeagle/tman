@@ -7,6 +7,12 @@ namespace Tman;
 /// </summary>
 public static class Host
 {
+    /// <summary>CPU and memory in use on the whole host, by every process, tman's or not.</summary>
+    public readonly record struct Usage(double Cores, long MemMb);
+
+    /// <summary>What the host is using now; null where tman cannot measure it.</summary>
+    public static Usage? MeasureUsage() => null;
+
     /// <summary>
     /// CPUs the host offers. <see cref="Environment.ProcessorCount"/> is the affinity-narrowed count,
     /// which is the right denominator: a tman confined to four CPUs budgets four.

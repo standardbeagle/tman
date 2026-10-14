@@ -752,6 +752,57 @@ public class AdmissionBudgetTests : IDisposable
         finally { Admission.StarvationBound = prev; }
     }
 
+    // ---- load no admitted run accounts for counts against the budget ----
+
+    [UnixFact("writes records this process's runner owns")]
+    public async Task LoadOutsideTheAdmittedRuns_HoldsAQueuedRun_UntilItDrops()
+    {
+        _home.WriteFile("tman.kdl", "queue \"q\" {\n    cores 8\n    mem 8g\n}\n");
+        var q = Config.Queue("q") with { Timeout = TimeSpan.FromMilliseconds(700) };
+        var prev = Admission.MeasureHost;
+        try
+        {
+            // a 1-core admitted run, and 6 more cores busy that no run accounts for (a build server
+            // reparented to init): 1 + 6 + 2 does not fit in 8
+            Occupy("occupy000001", cores: 1, memMb: 512);
+            Admission.MeasureHost = () => new Host.Usage(7, 1024);
+            var held = Runner.NewRecord("go", ["test"], new Caps(), "held", null, "held@/h", "/tmp");
+            Assert.False(await Admission.ClaimAdmission(held, q, new Admission.AdmissionCost(2, 512), false, null, null, default),
+                "a run was admitted onto a host its admitted runs alone do not explain");
+
+            Admission.MeasureHost = () => new Host.Usage(2, 1024);
+            var later = Runner.NewRecord("go", ["test"], new Caps(), "later", null, "later@/l", "/tmp");
+            Assert.True(await Admission.ClaimAdmission(later, q, new Admission.AdmissionCost(2, 512), false, null, null, default));
+        }
+        finally { Admission.MeasureHost = prev; }
+    }
+
+    [UnixFact("writes records this process's runner owns")]
+    public async Task LoadOutsideTheQueue_NeverHoldsTheHead_WhenNothingIsAdmitted()
+    {
+        _home.WriteFile("tman.kdl", "queue \"q\" {\n    cores 8\n    mem 8g\n}\n");
+        var q = Config.Queue("q") with { Timeout = TimeSpan.FromMilliseconds(700) };
+        var prev = Admission.MeasureHost;
+        try
+        {
+            // outside load can stay high for hours; a queue it could hold with nothing admitted
+            // would make no progress at all, so the lone-run rule still admits the head
+            Admission.MeasureHost = () => new Host.Usage(8, 8 * 1024);
+            var head = Runner.NewRecord("go", ["test"], new Caps(), "head", null, "head@/h", "/tmp");
+            Assert.True(await Admission.ClaimAdmission(head, q, new Admission.AdmissionCost(2, 512), false, null, null, default));
+        }
+        finally { Admission.MeasureHost = prev; }
+    }
+
+    [LinuxFact("reads /proc/stat and /proc/meminfo")]
+    public void HostUsage_IsMeasuredOnLinux()
+    {
+        var usage = Host.MeasureUsage();
+        Assert.NotNull(usage);
+        Assert.InRange(usage.Value.Cores, 0, Environment.ProcessorCount + 0.5);
+        Assert.InRange(usage.Value.MemMb, 1, Host.MemMb);
+    }
+
     [UnixFact("writes records this process's runner owns")]
     public async Task ADeadRunnersAdmission_IsReleasedByTheOrphanSweep()
     {
