@@ -271,6 +271,7 @@ public static class Runner
                             cpuPct = (sample.CpuJiffies - prevSample.CpuJiffies)
                                 / (sinceSample * JiffiesPerSecond * Environment.ProcessorCount) * 100.0;
                         var cores = Math.Round(cpuPct * Environment.ProcessorCount / 100.0, 1);
+                        record.CurrentCores = cores;
                         if (cores > record.PeakCores) record.PeakCores = cores;
                     }
                     if (firstJiffies < 0) firstJiffies = sample.CpuJiffies;

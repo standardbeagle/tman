@@ -66,6 +66,8 @@ public sealed class RunRecord
     public double CpuSeconds { get; set; }
     /// <summary>Most cores the tree kept busy over one sample interval, to one decimal.</summary>
     public double PeakCores { get; set; }
+    /// <summary>Cores the tree kept busy over its latest sample interval; null before the first.</summary>
+    public double? CurrentCores { get; set; }
     /// <summary>The CPUs limit-cpus confined the run to; null when it set none. See <see cref="Confinement"/>.</summary>
     public int[]? Cpus { get; set; }
     public string? KillReason { get; set; }

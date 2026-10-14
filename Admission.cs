@@ -31,7 +31,7 @@ public static class Admission
     /// Reads what the whole host is using. Settable so a test can fake the host's load; production
     /// never changes it.
     /// </summary>
-    internal static Func<Host.Usage?> MeasureHost = () => null;
+    internal static Func<Host.Usage?> MeasureHost = Host.MeasureUsage;
 
     /// <summary>Admission attempts made by this process, so a test can prove waiters do not spin.</summary>
     internal static long AttemptsForTest;
@@ -130,6 +130,26 @@ public static class Admission
         // declared budget could never start; the budget is a bound on what runs *beside* it
         if (cores == 0 && memMb == 0) return true;
         return cores + cost.Cores <= queue.Cores && memMb + cost.MemMb <= queue.MemMb;
+    }
+
+    /// <summary>
+    /// The host's load that no run in <paramref name="admitted"/> accounts for: what the host is
+    /// using, less each run's measured tree cores (its booked cores until it has a sample) and its
+    /// booked memory, never below zero. Build servers reparented out of a run's tree, and work tman
+    /// never started, show up here; what they are is not tman's to know. Null when the host's use
+    /// cannot be measured.
+    /// </summary>
+    public static AdmissionCost? UnattributedLoad(IEnumerable<RunRecord> admitted)
+    {
+        if (MeasureHost() is not { } host) return null;
+        var cores = host.Cores;
+        var memMb = host.MemMb;
+        foreach (var r in admitted)
+        {
+            cores -= r.CurrentCores ?? r.AdmittedCores ?? 0;
+            memMb -= r.AdmittedMemMb ?? 0;
+        }
+        return new AdmissionCost(Math.Max(0, cores), Math.Max(0, memMb));
     }
 
     /// <summary>The live records holding an admission in <paramref name="queue"/>.</summary>
@@ -274,6 +294,10 @@ public static class Admission
         var all = Store.LoadAll();
         var admitted = AdmittedRuns(queue.Name, all);
         var costs = admitted.Select(r => new AdmissionCost(r.AdmittedCores ?? 0, r.AdmittedMemMb ?? 0)).ToList();
+        // load outside the admitted runs is booked beside them, but only beside them: with nothing
+        // admitted the head starts whatever the host is doing, or outside load could hold the
+        // queue forever
+        if (costs.Count > 0 && UnattributedLoad(admitted) is { } outside) costs.Add(outside);
 
         if (exclusive)
         {
