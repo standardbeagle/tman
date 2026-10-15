@@ -170,6 +170,32 @@ public class AdmissionBudgetTests : IDisposable
             Admission.ExpectedCost(record, q, null, null));
     }
 
+    [Fact]
+    public void ExpectedCost_NeverBooksBelowWhatTheAliasDeclares()
+    {
+        _home.WriteFile("tman.kdl", "queue \"q\" {\n    cores 8\n    mem 64g\n}\n");
+        var q = Config.Queue("q");
+        // build1 2026-10-15: a `dotnet build` hands its compile to reused MSBuild nodes and the shared
+        // VBCSCompiler, outside its tree, so its tree averages 0.3 cores while the host runs flat out;
+        // seven builds booked at that mean were admitted together and drove an 8-core host to load 97
+        for (var i = 0; i < 5; i++)
+        {
+            var r = Finished("build" + i, "build@/b", cores: 5, memMb: 600);
+            r.ChildStartUtc = r.StartedUtc;
+            r.HeartbeatUtc = r.StartedUtc.AddSeconds(100);
+            r.CpuSeconds = 30;
+            Store.Save(r);
+        }
+        var record = Runner.NewRecord("dotnet", ["build"], new Caps(), "build", null, "build@/b", "/b");
+
+        // the declared cost is what tman cannot see, so it is a floor under the measured history
+        Assert.Equal(new Admission.AdmissionCost(6, 3 * 1024),
+            Admission.ExpectedCost(record, q, aliasCores: 6, aliasMemMb: 3 * 1024));
+        // and only a floor: history that measures more than the declaration still books what it measured
+        Assert.Equal(new Admission.AdmissionCost(0.3, 600),
+            Admission.ExpectedCost(record, q, aliasCores: 0.1, aliasMemMb: 100));
+    }
+
     static RunRecord Finished(string id, string group, double cores, long memMb) => new()
     {
         Id = id, Command = "/bin/true", Args = [], Group = group, State = RunState.Exited,
