@@ -312,9 +312,9 @@ public static class Admission
         if (costs.Count > 0 && UnattributedLoad(admitted) is { } outside) costs.Add(outside);
 
         // holds end with their owners' work, which runs as finite tman runs queued behind whoever
-        // waits, and outside load ends on its own clock: waiting for either to make room would
-        // hold a run that reserves the queue, and everyone behind it, forever
-        var onlyUndrainable = admitted.All(r => r.Hold);
+        // waits, services never end, and outside load ends on its own clock: waiting for any of
+        // them to make room would hold a run that reserves the queue, and everyone behind it, forever
+        var onlyUndrainable = admitted.All(Undrainable);
         var starving = Starving(record);
         if (exclusive)
         {
@@ -368,7 +368,7 @@ public static class Admission
         Store.Save(record);
         // an admission changes the admitted set, which can free a gap or a turn for another waiter
         Store.TouchQueue(gate);
-        if (exclusive && admitted.Where(r => !r.Hold).ToList() is { Count: > 0 } beside)
+        if (exclusive && admitted.Where(r => !Undrainable(r)).ToList() is { Count: > 0 } beside)
             Console.Error.WriteLine(
                 $"tman: exclusive run waited past the starvation bound ({Canon.Duration(StarvationBound)}) in queue " +
                 $"'{queue.Name}'; starting beside {beside.Count} admitted run(s) that did not end: " +
@@ -394,6 +394,12 @@ public static class Admission
             Thread.Sleep(2);
         }
     }
+
+    /// <summary>
+    /// True when the queue cannot wait for <paramref name="run"/> to end: a hold, whose owner's work
+    /// may be queued behind it, or a service, which never ends.
+    /// </summary>
+    static bool Undrainable(RunRecord run) => run.Hold || run.Service;
 
     /// <summary>True when <paramref name="run"/> has waited in line past <see cref="StarvationBound"/>.</summary>
     static bool Starving(RunRecord run) =>

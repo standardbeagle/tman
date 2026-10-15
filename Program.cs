@@ -81,7 +81,7 @@ public static partial class Program
         var caps = Config.EffectiveCaps(alias, new Caps(), config);
         return await GatedRun(alias.Command, args, caps, alias.Name, alias.Name, replace: false,
             RunKey.ScopeDir(config), config.Dir, cwd: config.Dir,
-            queue: alias.NoQueue ? null : Join(alias.Queue ?? config.DefaultQueue, null, alias.Exclusive),
+            queue: alias.NoQueue ? null : Join(alias.Queue ?? config.DefaultQueue, null, alias.Exclusive, alias.Service),
             expectedCores: alias.ExpectedCores ?? config.ExpectedCores, expectedMemMb: alias.ExpectedMemMb ?? config.ExpectedMemMb);
     }
 
@@ -90,7 +90,7 @@ public static partial class Program
         Reaper.Sweep(Retention());
 
         string? name = null, aliasName = null, queueName = null;
-        bool replace = false, noQueue = false, exclusive = false;
+        bool replace = false, noQueue = false, exclusive = false, service = false;
         var cliCaps = new Caps();
         var cmdArgs = new List<string>();
         var i = 0;
@@ -111,6 +111,7 @@ public static partial class Program
                     case "--queue": queueName = Next(); break;
                     case "--no-queue": noQueue = true; break;
                     case "--exclusive": exclusive = true; break;
+                    case "--service": service = true; break;
                     case "--max-time" or "--stall" or "--max-mem" or "--max-cpu" or "--max-parallel" or "--limit-cpus"
                         or "--limit-mem" or "--queue-timeout":
                         cliCaps = Caps.With(cliCaps, a[2..], Next(), a);
@@ -125,6 +126,10 @@ public static partial class Program
             throw new FormatException("--queue and --no-queue cannot both be given");
         if (noQueue && exclusive)
             throw new FormatException("--exclusive needs a queue; --no-queue and --exclusive cannot both be given");
+        if (service && noQueue)
+            throw new FormatException("--service books its cost in a queue; --no-queue and --service cannot both be given");
+        if (service && exclusive)
+            throw new FormatException("a run that never ends cannot hold the queue alone; --service and --exclusive cannot both be given");
 
         if (aliasName is not null)
         {
@@ -143,11 +148,15 @@ public static partial class Program
                 throw new FormatException(
                     $"alias '{aliasName}' sets no-queue, so --exclusive cannot be given: " +
                     "no-queue and exclusive cannot both be given");
+            if ((alias.Service || service) && (alias.Exclusive || exclusive))
+                throw new FormatException(
+                    $"alias '{aliasName}' with --service or --exclusive: a run that never ends cannot hold the queue alone; " +
+                    "service and exclusive cannot both be given");
             return await GatedRun(
                 alias.Command, args, caps, name ?? alias.Name, alias.Name, replace,
                 RunKey.ScopeDir(config), config.Dir, cwd: config.Dir,
                 queue: noQueue || aliasNoQueue ? null : Join(queueName ?? alias.Queue ?? config.DefaultQueue,
-                    cliCaps.QueueTimeout, alias.Exclusive || exclusive),
+                    cliCaps.QueueTimeout, alias.Exclusive || exclusive, alias.Service || service),
                 expectedCores: alias.ExpectedCores ?? config.ExpectedCores, expectedMemMb: alias.ExpectedMemMb ?? config.ExpectedMemMb);
         }
 
@@ -158,7 +167,7 @@ public static partial class Program
             return await GatedRun(
                 cmdArgs[0], cmdArgs[1..].ToArray(), caps, name, null, replace,
                 RunKey.ScopeDir(config), config?.Dir,
-                queue: noQueue ? null : Join(queueName ?? config?.DefaultQueue, cliCaps.QueueTimeout, exclusive),
+                queue: noQueue ? null : Join(queueName ?? config?.DefaultQueue, cliCaps.QueueTimeout, exclusive, service),
                 expectedCores: config?.ExpectedCores, expectedMemMb: config?.ExpectedMemMb);
         }
     }
@@ -174,7 +183,7 @@ public static partial class Program
     /// `--queue-timeout` overrides the queue's own: a project's `queue-timeout` sizes its bucket's
     /// wait, and is no judge of a line shared across projects.
     /// </param>
-    internal static QueueJoin? Join(string? name, TimeSpan? cliQueueTimeout, bool exclusive)
+    internal static QueueJoin? Join(string? name, TimeSpan? cliQueueTimeout, bool exclusive, bool service = false)
     {
         // an exclusive run names its own queue, or joins the machine's "default": exclusivity is a
         // claim on the shared limit, and a run that holds a queue only if it happens to name one
@@ -189,7 +198,7 @@ public static partial class Program
         }
         var queue = Config.Queue(resolved);
         if (cliQueueTimeout is { } timeout) queue = queue with { Timeout = timeout };
-        return new QueueJoin(queue, exclusive);
+        return new QueueJoin(queue, exclusive, service);
     }
 
     /// <param name="logDir">
@@ -205,8 +214,8 @@ public static partial class Program
     /// </param>
     const string ReplacedReason = "replaced by newer run";
 
-    /// <summary>A queue a run joins, with the exclusivity it brings.</summary>
-    public sealed record QueueJoin(NamedQueue Queue, bool Exclusive);
+    /// <summary>A queue a run joins, with the exclusivity it brings, or as a service that never ends.</summary>
+    public sealed record QueueJoin(NamedQueue Queue, bool Exclusive, bool Service = false);
 
     /// <param name="queue">The queue this run joins after its bucket admits it, or null.</param>
     internal static async Task<int> GatedRun(
@@ -299,6 +308,7 @@ public static partial class Program
             }
             if (!nested && queue is not null)
             {
+                record.Service = queue.Service;
                 var cost = Admission.ExpectedCost(record, queue.Queue, expectedCores, expectedMemMb);
                 if (!await Admission.ClaimAdmission(record, queue.Queue, cost, queue.Exclusive, expectedCores, expectedMemMb, interrupt.Token))
                     return Runner.ExitKilled;
@@ -628,7 +638,7 @@ public static partial class Program
             : Admission.Position(r, Store.LoadAll()) is { } position ? $"{r.Queue} (position {position})" : r.Queue);
         Row("admitted", r.AdmittedUtc is null ? null
             : $"{r.AdmittedCores:0.#} cores, {Canon.Mem(r.AdmittedMemMb ?? 0)}" +
-              (r.Exclusive ? ", exclusive" : "") +
+              (r.Exclusive ? ", exclusive" : "") + (r.Service ? ", service" : "") +
               (r.QueuedSeconds is { } qs ? $" (queued {Canon.Duration(TimeSpan.FromSeconds(qs))})" : ""));
         Row("parent", r.ParentId);
         Row("pid", $"{PidLabel(r)} (runner {r.RunnerPid})");

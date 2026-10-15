@@ -11,8 +11,10 @@ public sealed record AliasDef(
     /// <summary>The alias's declared expected cost, used when the bucket has no history yet.</summary>
     double? ExpectedCores = null,
     long? ExpectedMemMb = null,
-    /// <summary>True when the alias joins no queue at all — a dev server or a watch (see README).</summary>
-    bool NoQueue = false);
+    /// <summary>True when the alias joins no queue at all (see README).</summary>
+    bool NoQueue = false,
+    /// <summary>True when the alias never ends — a dev server or a watch — and books like a hold (see README).</summary>
+    bool Service = false);
 
 /// <summary>
 /// A queue declared once for the whole machine, which any project's runs can join by name. It
@@ -114,7 +116,7 @@ public static class Config
         if (n.Args.Count != 1 || n.Arg(0) is not { Length: > 0 } name)
             throw new FormatException($"{path}: alias takes exactly one name, as in alias \"test\" {{ ... }}");
         var where = $"{path}, alias \"{name}\"";
-        var caps = ReadCaps(n, where, child => child.Name is "command" or "args" or "queue" or "exclusive" or "cores" or "mem" or "no-queue");
+        var caps = ReadCaps(n, where, child => child.Name is "command" or "args" or "queue" or "exclusive" or "cores" or "mem" or "no-queue" or "service");
 
         var commandNode = n.Child("command")
             ?? throw new FormatException($"alias \"{name}\" in {path} is missing a command");
@@ -123,14 +125,19 @@ public static class Config
         var args = n.Child("args")?.Args.Select(a => a.AsString() ?? "").ToArray() ?? [];
         var exclusive = n.Child("exclusive") is { } ex && ReadBool(ex, $"{where}: exclusive");
         var noQueue = n.Child("no-queue") is { } nq && ReadBool(nq, $"{where}: no-queue");
+        var service = n.Child("service") is { } sv && ReadBool(sv, $"{where}: service");
         var queueName = ReadQueueName(n, where);
         if (noQueue && queueName is not null)
             throw new FormatException($"{where}: no-queue and queue name a queue and its absence; give only one");
         if (noQueue && exclusive)
             throw new FormatException($"{where}: no-queue and exclusive cannot both be given");
+        if (noQueue && service)
+            throw new FormatException($"{where}: no-queue and service cannot both be given; a service books its cost in a queue");
+        if (service && exclusive)
+            throw new FormatException($"{where}: service and exclusive cannot both be given; a run that never ends cannot hold the queue alone");
         return new AliasDef(
             name, command, args, caps, queueName, exclusive,
-            ReadExpectedCores(n, where), ReadExpectedMem(n, where), noQueue);
+            ReadExpectedCores(n, where), ReadExpectedMem(n, where), noQueue, service);
     }
 
     static bool ReadBool(KdlNode node, string where)

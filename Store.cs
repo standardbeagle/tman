@@ -102,6 +102,12 @@ public sealed class RunRecord
     /// </summary>
     public bool Hold { get; set; }
 
+    /// <summary>
+    /// True when the run was declared a service (`service true`, `--service`): it never ends — a dev
+    /// server, a watch — so, like a hold, it is not the queue's to wait for.
+    /// </summary>
+    public bool Service { get; set; }
+
     /// <summary>How long the run waited in its queue before admission; null when it never queued.</summary>
     public double? QueuedSeconds { get; set; }
 

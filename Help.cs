@@ -38,7 +38,11 @@ public static class Help
           --no-queue          join no queue, whatever .tman.kdl says (a dev server, a watch);
                               an alias whose block sets `no-queue true` does the same without a flag
           --exclusive         run alone in the queue: wait for admitted work, then hold the queue
-                              until this run exits (a perf audit)
+                              until this run exits (a perf audit); past the starvation bound it
+                              starts beside what is still admitted and names it
+          --service           a run that never ends (a dev server, a watch): booked in the queue
+                              like a hold, so no exclusive or starving run waits for it to end;
+                              an alias whose block sets `service true` does the same
         """;
 
     const string Sweep = """
@@ -262,7 +266,7 @@ public static class Help
         sb.AppendLine($"  caps:   {Program.DescribeCaps(Config.EffectiveCaps(alias, new Caps(), config))}");
         if (alias.NoQueue) sb.AppendLine("  queue:  none (no-queue true)");
         else if ((alias.Queue ?? config.DefaultQueue ?? Config.MachineDefaultQueue()) is { } queue)
-            sb.AppendLine($"  queue:  {queue}");
+            sb.AppendLine($"  queue:  {queue}" + (alias.Service ? " (service true)" : ""));
         sb.Append("Every arg, --help included, goes to the command.");
         return sb.ToString();
     }

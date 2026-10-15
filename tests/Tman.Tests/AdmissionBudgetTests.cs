@@ -272,6 +272,74 @@ public class AdmissionBudgetTests : IDisposable
     }
 
     [UnixFact("writes records this process's runner owns")]
+    public async Task AnExclusiveRun_StartsBesideAnAdmittedService_WithoutWaitingForTheBound()
+    {
+        _home.WriteFile("tman.kdl", "queue \"q\" {\n    cores 4\n    mem 4g\n}\n");
+        var prev = Admission.MeasureHost;
+        try
+        {
+            // a declared service never ends, so the queue books it like a hold and never waits on it
+            Admission.MeasureHost = () => new Host.Usage(0, 0);
+            Occupy("devservice01", cores: 3, memMb: 3 * 1024, service: true);
+            var q = Config.Queue("q") with { Timeout = TimeSpan.FromMilliseconds(700) };
+            var audit = Runner.NewRecord("audit", [], new Caps(), "audit", null, "audit@/a", "/tmp");
+            Assert.True(await Admission.ClaimAdmission(audit, q, new Admission.AdmissionCost(2, 2 * 1024), exclusive: true, null, null, default),
+                "an exclusive run waited on a declared service");
+        }
+        finally { Admission.MeasureHost = prev; }
+    }
+
+    [UnixFact("runs the sleep binary through Program.Main")]
+    public async Task AServiceAlias_AndTheServiceFlag_JoinTheQueueAsServices()
+    {
+        _home.WriteFile("tman.kdl", "queue \"default\" {\n    cores 4\n    mem 4g\n}\n");
+        using var proj = new TempDir();
+        proj.WriteFile(Config.FileName, """
+            alias "dev" {
+                command "sleep"
+                args "30"
+                service true
+            }
+            """);
+        Directory.SetCurrentDirectory(proj.Path);
+
+        // the alias and shim doors take no tman flags, so the declaration must live in the config
+        var alias = Task.Run(() => Program.Main(["dev"]));
+        var aliased = await Await(r => r is { State: RunState.Running } && r.Name == "dev");
+        Assert.True(aliased.Service);
+        Assert.Equal("default", aliased.Queue);
+
+        var flagged = Task.Run(() => Program.Main(["run", "--service", "--name", "watch", "--", "sleep", "30"]));
+        var bare = await Await(r => r is { State: RunState.Running } && r.Name == "watch");
+        Assert.True(bare.Service);
+        Assert.Equal("default", bare.Queue);
+
+        Assert.Equal(0, await Program.Main(["kill", aliased.Id]));
+        Assert.Equal(0, await Program.Main(["kill", bare.Id]));
+        Assert.Equal(Runner.ExitKilled, await alias.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.Equal(Runner.ExitKilled, await flagged.WaitAsync(TimeSpan.FromSeconds(10)));
+    }
+
+    [Theory]
+    [InlineData("--no-queue", "no-queue")]
+    [InlineData("--exclusive", "exclusive")]
+    public async Task TheServiceFlag_IsRefusedWithNoQueueOrExclusive(string other, string named)
+    {
+        using var proj = new TempDir();
+        Directory.SetCurrentDirectory(proj.Path);
+        var err = new StringWriter();
+        var prev = Console.Error;
+        Console.SetError(err);
+        int code;
+        try { code = await Program.Main(["run", "--service", other, "--", "/bin/true"]); }
+        finally { Console.SetError(prev); }
+
+        Assert.Equal(Runner.ExitNotFound, code);
+        Assert.Contains("--service", err.ToString());
+        Assert.Contains(named, err.ToString());
+    }
+
+    [UnixFact("writes records this process's runner owns")]
     public async Task AHold_IsAdmittedWhileAnExclusiveRunHoldsTheQueue_AheadOfWaitingFiniteRuns()
     {
         _home.WriteFile("tman.kdl", "queue \"q\" {\n    cores 4\n    mem 4g\n}\n");
@@ -297,13 +365,13 @@ public class AdmissionBudgetTests : IDisposable
         finally { Admission.MeasureHost = prev; }
     }
 
-    void Occupy(string id, double cores, long memMb, string queue = "q", bool hold = false)
+    void Occupy(string id, double cores, long memMb, string queue = "q", bool hold = false, bool service = false)
     {
         var me = ProcUtil.OwnStart();
         Store.Save(new RunRecord
         {
             Id = id, Command = "/bin/sh", Args = [], Group = "hold@" + _home.Path, State = RunState.Running,
-            Hold = hold, Queue = queue, AdmittedUtc = DateTime.UtcNow, AdmittedCores = cores, AdmittedMemMb = memMb,
+            Hold = hold, Service = service, Queue = queue, AdmittedUtc = DateTime.UtcNow, AdmittedCores = cores, AdmittedMemMb = memMb,
             QueuedUtc = DateTime.UtcNow, StartedUtc = DateTime.UtcNow, HeartbeatUtc = DateTime.UtcNow,
             Cwd = "/tmp", Pid = Environment.ProcessId, ChildStartUtc = me.Utc, ChildStartTicks = me.Ticks,
             RunnerPid = Environment.ProcessId, RunnerStartUtc = me.Utc, RunnerStartTicks = me.Ticks,
@@ -541,7 +609,7 @@ public class AdmissionBudgetTests : IDisposable
     }
 
     [Fact]
-    public void AnAliasOptOut_IsRefusedWithAQueueOrExclusive()
+    public void AliasQueueSettingsThatContradict_AreRefused()
     {
         using var proj = new TempDir();
         proj.WriteFile(Config.FileName, """
@@ -561,6 +629,24 @@ public class AdmissionBudgetTests : IDisposable
             }
             """);
         Assert.Contains("no-queue and exclusive", Assert.Throws<FormatException>(() => Config.Load(proj.Path)).Message);
+
+        proj.WriteFile(Config.FileName, """
+            alias "dev" {
+                command "sleep"
+                no-queue true
+                service true
+            }
+            """);
+        Assert.Contains("no-queue and service", Assert.Throws<FormatException>(() => Config.Load(proj.Path)).Message);
+
+        proj.WriteFile(Config.FileName, """
+            alias "dev" {
+                command "sleep"
+                service true
+                exclusive true
+            }
+            """);
+        Assert.Contains("service and exclusive", Assert.Throws<FormatException>(() => Config.Load(proj.Path)).Message);
     }
 
     [UnixFact("drives Program.Main")]
