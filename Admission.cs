@@ -21,7 +21,8 @@ public static class Admission
     /// How long a run may wait before it is admitted next regardless of smaller arrivals: without
     /// this, a stream of small runs that always fit would starve one large one forever. A run past
     /// the bound reserves the budget and starts once no finite run is admitted, whatever holds and
-    /// load outside the queue remain, since neither ends because the queue waits. Settable so
+    /// load outside the queue remain, since neither ends because the queue waits; an exclusive run
+    /// past it stops waiting for finite runs as well, since one of them may never end. Settable so
     /// a test can prove the bound without waiting minutes; production never changes it.
     /// </summary>
     internal static TimeSpan StarvationBound = TimeSpan.FromMinutes(5);
@@ -173,9 +174,10 @@ public static class Admission
     /// Waits for admission to <paramref name="queue"/> by cost: saves the record as queued, then
     /// retries until the expected cost fits beside what is admitted, or the run is killed,
     /// interrupted, or out of the queue's timeout — which end it as killed and return null. An
-    /// exclusive run waits for admitted finite runs to finish — not for holds or outside load — and
-    /// then holds finite admissions until it exits; a finite run never starts while an exclusive one
-    /// is admitted, and a hold still does. Arrival order is kept,
+    /// exclusive run waits for admitted finite runs to finish — not for holds or outside load — or,
+    /// past the starvation bound, starts beside the ones still admitted and names them; it then holds
+    /// finite admissions until it exits: a finite run never starts while an exclusive one is
+    /// admitted, and a hold still does. Arrival order is kept,
     /// but a small run may start ahead of a larger waiting one when it fits, and a run waiting past
     /// the starvation bound is admitted next whatever its size: it starts once no finite run is
     /// admitted, even beside holds and outside load.
@@ -313,11 +315,14 @@ public static class Admission
         // waits, and outside load ends on its own clock: waiting for either to make room would
         // hold a run that reserves the queue, and everyone behind it, forever
         var onlyUndrainable = admitted.All(r => r.Hold);
+        var starving = Starving(record);
         if (exclusive)
         {
             // an exclusive run starts once no finite run is admitted, whatever holds and outside
-            // load remain, and no finite run starts while it holds the queue
-            if (!onlyUndrainable) return AdmitOutcome.NoRoom;
+            // load remain, and no finite run starts while it holds the queue. Past the starvation
+            // bound it stops waiting for finite runs too: a run admitted as finite may never end
+            // (a dev server), and the exclusive run reserves the queue for everyone behind it
+            if (!onlyUndrainable && !starving) return AdmitOutcome.NoRoom;
         }
         else
         {
@@ -348,9 +353,10 @@ public static class Admission
             }
         }
 
-        // a starving or exclusive run starts once no finite run is admitted (see above); the
-        // lone-run rule in Fits is the same guarantee for an empty queue
-        if (!((exclusive || Starving(record)) && onlyUndrainable) && !Fits(cost, costs, queue)) return AdmitOutcome.NoRoom;
+        // an exclusive run that got here starts whatever the budget, and a starving one once no
+        // finite run is admitted (see above); the lone-run rule in Fits is the same guarantee for
+        // an empty queue
+        if (!exclusive && !(starving && onlyUndrainable) && !Fits(cost, costs, queue)) return AdmitOutcome.NoRoom;
 
         record.State = RunState.Queued;
         record.AdmittedUtc = DateTime.UtcNow;
@@ -362,6 +368,11 @@ public static class Admission
         Store.Save(record);
         // an admission changes the admitted set, which can free a gap or a turn for another waiter
         Store.TouchQueue(gate);
+        if (exclusive && admitted.Where(r => !r.Hold).ToList() is { Count: > 0 } beside)
+            Console.Error.WriteLine(
+                $"tman: exclusive run waited past the starvation bound ({Canon.Duration(StarvationBound)}) in queue " +
+                $"'{queue.Name}'; starting beside {beside.Count} admitted run(s) that did not end: " +
+                string.Join(", ", beside.Select(r => $"{r.Name ?? Path.GetFileName(r.Command)} ({r.Id})")));
         return AdmitOutcome.Admitted;
     }
 
