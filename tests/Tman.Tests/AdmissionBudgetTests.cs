@@ -238,6 +238,40 @@ public class AdmissionBudgetTests : IDisposable
     }
 
     [UnixFact("writes records this process's runner owns")]
+    public async Task AnExclusiveRunPastTheStarvationBound_StartsBesideAFiniteRunThatNeverEnds_AndSaysSo()
+    {
+        _home.WriteFile("tman.kdl", "queue \"q\" {\n    cores 4\n    mem 4g\n}\n");
+        var prevBound = Admission.StarvationBound;
+        var prevHost = Admission.MeasureHost;
+        var prevErr = Console.Error;
+        var err = new StringWriter();
+        Admission.StarvationBound = TimeSpan.FromMilliseconds(100);
+        try
+        {
+            // beagle-ab 2026-10-15: agency's exclusive ui-gate sat queued #1 for 2h+ behind a dev
+            // server admitted as an ordinary run, which never ends because the queue waits
+            Admission.MeasureHost = () => new Host.Usage(0, 0);
+            Occupy("devserver001", cores: 3, memMb: 3 * 1024);
+            var q = Config.Queue("q") with { Timeout = TimeSpan.FromSeconds(5) };
+            var audit = Runner.NewRecord("audit", [], new Caps(), "audit", null, "audit@/a", "/tmp");
+
+            Console.SetError(err);
+            Assert.True(await Admission.ClaimAdmission(audit, q, new Admission.AdmissionCost(2, 2 * 1024), exclusive: true, null, null, default),
+                "an exclusive run past the starvation bound kept waiting on a finite run");
+            Assert.True(audit.Exclusive);
+            // it says why it did not run alone, and beside what
+            Assert.Contains("starvation bound", err.ToString());
+            Assert.Contains("devserver001", err.ToString());
+        }
+        finally
+        {
+            Console.SetError(prevErr);
+            Admission.StarvationBound = prevBound;
+            Admission.MeasureHost = prevHost;
+        }
+    }
+
+    [UnixFact("writes records this process's runner owns")]
     public async Task AHold_IsAdmittedWhileAnExclusiveRunHoldsTheQueue_AheadOfWaitingFiniteRuns()
     {
         _home.WriteFile("tman.kdl", "queue \"q\" {\n    cores 4\n    mem 4g\n}\n");
