@@ -81,12 +81,12 @@ public static class Admission
     public const int HistoryDepth = 20;
 
     /// <summary>
-    /// The cost a run is expected to bear, in cores and memory:
-    /// <list type="number">
-    /// <item>a high percentile of the run's bucket's recent records, once there are any;</item>
-    /// <item>the alias's declared `cores`/`mem`, or the project's in `defaults`;</item>
-    /// <item>the queue's own defaults.</item>
-    /// </list>
+    /// The cost a run is expected to bear, in cores and memory: a high percentile of the run's
+    /// bucket's recent records, else the queue's own defaults, and never less than the alias's
+    /// declared `cores`/`mem` (or the project's, in `defaults`). The declaration is a floor, not a
+    /// fallback, because history measures only the run's own tree: a build that hands its compile to
+    /// a long-lived server outside it (reused MSBuild nodes, VBCSCompiler) averages a fraction of a
+    /// core there while the host runs flat out, and only the project knows that.
     /// Memory books the peak: overrunning it kills a run, so a run that once took 5 GB is sized at
     /// 5 GB. Cores book the p90 of each run's mean (CPU-seconds over the child's wall time), because
     /// overrunning CPU only slows a run, and a build that fans out for a few seconds averages far
@@ -100,11 +100,11 @@ public static class Admission
             .OrderByDescending(r => r.StartedUtc)
             .Take(HistoryDepth)
             .ToList();
-        var cores = Percentile(history.Select(BookedCores).Where(v => v > 0).ToList());
-        var memMb = Percentile(history.Select(r => (double)r.PeakMemMb).Where(v => v > 0).ToList());
+        var cores = Math.Max(Percentile(history.Select(BookedCores).Where(v => v > 0).ToList()), aliasCores ?? 0);
+        var memMb = Math.Max(Percentile(history.Select(r => (double)r.PeakMemMb).Where(v => v > 0).ToList()), aliasMemMb ?? 0);
         return new AdmissionCost(
-            cores > 0 ? cores : aliasCores ?? queue.DefaultCores,
-            memMb > 0 ? (long)Math.Ceiling(memMb) : aliasMemMb ?? queue.DefaultMemMb);
+            cores > 0 ? cores : queue.DefaultCores,
+            memMb > 0 ? (long)Math.Ceiling(memMb) : queue.DefaultMemMb);
     }
 
     /// <summary>A finished run's mean cores; its peak when it has no CPU-seconds or no wall time to divide by.</summary>

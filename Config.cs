@@ -8,7 +8,7 @@ public sealed record AliasDef(
     string? Queue = null,
     /// <summary>True when the alias may never run beside another admitted run: a perf audit.</summary>
     bool Exclusive = false,
-    /// <summary>The alias's declared expected cost, used when the bucket has no history yet.</summary>
+    /// <summary>The alias's declared expected cost: a floor under what the bucket's history measures.</summary>
     double? ExpectedCores = null,
     long? ExpectedMemMb = null,
     /// <summary>True when the alias joins no queue at all (see README).</summary>
