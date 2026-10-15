@@ -104,7 +104,8 @@ tman init --shims --gitignore
 | `--queue-timeout T` | 5m | give up waiting — for a bucket slot, or for a [named queue](#named-queues)'s admission; the run is recorded `killed: queue timeout …` and exits 130 |
 | `--queue Q` | — | wait in the machine-wide [named queue](#named-queues) Q, admitted by measured cost; with no queue named anywhere, the machine's `default` queue if one is declared |
 | `--no-queue` | off | join no queue, even one the alias, `defaults`, or the machine's `default` names |
-| `--exclusive` | off | run alone in its queue: wait for admitted runs to finish — not for `tman hold` bookings or load outside the queue — then hold the queue until it exits; holds are still admitted beside it |
+| `--exclusive` | off | run alone in its queue: wait for admitted runs to finish — not for `tman hold` bookings, service runs or load outside the queue — then hold the queue until it exits; holds are still admitted beside it. Past the starvation bound it stops waiting and starts beside the runs still admitted, naming them on stderr |
+| `--service` | off | a long-lived run (a dev server, a watcher): it books its cost in the queue like a `tman hold`, so it never holds back an exclusive or a starving run, which cannot wait for it to end |
 
 Cap precedence: CLI flags > alias block > `defaults` block > built-ins.
 
@@ -317,9 +318,11 @@ alias "build" {
 ```
 
 An exclusive run starts once no ordinary run is admitted, the same rule a starving waiter follows:
-`tman hold` bookings and load outside the queue do not hold it back, since neither ends because the
-queue waits. While it runs, ordinary runs wait and holds are still admitted — a hold's own work runs
-as ordinary tman runs, which wait.
+`tman hold` bookings, service runs and load outside the queue do not hold it back, since none ends
+because the queue waits. While it runs, ordinary runs wait and holds are still admitted — a hold's
+own work runs as ordinary tman runs, which wait. An ordinary run may still never end (a dev server
+nobody declared a service), so past the starvation bound an exclusive run stops waiting: it starts
+beside the runs still admitted, says on stderr which ones, and new ordinary runs still wait for it.
 
 A project can also put every run in a queue at once, from its `defaults`:
 
@@ -331,15 +334,18 @@ defaults {
 
 That reaches the runs no alias names: the PATH shims' `tman run -- go test ./...`, the Claude Code
 hook's rewrite, and a bare `tman run`. An alias's own `queue` wins over it, and `--queue` wins over
-both. A long-lived run — a dev server, a watcher — would hold an admission for hours, so an alias can
-opt out with `no-queue true` (the `tman <alias>` and `./<alias>` shim doors take no tman flags), and
-`tman run --no-queue` does the same for a bare command; an alias cannot set `no-queue` with `queue`
-or `exclusive`, and `--no-queue` together with `--queue` is refused.
+both. A long-lived run — a dev server, a watcher — never ends, so the queue must not wait for it.
+Declare it a **service** with `service true` (the `tman <alias>` and `./<alias>` shim doors take no
+tman flags), or `tman run --service` for a bare command: it is admitted and books its cost like a
+`tman hold`, so the queue still sees what it uses, but an exclusive or starving run never waits for
+it to end. To book nothing at all, opt out with `no-queue true` / `tman run --no-queue`. An alias
+cannot set `no-queue` with `queue`, `exclusive` or `service`, nor `service` with `exclusive`, and the
+same pairs of flags are refused.
 
 ```kdl
 alias "dev" {
     command "vite"
-    no-queue true
+    service true
 }
 ```
 
@@ -352,8 +358,8 @@ queue is the only limit they all share. A machine that declares no `default` que
   first claim, and claims a place only while nobody who joined earlier is still waiting. A small run
   may start ahead of a larger waiting one when its cost fits the gap; a run waiting past a bound is
   admitted next whatever its size, so nothing starves: it starts as soon as no ordinary run is
-  admitted, even if `tman hold` bookings or load outside the queue leave it no room. Neither ends
-  because the queue waits — a hold ends with its owner's work, which may be queued behind it. `tman list` shows each waiter's place as
+  admitted, even if `tman hold` bookings, service runs or load outside the queue leave it no room.
+  None ends because the queue waits — a hold ends with its owner's work, which may be queued behind it. `tman list` shows each waiter's place as
   `queued #1`, `queued #2`, and `tman status` shows it as `queue: compile (position 2)`. A waiter
   whose tman died holds no place.
 - **Load outside the queue counts.** Booked costs miss work that left a run's tree (a `dotnet` build
