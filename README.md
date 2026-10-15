@@ -297,8 +297,11 @@ A run is admitted when the cost it is **expected** to bear fits beside what is a
 a 5 GB / 3-core full suite and a 120 MB single test are not the same claim on the machine. Expected
 cost is a high percentile of the run's bucket's recent `PeakMemMb` and of each run's mean cores (`CpuSeconds` over
 its child's wall time, its `PeakCores` when it has neither); with no history
-yet, an alias's declared `cores`/`mem` (or the project's, in `defaults`), else the queue's
-`cores-default`/`mem-default`. A run larger than the whole budget still starts, alone. On exit its
+yet, the queue's `cores-default`/`mem-default`. An alias's declared `cores`/`mem` (or the project's,
+in `defaults`) is a **floor** under that estimate: tman measures a run's own process tree, and work
+the run hands to a long-lived server outside it — a `dotnet build`'s reused MSBuild nodes and shared
+`VBCSCompiler` — never shows in its history, so a build that averages 0.3 cores in its tree while
+the host runs flat out is booked at what its alias declares (`cores 6`). A run larger than the whole budget still starts, alone. On exit its
 admission is released; a runner that died is reaped by the ordinary sweep.
 
 The slot-counting form (`max-parallel`) is **replaced, not kept**: a machine queue that still writes
