@@ -158,6 +158,30 @@ public class AdmissionBudgetTests : IDisposable
     }
 
     [Fact]
+    public void ExpectedCost_DividesCpuByTheWallClockTheRunWasTimedOn_NotTheChildsStartStamp()
+    {
+        _home.WriteFile("tman.kdl", "queue \"q\" {\n    cores 12\n    mem 64g\n}\n");
+        var q = Config.Queue("q");
+        // beagle-ab 2026-10-16 (WSL2): Linux recomputes a child's start from boot time, which drifts
+        // from the wall clock, so a 61 s test-by-name run recorded a start 59 s late. Its 193.6
+        // CPU-seconds divided over the 2 s that left booked 96.8 cores, and the bucket's p90 asked
+        // 18.6 cores of a 12-core queue; over the wall clock the run was timed on it is 3.2
+        for (var i = 0; i < 5; i++)
+        {
+            var r = Finished("skewed" + i, "tbn@/s", cores: 9.8, memMb: 750);
+            r.HeartbeatUtc = r.StartedUtc.AddSeconds(61);
+            r.ChildStartUtc = r.StartedUtc.AddSeconds(59);
+            r.CpuSeconds = 193.6;
+            Store.Save(r);
+        }
+
+        var cost = Admission.ExpectedCost(
+            Runner.NewRecord("tbn", ["X"], new Caps(), "tbn", null, "tbn@/s", "/s"), q, null, null);
+
+        Assert.InRange(cost.Cores, 3.1, 3.3);
+    }
+
+    [Fact]
     public void ExpectedCost_FallsBackToTheAliasThenTheQueue_WithNoHistory()
     {
         _home.WriteFile("tman.kdl", "queue \"q\" {\n    cores 8\n    mem 64g\n    cores-default 2\n    mem-default 3g\n}\n");
