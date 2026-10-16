@@ -30,8 +30,12 @@ public static class Reaper
             if (r.State == RunState.Queued)
             {
                 // a waiter has no child: nothing to kill, only an outcome nobody else will write
-                r.State = RunState.Killed;
-                r.KillReason = Store.ReadKillRequest(r.Id) ?? "runner died while queued";
+                if (Store.ReadKillRequest(r.Id) is { } requested) r.EndOnKillRequest(requested);
+                else
+                {
+                    r.State = RunState.Killed;
+                    r.KillReason = "runner died while queued";
+                }
                 r.HeartbeatUtc = DateTime.UtcNow;
                 Store.Save(r);
                 continue;
@@ -42,8 +46,12 @@ public static class Reaper
                 // the child is gone and its runner never wrote the outcome: nobody read the exit
                 // status, so this is the same unknown the Runner reports, not a finished run —
                 // unless someone killed it on purpose and said why
-                r.State = RunState.Killed;
-                r.KillReason = Store.ReadKillRequest(r.Id) ?? Runner.ExitStatusUnknownReason;
+                if (Store.ReadKillRequest(r.Id) is { } requested) r.EndOnKillRequest(requested);
+                else
+                {
+                    r.State = RunState.Killed;
+                    r.KillReason = Runner.ExitStatusUnknownReason;
+                }
                 r.HeartbeatUtc = DateTime.UtcNow;
                 Store.Save(r);
                 continue;
@@ -83,8 +91,7 @@ public static class Reaper
         if (r.Queue is { } queue) Store.TouchQueue(Admission.QueueKey(queue));
         if (!ProcUtil.KillTree(r.Pid, r.ChildStartUtc, r.ChildStartTicks)) return false;
         if (RunnerAlive(r)) return true;
-        r.State = RunState.Killed;
-        r.KillReason = reason;
+        r.EndOnKillRequest(reason);
         r.HeartbeatUtc = DateTime.UtcNow;
         Store.Save(r);
         return true;

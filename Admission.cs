@@ -207,8 +207,10 @@ public static class Admission
         var since = Stopwatch.GetTimestamp();
         while (true)
         {
-            if ((Store.ReadKillRequest(record.Id) ?? (ct.IsCancellationRequested ? CancelledReason : null)) is { } stop)
-            { EndQueued(record, stop); return false; }
+            if (Store.ReadKillRequest(record.Id) is { } requested)
+            { EndQueued(record, requested, killRequested: true); return false; }
+            if (ct.IsCancellationRequested)
+            { EndQueued(record, CancelledReason); return false; }
             var attempt = TryAdmit(record, queue, cost, exclusive, aliasCores, aliasMemMb, gate);
             if (attempt == AdmitOutcome.Admitted)
             {
@@ -460,8 +462,10 @@ public static class Admission
         while (true)
         {
             // before every claim: a run told to stop must not be admitted on the way out
-            if ((Store.ReadKillRequest(record.Id) ?? (ct.IsCancellationRequested ? CancelledReason : null)) is { } stop)
-                return EndQueued(record, stop);
+            if (Store.ReadKillRequest(record.Id) is { } requested)
+                return EndQueued(record, requested, killRequested: true);
+            if (ct.IsCancellationRequested)
+                return EndQueued(record, CancelledReason);
             if (tryClaim() is { } slot) return slot;
             var elapsed = Stopwatch.GetElapsedTime(since);
             if (elapsed >= timeout)
@@ -475,11 +479,15 @@ public static class Admission
         }
     }
 
-    static FileStream? EndQueued(RunRecord record, string reason)
+    static FileStream? EndQueued(RunRecord record, string reason, bool killRequested = false)
     {
         Console.Error.WriteLine($"tman: {reason}");
-        record.State = RunState.Killed;
-        record.KillReason = reason;
+        if (killRequested) record.EndOnKillRequest(reason);
+        else
+        {
+            record.State = RunState.Killed;
+            record.KillReason = reason;
+        }
         record.HeartbeatUtc = DateTime.UtcNow;
         // the save is a finished record, so Store.Save touches the queue event: a waiter leaving
         // the line frees a place for whoever was behind it

@@ -75,9 +75,10 @@ public class QueuedRunTests : IDisposable
 
         Assert.Equal(0, await Program.Main(["kill", queued.Id]));
 
-        Assert.Equal(Runner.ExitKilled, await waiter.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.Equal(Runner.ExitKillRequested, await waiter.WaitAsync(TimeSpan.FromSeconds(10)));
         var ended = Store.Load(queued.Id)!;
         Assert.Equal(RunState.Killed, ended.State);
+        Assert.True(ended.KillRequested);
         Assert.Equal("killed via tman kill", ended.KillReason);
         Assert.Null(ended.ChildStartUtc);
         // the holder was never touched

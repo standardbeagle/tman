@@ -10,6 +10,11 @@ public static class Runner
     public const int ExitCulled = 126;
     public const int ExitNotFound = 127;
     public const int ExitKilled = 130;
+    /// <summary>
+    /// sysexits EX_TEMPFAIL: the run was ended on a kill request (`tman kill`, or `--replace` by
+    /// another run), not by the run failing, a deadline, a cap or Ctrl+C. Its own code, so a
+    /// supervisor can tell a deploy's or an operator's kill from the work it judges and re-run it.
+    /// </summary>
     public const int ExitKillRequested = 75;
     /// <summary>EX_NOPERM: the caller may not do this, as opposed to the command failing.</summary>
     public const int ExitRefused = 77;
@@ -220,6 +225,7 @@ public static class Runner
 
         string? killReason = null;
         RunState killState = RunState.Killed;
+        var killRequested = false;
         var prevCpu = TimeSpan.Zero;
         var prevTick = clock.GetTimestamp();
         var cpuBreaches = 0;
@@ -315,7 +321,7 @@ public static class Runner
                 prevTick = now;
 
                 if (Store.ReadKillRequest(record.Id) is { } requested)
-                { killReason = requested; killState = RunState.Killed; }
+                { killReason = requested; killState = RunState.Killed; killRequested = true; }
                 else if (confinement.Breach() is { } breach)
                 { killReason = breach; killState = RunState.Culled; }
                 else if (caps.MaxTime is { } mt && clock.GetElapsedTime(startedAt, now) > mt)
@@ -358,6 +364,7 @@ public static class Runner
             {
                 killReason = requested;
                 killState = RunState.Killed;
+                killRequested = true;
             }
 
             if (killReason is not null)
@@ -391,7 +398,11 @@ public static class Runner
             confinement.Dispose();
 
             record.HeartbeatUtc = Utc();
-            if (killReason is not null)
+            if (killReason is not null && killRequested)
+            {
+                record.EndOnKillRequest(killReason);
+            }
+            else if (killReason is not null)
             {
                 record.State = killState;
                 record.KillReason = killReason;
@@ -434,10 +445,12 @@ public static class Runner
         return ExitCodeFor(record);
     }
 
-    static int ExitCodeFor(RunRecord record) =>
+    /// <summary>The exit a finished <paramref name="record"/> reports, queued runs that never started included.</summary>
+    internal static int ExitCodeFor(RunRecord record) =>
         record.State switch
         {
             RunState.Exited => record.ExitCode!.Value,
+            RunState.Killed when record.KillRequested => ExitKillRequested,
             RunState.StartFailed => ExitNotFound,
             RunState.TimedOut => ExitTimeout,
             RunState.Stalled => ExitStalled,

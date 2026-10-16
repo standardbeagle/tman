@@ -304,14 +304,14 @@ public static partial class Program
             if (!nested && caps.MaxParallel is { } maxPar && maxPar > 0)
             {
                 slotFile = await Admission.ClaimBucketSlot(record, maxPar, queueTimeout, interrupt.Token);
-                if (slotFile is null) return Runner.ExitKilled;
+                if (slotFile is null) return Runner.ExitCodeFor(record);
             }
             if (!nested && queue is not null)
             {
                 record.Service = queue.Service;
                 var cost = Admission.ExpectedCost(record, queue.Queue, expectedCores, expectedMemMb);
                 if (!await Admission.ClaimAdmission(record, queue.Queue, cost, queue.Exclusive, expectedCores, expectedMemMb, interrupt.Token))
-                    return Runner.ExitKilled;
+                    return Runner.ExitCodeFor(record);
             }
 
             // the same reasoning as the slot: a nested run is the parent's work, and the parent is
@@ -441,7 +441,7 @@ public static partial class Program
         {
             var cost = new Admission.AdmissionCost(cores.Value, memMb.Value);
             if (!await Admission.ClaimAdmission(record, join.Queue, cost, join.Exclusive, cores, memMb, interrupt.Token))
-                return Runner.ExitKilled;
+                return Runner.ExitCodeFor(record);
             record.State = RunState.Running;
             Store.Save(record);
             Console.Error.WriteLine(
@@ -509,15 +509,30 @@ public static partial class Program
         }
     }
 
+    /// <summary>The reason a run ended by `tman kill` records, before the requester's own `--reason`.</summary>
+    const string KilledViaKill = "killed via tman kill";
+
     static int CmdKill(string[] argv)
     {
         Reaper.Sweep(Retention(), quiet: true);
         // a flag that is not understood is refused, not skipped: `kill all --<something>` read as
         // `kill all` kills the runs the caller was trying to exclude
-        var unknown = argv.FirstOrDefault(a => a.StartsWith("--") && a != "--everywhere");
+        string? why = null;
+        var rest = new List<string>();
+        for (var i = 0; i < argv.Length; i++)
+        {
+            if (argv[i] != "--reason") { rest.Add(argv[i]); continue; }
+            if (i + 1 >= argv.Length || string.IsNullOrWhiteSpace(argv[i + 1]))
+                throw new FormatException("--reason needs the text to record with the kill");
+            why = argv[++i];
+        }
+        var unknown = rest.FirstOrDefault(a => a.StartsWith("--") && a != "--everywhere");
         if (unknown is not null) throw new FormatException($"unknown flag {unknown}");
-        var everywhere = argv.Contains("--everywhere");
-        var targets = argv.Where(a => a != "--everywhere").ToList();
+        var everywhere = rest.Contains("--everywhere");
+        var targets = rest.Where(a => a != "--everywhere").ToList();
+        // the requester says why, and the killed run's record keeps it: a supervisor reading the
+        // record learns who stopped its run without guessing from the exit code alone
+        var killReason = why is null ? KilledViaKill : $"{KilledViaKill}: {why}";
         if (targets.Count == 0) throw new FormatException("kill requires <id|name|all>");
         if (everywhere && targets.Any(t => t != "all"))
             throw new FormatException("--everywhere only goes with `all`; a run named by id is killed wherever it is");
@@ -556,7 +571,7 @@ public static partial class Program
                     ? $" — outside this scope, belonging to {Scope.Describe(r)}"
                     : "";
                 Console.WriteLine($"tman: killing {r.Name ?? r.Id} (pid {r.Pid}){owner}");
-                if (Reaper.KillRun(r, "killed via tman kill")) killed++;
+                if (Reaper.KillRun(r, killReason)) killed++;
                 else failed++;
             }
         }

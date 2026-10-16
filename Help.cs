@@ -71,8 +71,8 @@ public static class Help
             queue-timeout 5m). A cap value tman cannot read refuses the run.
 
             exit: the child's own code, or 124 max-time, 125 stall, 126 max-mem/max-cpu/limit-mem, 127 cannot
-            start / bad flag or config, 130 killed, interrupted, queue timeout, or name already
-            running, 74 the run store cannot be written.
+            start / bad flag or config, 75 killed on request (`tman kill`, `--replace`), 130
+            interrupted, queue timeout, or name already running, 74 the run store cannot be written.
             """),
         new("<alias>",
             ["tman <alias> [args...]"],
@@ -93,12 +93,14 @@ public static class Help
             """,
             ["ls"]),
         new("kill",
-            ["tman kill <id|name|id-prefix|all>...", "tman kill all --everywhere"],
+            ["tman kill <id|name|id-prefix|all>... [--reason <text>]", "tman kill all --everywhere"],
             "kill run(s)",
             """
             Kills each matching live run's process tree, queued runs included — a queued run ends
             without ever starting its child. The run's own tman records it `killed: killed via tman
-            kill` and exits 130. An id prefix needs at least 4 characters.
+            kill` (`killed via tman kill: <text>` with --reason), marks the record killRequested, and
+            exits 75 — its own code, so a supervisor tells the kill from the run failing or a
+            Ctrl+C (130). An id prefix needs at least 4 characters.
 
             `all` means your own runs: the same project root (the directory holding the nearest
             .tman.kdl above the cwd, else the cwd) and, when both sides have one, the same agent
@@ -108,6 +110,7 @@ public static class Help
 
               --everywhere        with `all`: every live run on the machine. Needs a controlling
                                   terminal (/dev/tty); without one it refuses with exit 77
+              --reason <text>     why, in the killed runs' records: who is stopping them and for what
 
             exit: 0, or 1 when part of a run's tree could not be killed; 127 for an unknown flag;
             77 for `--everywhere` without a terminal.

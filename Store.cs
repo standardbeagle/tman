@@ -71,7 +71,21 @@ public sealed class RunRecord
     /// <summary>The CPUs limit-cpus confined the run to; null when it set none. See <see cref="Confinement"/>.</summary>
     public int[]? Cpus { get; set; }
     public string? KillReason { get; set; }
+    /// <summary>
+    /// The run was ended on a kill request (`tman kill`, `--replace`): <see cref="KillReason"/> is
+    /// the request's own words, and the run exits <see cref="Runner.ExitKillRequested"/>. Set by
+    /// <see cref="EndOnKillRequest"/> only, so a reader tells the kill from a cancel, a timeout or an
+    /// unknown exit by this field, never by the reason's wording.
+    /// </summary>
     public bool KillRequested { get; set; }
+
+    /// <summary>Ends the record as killed on the kill request <paramref name="reason"/>.</summary>
+    public void EndOnKillRequest(string reason)
+    {
+        State = RunState.Killed;
+        KillReason = reason;
+        KillRequested = true;
+    }
     /// <summary>The named queue the run joined, from the machine config; null when it named none.</summary>
     public string? Queue { get; set; }
     /// <summary>
