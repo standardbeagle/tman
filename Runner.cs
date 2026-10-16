@@ -153,7 +153,7 @@ public static class Runner
             interrupted = true;
             interrupt.Cancel();
         };
-        Console.CancelKeyPress += onCancel;
+        Interrupt.Listen(onCancel);
 
         record.State = RunState.Running;
         record.StartedUtc = record.HeartbeatUtc = record.LastOutputUtc = Utc();
@@ -162,7 +162,7 @@ public static class Runner
         try { confinement = Confinement.For(record); }
         catch (Exception e) when (e is FormatException or Win32Exception)
         {
-            Console.CancelKeyPress -= onCancel;
+            Interrupt.Unlisten(onCancel);
             return RecordStartFailure(record, e.Message, log);
         }
 
@@ -173,7 +173,7 @@ public static class Runner
         }
         catch (Exception e)
         {
-            Console.CancelKeyPress -= onCancel;
+            Interrupt.Unlisten(onCancel);
             confinement.Dispose();
             return RecordStartFailure(record, $"cannot start '{command}': {e.Message}", log);
         }
@@ -204,7 +204,7 @@ public static class Runner
         // running behind the error that reports it
         catch (KnownError)
         {
-            Console.CancelKeyPress -= onCancel;
+            Interrupt.Unlisten(onCancel);
             ProcUtil.KillTree(proc);
             proc.WaitForExit();
             proc.Dispose();
@@ -376,7 +376,7 @@ public static class Runner
                 killReason = interrupted ? "interrupted" : "cancelled";
                 killState = RunState.Killed;
             }
-            Console.CancelKeyPress -= onCancel;
+            Interrupt.Unlisten(onCancel);
             // a limit the kernel enforced ended the run without tman doing anything, so it is only
             // known once the run is over — and it outranks the bare signal the root died of
             // asked even when tman did the killing: asking is also what clears a scope that failed

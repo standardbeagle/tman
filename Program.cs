@@ -293,7 +293,7 @@ public static partial class Program
             e.Cancel = true;
             interrupt.Cancel();
         };
-        Console.CancelKeyPress += onCancel;
+        Interrupt.Listen(onCancel);
 
         var record = Runner.NewRecord(command, args, caps, name, alias, group, cwd);
         FileStream? slotFile = null;
@@ -321,7 +321,7 @@ public static partial class Program
         }
         finally
         {
-            Console.CancelKeyPress -= onCancel;
+            Interrupt.Unlisten(onCancel);
             if (slotFile is not null) Store.ReleaseLock(slotFile);
             if (lockFile is not null) Store.ReleaseLock(lockFile);
         }
@@ -436,7 +436,7 @@ public static partial class Program
 
         using var interrupt = new CancellationTokenSource();
         ConsoleCancelEventHandler onCancel = (_, e) => { e.Cancel = true; interrupt.Cancel(); };
-        Console.CancelKeyPress += onCancel;
+        Interrupt.Listen(onCancel);
         try
         {
             var cost = new Admission.AdmissionCost(cores.Value, memMb.Value);
@@ -472,7 +472,7 @@ public static partial class Program
         }
         finally
         {
-            Console.CancelKeyPress -= onCancel;
+            Interrupt.Unlisten(onCancel);
         }
     }
 
