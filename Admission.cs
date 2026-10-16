@@ -210,7 +210,14 @@ public static class Admission
             if ((Store.ReadKillRequest(record.Id) ?? (ct.IsCancellationRequested ? CancelledReason : null)) is { } stop)
             { EndQueued(record, stop); return false; }
             var attempt = TryAdmit(record, queue, cost, exclusive, aliasCores, aliasMemMb, gate);
-            if (attempt == AdmitOutcome.Admitted) return true;
+            if (attempt == AdmitOutcome.Admitted)
+            {
+                // a fixed form a supervisor can parse to learn the run left the line, said only by a
+                // run that said it queued: the child's own first output may be minutes later
+                if (said)
+                    Console.Error.WriteLine($"tman: admitted to '{queue.Name}' after {Canon.Duration(Stopwatch.GetElapsedTime(since))}");
+                return true;
+            }
 
             var elapsed = Stopwatch.GetElapsedTime(since);
             if (elapsed >= queue.Timeout)
