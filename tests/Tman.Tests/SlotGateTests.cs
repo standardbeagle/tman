@@ -224,7 +224,8 @@ public class SlotGateTests : IDisposable
         Assert.NotNull(held);
         var caps = new Caps { MaxParallel = 1, QueueTimeout = TimeSpan.Zero };
 
-        Assert.Equal(Runner.ExitKilled, await Sleep("0", caps));
+        // the slot is held and the run may not wait: it times out in the queue, tman's stop
+        Assert.Equal(Runner.ExitStoppedByTman, await Sleep("0", caps));
         // a supervised process re-entering tman would otherwise queue behind its own parent
         Environment.SetEnvironmentVariable(Runner.ParentIdEnvVar, "parent-run-id");
         Assert.Equal(0, await Sleep("0", caps));

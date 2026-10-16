@@ -100,6 +100,7 @@ public class QueuedRunTests : IDisposable
         var ended = Assert.Single(Store.LoadAll(), r => r.State == RunState.Killed);
         Assert.StartsWith("queue timeout waiting for a 'sleep@", ended.KillReason);
         Assert.Null(ended.ChildStartUtc);
+        Assert.True(ended.QueueTimedOut);
         Assert.InRange(ended.QueuedSeconds ?? 0, 1, 10);
     }
 

@@ -50,7 +50,7 @@ curl -fsSL https://raw.githubusercontent.com/standardbeagle/tman/main/install.sh
     <tr><td><code>--limit-cpus N</code></td><td>—</td><td>run the whole tree on N CPUs through an affinity mask the kernel enforces, so <code>nproc</code> sees N; Linux and Windows, refused on macOS</td></tr>
     <tr><td><code>--limit-mem M</code></td><td>—</td><td>memory ceiling the kernel enforces on the whole tree (a systemd user scope on Linux, a Job Object on Windows); crossing it ends the tree, exit 126; refused on macOS</td></tr>
     <tr><td><code>--max-parallel N</code></td><td>2</td><td>queue until one of the bucket's N slots can be held; a run that waits says so once on stderr, and once more when it gets a slot</td></tr>
-    <tr><td><code>--queue-timeout T</code></td><td>5m</td><td>give up waiting — for a bucket slot, or for a named queue's admission</td></tr>
+    <tr><td><code>--queue-timeout T</code></td><td>5m</td><td>give up waiting — for a bucket slot, or for a named queue's admission; the run exits 75 and its record says <code>QueueTimedOut</code> and <code>QueuedSeconds</code></td></tr>
     <tr><td><code>--queue Q</code></td><td>—</td><td>wait in the machine-wide named queue Q, declared in <code>~/.tman/tman.kdl</code> as <code>queue "Q" &#123; cores "80%"; mem "80%" &#125;</code> and admitted by measured cost (cores and memory); with no queue named anywhere, the machine's <code>default</code> queue if one is declared. A run that had to wait says <code>tman: admitted to 'Q' after 3m05s</code> on stderr when it starts</td></tr>
     <tr><td><code>--no-queue</code></td><td>off</td><td>join no queue, whatever <code>.tman.kdl</code> says, so the run books nothing; an alias can opt out without a flag with <code>no-queue true</code></td></tr>
     <tr><td><code>--exclusive</code></td><td>off</td><td>run alone in its queue: wait for admitted work to finish, then hold the queue until it exits; past the starvation bound it starts beside the runs still admitted and names them</td></tr>
@@ -194,8 +194,8 @@ alias "dev" &#123;
     <tr><td>125</td><td>stalled (<code>--stall</code>)</td></tr>
     <tr><td>126</td><td>culled (<code>--max-mem</code> / <code>--max-cpu</code>)</td></tr>
     <tr><td>127</td><td>command / config not found</td></tr>
-    <tr><td>75</td><td>killed on request (<code>tman kill</code>, or <code>--replace</code> by another run); the record says <code>KillRequested</code> and the reason</td></tr>
-    <tr><td>130</td><td>killed (dedup refusal, queue timeout, Ctrl+C, exit status unknown)</td></tr>
+    <tr><td>75</td><td>stopped by tman: killed on request (<code>tman kill</code>, or <code>--replace</code> by another run; the record says <code>KillRequested</code> and the reason), or ended by its queue-timeout (the record says <code>QueueTimedOut</code> and <code>QueuedSeconds</code>)</td></tr>
+    <tr><td>130</td><td>killed (dedup refusal, Ctrl+C, exit status unknown)</td></tr>
   </table>
 
   <h2>claude code hook</h2>

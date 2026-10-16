@@ -885,6 +885,7 @@ public class AdmissionBudgetTests : IDisposable
             $"the waiter took {elapsed} to honour a one-second queue-timeout");
         // a named queue's timeout exits as tman stopping the run, and the record says how long it waited
         Assert.Equal(Runner.ExitStoppedByTman, Runner.ExitCodeFor(ended));
+        Assert.True(ended.QueueTimedOut);
         Assert.InRange(ended.QueuedSeconds ?? 0, 1, 3);
     }
 

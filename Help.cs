@@ -71,8 +71,8 @@ public static class Help
             queue-timeout 5m). A cap value tman cannot read refuses the run.
 
             exit: the child's own code, or 124 max-time, 125 stall, 126 max-mem/max-cpu/limit-mem, 127 cannot
-            start / bad flag or config, 75 killed on request (`tman kill`, `--replace`), 130
-            interrupted, queue timeout, or name already running, 74 the run store cannot be written.
+            start / bad flag or config, 75 stopped by tman (`tman kill`, `--replace`, queue timeout),
+            130 interrupted or name already running, 74 the run store cannot be written.
             """),
         new("<alias>",
             ["tman <alias> [args...]"],
@@ -161,7 +161,8 @@ public static class Help
               --pid P             release when pid P exits; without it, hold until killed
               --queue Q           the machine queue to hold in (default: "default")
 
-            exit: 0 when the held pid exited, 130 when cancelled or refused.
+            exit: 0 when the held pid exited, 75 when stopped by tman (`tman kill`, queue timeout),
+            130 when cancelled or refused.
             """),
         new("probe",
             ["tman probe --pid <pid> [--start-ticks <ticks>]"],

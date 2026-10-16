@@ -102,7 +102,7 @@ tman init --shims --gitignore
 | `--limit-cpus N` | — | run the whole tree on N CPUs, enforced by the kernel — see [Kernel-enforced limits](#kernel-enforced-limits) |
 | `--limit-mem M` | — | memory ceiling (MB or `2g`) the kernel enforces on the whole tree; crossing it ends the tree → exit 126 |
 | `--max-parallel N` | 2 | queue until one of the bucket's N slots can be held; a run that has to wait says so once on stderr (with the queue timeout) and once more, `slot acquired after Xs`, when it gets through. While it waits it is a `queued` run: `tman list` shows it, `tman kill` ends it (exit 75), and Ctrl+C ends it as `killed: cancelled while queued` with exit 130 — none of which starts its child |
-| `--queue-timeout T` | 5m | give up waiting — for a bucket slot, or for a [named queue](#named-queues)'s admission; the run is recorded `killed: queue timeout …` and exits 130 |
+| `--queue-timeout T` | 5m | give up waiting — for a bucket slot, or for a [named queue](#named-queues)'s admission; the run is recorded `killed: queue timeout …` with `QueueTimedOut: true` and how long it waited (`QueuedSeconds`), and exits 75 — tman stopped it, as with `tman kill`, so a supervisor re-runs it rather than charging the work |
 | `--queue Q` | — | wait in the machine-wide [named queue](#named-queues) Q, admitted by measured cost; with no queue named anywhere, the machine's `default` queue if one is declared |
 | `--no-queue` | off | join no queue, even one the alias, `defaults`, or the machine's `default` names |
 | `--exclusive` | off | run alone in its queue: wait for admitted runs to finish — not for `tman hold` bookings, service runs or load outside the queue — then hold the queue until it exits; holds are still admitted beside it. Past the starvation bound it stops waiting and starts beside the runs still admitted, naming them on stderr |
@@ -607,8 +607,8 @@ record written by a different tman version is discarded rather than half-read.
 | 125 | stalled (`--stall`) |
 | 126 | culled (`--max-mem` / `--max-cpu` / `--limit-mem`) |
 | 127 | command / config not found; a program that cannot be started is recorded as `startfailed` with the reason, and gets a digest |
-| 75 | killed on request: `tman kill`, or `--replace` by another run; the record says `KillRequested` and the request's reason |
-| 130 | killed (dedup refusal, queue timeout, Ctrl+C, exit status unknown) |
+| 75 | stopped by tman, not by the work: killed on request (`tman kill`, or `--replace` by another run; the record says `KillRequested` and the request's reason), or ended by its queue-timeout before its child started (the record says `QueueTimedOut` and `QueuedSeconds`) |
+| 130 | killed (dedup refusal, Ctrl+C, exit status unknown) |
 
 tman never reports 0 for a run it did not see finish. A Ctrl+C interrupts the run as a whole, so a
 child that traps the signal and exits 0 on its way out is still reported as 130. That holds however

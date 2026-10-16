@@ -11,9 +11,10 @@ public static class Runner
     public const int ExitNotFound = 127;
     public const int ExitKilled = 130;
     /// <summary>
-    /// sysexits EX_TEMPFAIL: the run was ended on a kill request (`tman kill`, or `--replace` by
-    /// another run), not by the run failing, a deadline, a cap or Ctrl+C. Its own code, so a
-    /// supervisor can tell a deploy's or an operator's kill from the work it judges and re-run it.
+    /// sysexits EX_TEMPFAIL: tman stopped the run — a kill request (`tman kill`, or `--replace` by
+    /// another run), or a queue-timeout that ended it before its child started — not the run failing,
+    /// a deadline, a cap or Ctrl+C. Its own code, so a supervisor can tell a deploy's or an operator's
+    /// kill, or a host too busy to admit the run, from the work it judges, and re-run it.
     /// </summary>
     public const int ExitStoppedByTman = 75;
     /// <summary>EX_NOPERM: the caller may not do this, as opposed to the command failing.</summary>
@@ -458,7 +459,7 @@ public static class Runner
         record.State switch
         {
             RunState.Exited => record.ExitCode!.Value,
-            RunState.Killed when record.KillRequested => ExitStoppedByTman,
+            RunState.Killed when record.KillRequested || record.QueueTimedOut => ExitStoppedByTman,
             RunState.StartFailed => ExitNotFound,
             RunState.TimedOut => ExitTimeout,
             RunState.Stalled => ExitStalled,

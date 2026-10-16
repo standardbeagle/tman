@@ -86,6 +86,24 @@ public sealed class RunRecord
         KillReason = reason;
         KillRequested = true;
     }
+
+    /// <summary>
+    /// The run waited out its queue-timeout — for a bucket slot or a named queue's admission — and
+    /// ended without starting its child; <see cref="QueuedSeconds"/> says how long it waited. Like a
+    /// kill request it is tman stopping the run, not the run failing, so it exits
+    /// <see cref="Runner.ExitStoppedByTman"/>. Set by <see cref="EndOnQueueTimeout"/> only, so a
+    /// reader tells it from a cancel by this field, never by the reason's wording.
+    /// </summary>
+    public bool QueueTimedOut { get; set; }
+
+    /// <summary>Ends the record as killed on its queue-timeout, after waiting <paramref name="waited"/>.</summary>
+    public void EndOnQueueTimeout(string reason, TimeSpan waited)
+    {
+        State = RunState.Killed;
+        KillReason = reason;
+        QueueTimedOut = true;
+        QueuedSeconds = waited.TotalSeconds;
+    }
     /// <summary>The named queue the run joined, from the machine config; null when it named none.</summary>
     public string? Queue { get; set; }
     /// <summary>
@@ -123,7 +141,10 @@ public sealed class RunRecord
     /// </summary>
     public bool Service { get; set; }
 
-    /// <summary>How long the run waited in its queue before admission; null when it never queued.</summary>
+    /// <summary>
+    /// How long the run waited in its queue before admission, or before its queue-timeout ended it;
+    /// null when it never queued.
+    /// </summary>
     public double? QueuedSeconds { get; set; }
 
     public bool IsNested => ParentId is not null;

@@ -8,6 +8,15 @@ below 1.0, behavior changes land in minor releases.
 
 ## [Unreleased]
 
+### Changed
+- **A run that times out in its queue exits 75, not 130.** Waiting out `queue-timeout` — for a
+  bucket slot, a named queue's admission, or a `tman hold` — ends a run tman never started, yet it
+  exited 130 like a Ctrl+C, so a supervisor charged a busy host to the work: worktrack recorded it as
+  the task failing. It is tman stopping the run, as `tman kill` does, and now exits the same 75. Its
+  record carries `QueueTimedOut: true` and how long it waited (`QueuedSeconds`, until now set only
+  for a run that was admitted). A script that read 130 as "queue timed out" must read 75 and the
+  field instead.
+
 ### Fixed
 - **A run's booked cores no longer read its CPU over a start the clock drifted from.** A finished
   run's mean cores divided its CPU-seconds by the time from the child's start to its last heartbeat,

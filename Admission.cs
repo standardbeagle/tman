@@ -230,7 +230,7 @@ public static class Admission
 
             var elapsed = Stopwatch.GetElapsedTime(since);
             if (elapsed >= queue.Timeout)
-            { EndQueued(record, $"queue timeout waiting for queue '{queue.Name}'"); return false; }
+            { EndQueued(record, $"queue timeout waiting for queue '{queue.Name}'", timedOutAfter: elapsed); return false; }
 
             if (!said)
             {
@@ -490,7 +490,7 @@ public static class Admission
             if (tryClaim() is { } slot) return slot;
             var elapsed = Stopwatch.GetElapsedTime(since);
             if (elapsed >= timeout)
-                return EndQueued(record, $"queue timeout waiting for {waitingFor}");
+                return EndQueued(record, $"queue timeout waiting for {waitingFor}", timedOutAfter: elapsed);
             waiting(elapsed);
 
             try { await Task.Delay(PollInterval, ct); }
@@ -500,10 +500,11 @@ public static class Admission
         }
     }
 
-    static FileStream? EndQueued(RunRecord record, string reason, bool killRequested = false)
+    static FileStream? EndQueued(RunRecord record, string reason, bool killRequested = false, TimeSpan? timedOutAfter = null)
     {
         Console.Error.WriteLine($"tman: {reason}");
         if (killRequested) record.EndOnKillRequest(reason);
+        else if (timedOutAfter is { } waited) record.EndOnQueueTimeout(reason, waited);
         else
         {
             record.State = RunState.Killed;
