@@ -57,7 +57,7 @@ public class AdmissionBudgetTests : IDisposable
         Assert.Equal("default", record.Queue);
 
         Assert.Equal(0, await Program.Main(["kill", record.Id]));
-        Assert.Equal(Runner.ExitKillRequested, await run.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.Equal(Runner.ExitStoppedByTman, await run.WaitAsync(TimeSpan.FromSeconds(10)));
     }
 
     [UnixFact("runs the sleep binary through Program.Main")]
@@ -77,7 +77,7 @@ public class AdmissionBudgetTests : IDisposable
         Assert.Null(record.Queue);
 
         Assert.Equal(0, await Program.Main(["kill", record.Id]));
-        Assert.Equal(Runner.ExitKillRequested, await run.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.Equal(Runner.ExitStoppedByTman, await run.WaitAsync(TimeSpan.FromSeconds(10)));
     }
 
     static async Task<RunRecord> Await(Func<RunRecord, bool> match)
@@ -366,8 +366,8 @@ public class AdmissionBudgetTests : IDisposable
 
         Assert.Equal(0, await Program.Main(["kill", aliased.Id]));
         Assert.Equal(0, await Program.Main(["kill", bare.Id]));
-        Assert.Equal(Runner.ExitKillRequested, await alias.WaitAsync(TimeSpan.FromSeconds(10)));
-        Assert.Equal(Runner.ExitKillRequested, await flagged.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.Equal(Runner.ExitStoppedByTman, await alias.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.Equal(Runner.ExitStoppedByTman, await flagged.WaitAsync(TimeSpan.FromSeconds(10)));
     }
 
     [Theory]
@@ -754,7 +754,7 @@ public class AdmissionBudgetTests : IDisposable
         Assert.True(record.Exclusive);
 
         Assert.Equal(0, await Program.Main(["kill", record.Id]));
-        Assert.Equal(Runner.ExitKillRequested, await run.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.Equal(Runner.ExitStoppedByTman, await run.WaitAsync(TimeSpan.FromSeconds(10)));
     }
 
     [Fact]
@@ -789,7 +789,7 @@ public class AdmissionBudgetTests : IDisposable
         Assert.Null(record.AdmittedUtc);
 
         Assert.Equal(0, await Program.Main(["kill", record.Id]));
-        Assert.Equal(Runner.ExitKillRequested, await run.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.Equal(Runner.ExitStoppedByTman, await run.WaitAsync(TimeSpan.FromSeconds(10)));
     }
 
     [Fact]

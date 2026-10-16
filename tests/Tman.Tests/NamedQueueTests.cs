@@ -390,7 +390,7 @@ public class NamedQueueRunTests : IDisposable
         Assert.Equal("compile", queued.Queue);
         Assert.Equal(0, await Program.Main(["kill", queued.Id]));
         // a waiter ended by `tman kill` exits as killed on request, like a running child
-        Assert.Equal(Runner.ExitKillRequested, await run.WaitAsync(TimeSpan.FromSeconds(3)));
+        Assert.Equal(Runner.ExitStoppedByTman, await run.WaitAsync(TimeSpan.FromSeconds(3)));
         var ended = Store.Load(queued.Id)!;
         Assert.Equal(RunState.Killed, ended.State);
         Assert.True(ended.KillRequested);
@@ -470,6 +470,6 @@ public class NamedQueueRunTests : IDisposable
             .Single(r => r.State == RunState.Queued && r.RunnerPid == Environment.ProcessId);
         Assert.Equal("compile", queued.Queue);
         Assert.Equal(0, await Program.Main(["kill", queued.Id]));
-        Assert.Equal(Runner.ExitKillRequested, await run.WaitAsync(TimeSpan.FromSeconds(3)));
+        Assert.Equal(Runner.ExitStoppedByTman, await run.WaitAsync(TimeSpan.FromSeconds(3)));
     }
 }

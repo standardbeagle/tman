@@ -75,7 +75,7 @@ public class QueuedRunTests : IDisposable
 
         Assert.Equal(0, await Program.Main(["kill", queued.Id]));
 
-        Assert.Equal(Runner.ExitKillRequested, await waiter.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.Equal(Runner.ExitStoppedByTman, await waiter.WaitAsync(TimeSpan.FromSeconds(10)));
         var ended = Store.Load(queued.Id)!;
         Assert.Equal(RunState.Killed, ended.State);
         Assert.True(ended.KillRequested);

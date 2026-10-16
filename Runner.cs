@@ -15,7 +15,7 @@ public static class Runner
     /// another run), not by the run failing, a deadline, a cap or Ctrl+C. Its own code, so a
     /// supervisor can tell a deploy's or an operator's kill from the work it judges and re-run it.
     /// </summary>
-    public const int ExitKillRequested = 75;
+    public const int ExitStoppedByTman = 75;
     /// <summary>EX_NOPERM: the caller may not do this, as opposed to the command failing.</summary>
     public const int ExitRefused = 77;
     /// <summary>sysexits EX_IOERR: tman's run store cannot be written, so no run can be recorded.</summary>
@@ -450,7 +450,7 @@ public static class Runner
         record.State switch
         {
             RunState.Exited => record.ExitCode!.Value,
-            RunState.Killed when record.KillRequested => ExitKillRequested,
+            RunState.Killed when record.KillRequested => ExitStoppedByTman,
             RunState.StartFailed => ExitNotFound,
             RunState.TimedOut => ExitTimeout,
             RunState.Stalled => ExitStalled,

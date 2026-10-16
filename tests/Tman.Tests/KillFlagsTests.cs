@@ -54,8 +54,8 @@ public class KillFlagsTests : IDisposable
         Assert.Equal(0, await Program.Main(["kill", r.Id]));
         var exit = await run.WaitAsync(TimeSpan.FromSeconds(15));
 
-        Assert.Equal(Runner.ExitKillRequested, exit);
-        Assert.NotEqual(Runner.ExitKilled, Runner.ExitKillRequested);
+        Assert.Equal(Runner.ExitStoppedByTman, exit);
+        Assert.NotEqual(Runner.ExitKilled, Runner.ExitStoppedByTman);
         var saved = Store.Load(r.Id)!;
         Assert.Equal(RunState.Killed, saved.State);
         Assert.True(saved.KillRequested);
@@ -71,7 +71,7 @@ public class KillFlagsTests : IDisposable
 
         Assert.Equal(0, await Program.Main(["kill", r.Id, "--reason", "fleet deploy of tman 0.7.6"]));
 
-        Assert.Equal(Runner.ExitKillRequested, await run.WaitAsync(TimeSpan.FromSeconds(15)));
+        Assert.Equal(Runner.ExitStoppedByTman, await run.WaitAsync(TimeSpan.FromSeconds(15)));
         Assert.Equal("killed via tman kill: fleet deploy of tman 0.7.6", Store.Load(r.Id)!.KillReason);
     }
 

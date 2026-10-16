@@ -73,7 +73,7 @@ public sealed class RunRecord
     public string? KillReason { get; set; }
     /// <summary>
     /// The run was ended on a kill request (`tman kill`, `--replace`): <see cref="KillReason"/> is
-    /// the request's own words, and the run exits <see cref="Runner.ExitKillRequested"/>. Set by
+    /// the request's own words, and the run exits <see cref="Runner.ExitStoppedByTman"/>. Set by
     /// <see cref="EndOnKillRequest"/> only, so a reader tells the kill from a cancel, a timeout or an
     /// unknown exit by this field, never by the reason's wording.
     /// </summary>
