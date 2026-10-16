@@ -17,6 +17,13 @@ below 1.0, behavior changes land in minor releases.
   18.6 cores against a 12-core queue, so every run of that alias waited for an empty queue and timed
   out behind a host at load 2.4. The wall time is now the run's own start to its last heartbeat, both
   on one clock; replaying that host's records books the same runs at 2.9-3.2 cores.
+- **A Ctrl+C'd run whose child exits 0 is reported interrupted however late .NET runs tman's
+  handler.** .NET runs SIGINT handlers on a thread it starts for the signal, and a loaded host could
+  schedule that thread after tman had read the child's exit, so a child that trapped the same Ctrl+C
+  and exited 0 was recorded as a clean 0 (the v0.7.8 release job failed on this on macos-15-intel).
+  tman now counts SIGINTs in signal context, chained in front of the runtime's handler, and decides
+  the run's outcome from that count; the kernel delivers the SIGINT before the child's exit can be
+  seen. Building from source on Linux and macOS now needs a C compiler (`cc`).
 
 ## [0.7.8] - 2026-10-16
 

@@ -1,3 +1,6 @@
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+
 namespace Tman;
 
 /// <summary>
@@ -9,6 +12,16 @@ namespace Tman;
 /// ran late on a loaded host — so the first listener also subscribes <see cref="Absorb"/>, which
 /// never leaves. A Ctrl+C no run is listening for is cancelled and said, and the run's recorded
 /// outcome stands.
+/// <para>
+/// Because that thread can run late, a handler alone cannot say whether a SIGINT arrived before a
+/// child's exit was read: a child that exits 0 on the same Ctrl+C read as a finished run. So every
+/// listen also counts SIGINTs in signal context (<c>native/tman_sigint.c</c>), and
+/// <see cref="Received"/> answers synchronously. The kernel delivers the SIGINT before the SIGCHLD of
+/// a child that exits on it, so the count has moved by the time the exit is seen. The counter is C,
+/// not an [UnmanagedCallersOnly] method: a signal lands on whatever thread is running, a reverse
+/// P/Invoke entered on a thread already in managed code fails fast, and attaching an unknown thread
+/// allocates — neither is safe in a signal handler.
+/// </para>
 /// </summary>
 internal static class Interrupt
 {
@@ -21,6 +34,10 @@ internal static class Interrupt
         if (Interlocked.Exchange(ref s_absorbing, 1) == 0) Console.CancelKeyPress += Absorb;
         Interlocked.Increment(ref s_listening);
         Console.CancelKeyPress += handler;
+        // after the subscription, which installs the runtime's handler: the counter chains in front
+        // of it. Every listen re-checks, so a disposition replaced since is counted again
+        if (!OperatingSystem.IsWindows() && tman_sigint_install() != 0)
+            throw new Win32Exception(Marshal.GetLastPInvokeError(), "tman: cannot count SIGINTs");
     }
 
     /// <summary>Unsubscribes a handler <see cref="Listen"/> subscribed; Ctrl+C stays tman's.</summary>
@@ -30,10 +47,22 @@ internal static class Interrupt
         Interlocked.Decrement(ref s_listening);
     }
 
+    /// <summary>
+    /// SIGINTs this process has received since it first listened, counted as each arrived. Windows
+    /// has no SIGINT, and reads 0.
+    /// </summary>
+    public static long Received => OperatingSystem.IsWindows() ? 0 : tman_sigint_received();
+
     static void Absorb(object? sender, ConsoleCancelEventArgs e)
     {
         e.Cancel = true;
         if (Volatile.Read(ref s_listening) == 0)
             Console.Error.WriteLine("tman: interrupted after the run ended; its outcome stands");
     }
+
+    [DllImport("tman_sigint", SetLastError = true)]
+    static extern int tman_sigint_install();
+
+    [DllImport("tman_sigint")]
+    static extern long tman_sigint_received();
 }

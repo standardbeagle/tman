@@ -160,6 +160,13 @@ public static class Runner
             interrupt.Cancel();
         };
         Interrupt.Listen(onCancel);
+        // the handler above runs on a thread the runtime starts for the signal, which can run after
+        // the child's exit is read; the count moves in signal context, before that exit can be seen
+        var sigintsBefore = Interrupt.Received;
+        string? StopReason() =>
+            interrupted || Interrupt.Received != sigintsBefore ? "interrupted"
+            : interrupt.IsCancellationRequested ? "cancelled"
+            : null;
 
         record.State = RunState.Running;
         record.StartedUtc = record.HeartbeatUtc = record.LastOutputUtc = Utc();
@@ -352,9 +359,9 @@ public static class Runner
         {
             // checked here and not only where the delay was cut short: the loop can also end because
             // the child exited on the same signal, and that exit is still not a finished run
-            if (killReason is null && interrupt.IsCancellationRequested)
+            if (killReason is null && StopReason() is { } stopped)
             {
-                killReason = interrupted ? "interrupted" : "cancelled";
+                killReason = stopped;
                 killState = RunState.Killed;
             }
             // and here, after the loop, because the usual way a requested kill shows up is the child
@@ -378,10 +385,11 @@ public static class Runner
             await DrainOutput(Task.WhenAll(outPump, errPump), outputPipes);
             // and once more now the child is reaped and drained: the same Ctrl+C reaches the child
             // and tman together, and a child that handles it at once can exit before tman's own
-            // handler has run — an interrupted run, whichever of the two noticed first
-            if (killReason is null && interrupt.IsCancellationRequested)
+            // handler has run — an interrupted run, whichever of the two noticed first. The SIGINT
+            // count has moved by now whatever that handler's thread is doing
+            if (killReason is null && StopReason() is { } stoppedAsItExited)
             {
-                killReason = interrupted ? "interrupted" : "cancelled";
+                killReason = stoppedAsItExited;
                 killState = RunState.Killed;
             }
             Interrupt.Unlisten(onCancel);

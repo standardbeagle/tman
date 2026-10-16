@@ -50,7 +50,8 @@ npm install -g @standardbeagle/tman
 curl -fsSL https://raw.githubusercontent.com/standardbeagle/tman/main/install.sh | sh
 ```
 
-**from source** — requires the [.NET 10 SDK](https://dot.net):
+**from source** — requires the [.NET 10 SDK](https://dot.net), and on Linux and macOS a C compiler (`cc`) for the
+signal counter in `native/`:
 ```sh
 git clone https://github.com/standardbeagle/tman
 cd tman
@@ -610,7 +611,9 @@ record written by a different tman version is discarded rather than half-read.
 | 130 | killed (dedup refusal, queue timeout, Ctrl+C, exit status unknown) |
 
 tman never reports 0 for a run it did not see finish. A Ctrl+C interrupts the run as a whole, so a
-child that traps the signal and exits 0 on its way out is still reported as 130.
+child that traps the signal and exits 0 on its way out is still reported as 130. That holds however
+late .NET runs tman's handler: the SIGINT is counted in signal context, before the child's exit can
+be seen, and the run's outcome is read from that count.
 
 ## Scope
 
