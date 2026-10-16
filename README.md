@@ -79,7 +79,7 @@ tman init --shims --gitignore
 | `tman run [flags] -- <cmd> [args]` | run a process under supervision |
 | `tman run --alias <name> [args]` / `tman <alias>` | run a `.tman.kdl` alias |
 | `tman list [--all]` | list live runs — running, and queued for a slot (pid `-`) — or all records; PROJECT is the run's project root, the scope `kill all` works within |
-| `tman kill <id\|name\|all>` | kill run(s), queued ones included. `all` means *your* runs: the same project root (nearest `.tman.kdl` above the cwd, else the cwd) and, when both sides have one, the same agent session (`CLAUDE_CODE_SESSION_ID`); other projects' and sessions' runs are left alone and counted, so one agent cannot stop its siblings' runs. A run named by id or name is killed wherever it is, with its owner printed when that is outside your scope. `kill all --everywhere` lifts the scope but needs a controlling terminal (`/dev/tty`); without one it refuses with exit 77 and names the command a person runs — a queued run ends without ever starting its child; the killed run ends `killed: killed via tman kill` and its `tman` exits 130. `kill` leaves the reason in `~/.tman/runs/<id>.kill` before killing, and the run's own runner writes the outcome from it, so the two never race to save the record. An unknown flag refuses the command with exit 127 rather than being skipped; exits 1 when part of a run's tree could not be killed |
+| `tman kill <id\|name\|all> [--reason <text>]` | kill run(s), queued ones included. `all` means *your* runs: the same project root (nearest `.tman.kdl` above the cwd, else the cwd) and, when both sides have one, the same agent session (`CLAUDE_CODE_SESSION_ID`); other projects' and sessions' runs are left alone and counted, so one agent cannot stop its siblings' runs. A run named by id or name is killed wherever it is, with its owner printed when that is outside your scope. `kill all --everywhere` lifts the scope but needs a controlling terminal (`/dev/tty`); without one it refuses with exit 77 and names the command a person runs — a queued run ends without ever starting its child; the killed run ends `killed: killed via tman kill` (`killed via tman kill: <text>` with `--reason <text>`, which says who is stopping it and why), its record carries `KillRequested: true`, and its `tman` exits 75 — its own code, so a supervisor tells a deploy's or an operator's kill from the run failing or a Ctrl+C (130) without reading the reason's words. `kill` leaves the reason in `~/.tman/runs/<id>.kill` before killing, and the run's own runner writes the outcome from it, so the two never race to save the record. An unknown flag refuses the command with exit 127 rather than being skipped; exits 1 when part of a run's tree could not be killed |
 | `tman clean` | run the housekeeping sweep now and report what it did |
 | `tman status [id\|name\|id-prefix] [--json]` | summary counts and the host's unattributed load, or one run's detail |
 | `tman init [--shims] [--gitignore]` | scaffold `.tman.kdl` + shims (aliases it cannot detect are left commented out, so `./test` fails loudly instead of faking a pass); shims are named after the aliases in the config on disk, so re-running it in a project that already has one shims that file's aliases; `--gitignore` ignores `.tman/` and the shims, and skips an alias whose name is already a directory, so `/test` never hides a `test/` tree |
@@ -100,7 +100,7 @@ tman init --shims --gitignore
 | `--max-cpu P` | — | process-tree CPU above P% for 3 consecutive 1s ticks → cull, exit 126 |
 | `--limit-cpus N` | — | run the whole tree on N CPUs, enforced by the kernel — see [Kernel-enforced limits](#kernel-enforced-limits) |
 | `--limit-mem M` | — | memory ceiling (MB or `2g`) the kernel enforces on the whole tree; crossing it ends the tree → exit 126 |
-| `--max-parallel N` | 2 | queue until one of the bucket's N slots can be held; a run that has to wait says so once on stderr (with the queue timeout) and once more, `slot acquired after Xs`, when it gets through. While it waits it is a `queued` run: `tman list` shows it, `tman kill` ends it, and Ctrl+C ends it as `killed: cancelled while queued` with exit 130 — none of which starts its child |
+| `--max-parallel N` | 2 | queue until one of the bucket's N slots can be held; a run that has to wait says so once on stderr (with the queue timeout) and once more, `slot acquired after Xs`, when it gets through. While it waits it is a `queued` run: `tman list` shows it, `tman kill` ends it (exit 75), and Ctrl+C ends it as `killed: cancelled while queued` with exit 130 — none of which starts its child |
 | `--queue-timeout T` | 5m | give up waiting — for a bucket slot, or for a [named queue](#named-queues)'s admission; the run is recorded `killed: queue timeout …` and exits 130 |
 | `--queue Q` | — | wait in the machine-wide [named queue](#named-queues) Q, admitted by measured cost; with no queue named anywhere, the machine's `default` queue if one is declared |
 | `--no-queue` | off | join no queue, even one the alias, `defaults`, or the machine's `default` names |
@@ -387,7 +387,7 @@ queue is the only limit they all share. A machine that declares no `default` que
   `tman: admitted to 'compile' after 3m05s` (the wait as `42s`, `3m05s`, `1h02m` or `2d03h`); a run
   admitted at once writes neither line. It gives up after the queue's `queue-timeout`;
   `--queue-timeout` on the command line overrides it.
-- **Cancellable.** Ctrl+C or `tman kill` ends a waiter as `killed` with exit 130, its child never
+- **Cancellable.** Ctrl+C (exit 130) or `tman kill` (exit 75) ends a waiter as `killed`, its child never
   started, and the next in line moves up. A kill or a `queue-timeout` runs out within about a second,
   both because a kill touches the queue's event file and because the waiter never parks past the
   queue-timeout left to it.
@@ -601,7 +601,8 @@ record written by a different tman version is discarded rather than half-read.
 | 125 | stalled (`--stall`) |
 | 126 | culled (`--max-mem` / `--max-cpu` / `--limit-mem`) |
 | 127 | command / config not found; a program that cannot be started is recorded as `startfailed` with the reason, and gets a digest |
-| 130 | killed (dedup refusal, queue timeout, `tman kill`, Ctrl+C, exit status unknown) |
+| 75 | killed on request: `tman kill`, or `--replace` by another run; the record says `KillRequested` and the request's reason |
+| 130 | killed (dedup refusal, queue timeout, Ctrl+C, exit status unknown) |
 
 tman never reports 0 for a run it did not see finish. A Ctrl+C interrupts the run as a whole, so a
 child that traps the signal and exits 0 on its way out is still reported as 130.

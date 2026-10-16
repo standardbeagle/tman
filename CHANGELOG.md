@@ -8,6 +8,14 @@ below 1.0, behavior changes land in minor releases.
 
 ## [Unreleased]
 
+### Changed
+- **A run ended by `tman kill` exits 75, not 130.** Its record carries `KillRequested: true` beside
+  the reason, and `tman kill --reason <text>` records who is stopping it and why
+  (`killed via tman kill: <text>`). 130 stays for Ctrl+C, a queue timeout, a dedup refusal and an
+  unknown exit. A supervisor could not tell a deploy's kill from the run failing: worktrack charged a
+  fleet deploy's kill of a queued gate to the task it was judging (2026-10-15). A run killed by
+  another run's `--replace` exits 75 too.
+
 ## [0.7.6] - 2026-10-15
 
 ### Added
