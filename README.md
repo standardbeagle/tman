@@ -383,8 +383,10 @@ queue is the only limit they all share. A machine that declares no `default` que
   is not such an event (the waiter's own liveness is its pid, not the heartbeat), so a busy queue
   costs no wakeups, and the wait is not a poll. It re-checks on its own every 10 s, which is what
   notices a dead runner and the starvation bound. It says where it stands when it joins and once a
-  minute after that, and gives up after the queue's `queue-timeout`. `--queue-timeout` on the command
-  line overrides it.
+  minute after that, and when it is admitted it says so in a fixed form a supervisor can parse,
+  `tman: admitted to 'compile' after 3m05s` (the wait as `42s`, `3m05s`, `1h02m` or `2d03h`); a run
+  admitted at once writes neither line. It gives up after the queue's `queue-timeout`;
+  `--queue-timeout` on the command line overrides it.
 - **Cancellable.** Ctrl+C or `tman kill` ends a waiter as `killed` with exit 130, its child never
   started, and the next in line moves up. A kill or a `queue-timeout` runs out within about a second,
   both because a kill touches the queue's event file and because the waiter never parks past the
