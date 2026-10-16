@@ -8,6 +8,16 @@ below 1.0, behavior changes land in minor releases.
 
 ## [Unreleased]
 
+### Fixed
+- **A run's booked cores no longer read its CPU over a start the clock drifted from.** A finished
+  run's mean cores divided its CPU-seconds by the time from the child's start to its last heartbeat,
+  and Linux recomputes that start from boot time, which drifts from the wall clock the heartbeat is
+  read on. On beagle-ab (WSL2) one record in eight carried a start more than 2 s off, up to 152 s; a
+  61 s `test-by-name` run read a start 59 s late, booked 96.8 cores, and lifted its bucket's p90 to
+  18.6 cores against a 12-core queue, so every run of that alias waited for an empty queue and timed
+  out behind a host at load 2.4. The wall time is now the run's own start to its last heartbeat, both
+  on one clock; replaying that host's records books the same runs at 2.9-3.2 cores.
+
 ## [0.7.8] - 2026-10-16
 
 ### Fixed

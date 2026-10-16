@@ -88,7 +88,7 @@ public static class Admission
     /// a long-lived server outside it (reused MSBuild nodes, VBCSCompiler) averages a fraction of a
     /// core there while the host runs flat out, and only the project knows that.
     /// Memory books the peak: overrunning it kills a run, so a run that once took 5 GB is sized at
-    /// 5 GB. Cores book the p90 of each run's mean (CPU-seconds over the child's wall time), because
+    /// 5 GB. Cores book the p90 of each run's mean (CPU-seconds over the run's wall time), because
     /// overrunning CPU only slows a run, and a build that fans out for a few seconds averages far
     /// less than it peaks; the queue's unattributed-load accounting corrects real oversubscription.
     /// A run with no CPU-seconds or no measurable wall time stands in with its peak cores.
@@ -107,10 +107,16 @@ public static class Admission
             memMb > 0 ? (long)Math.Ceiling(memMb) : queue.DefaultMemMb);
     }
 
-    /// <summary>A finished run's mean cores; its peak when it has no CPU-seconds or no wall time to divide by.</summary>
+    /// <summary>
+    /// A finished run's mean cores; its peak when it has no CPU-seconds or no wall time to divide by.
+    /// The wall time is <see cref="RunRecord.StartedUtc"/> to the final heartbeat, both read off the
+    /// one clock the runner timed the run on. Not <see cref="RunRecord.ChildStartUtc"/>: Linux
+    /// recomputes that from boot time, which drifts from the wall clock, and on beagle-ab (WSL2) a
+    /// 61 s run whose start read 59 s late booked 96.8 cores.
+    /// </summary>
     static double BookedCores(RunRecord r)
     {
-        var wallSeconds = r.ChildStartUtc is { } start ? (r.HeartbeatUtc - start).TotalSeconds : 0;
+        var wallSeconds = (r.HeartbeatUtc - r.StartedUtc).TotalSeconds;
         return r.CpuSeconds > 0 && wallSeconds > 0 ? r.CpuSeconds / wallSeconds : r.PeakCores;
     }
 

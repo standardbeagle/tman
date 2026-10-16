@@ -296,7 +296,7 @@ queue "compile" {
 A run is admitted when the cost it is **expected** to bear fits beside what is already admitted, so
 a 5 GB / 3-core full suite and a 120 MB single test are not the same claim on the machine. Expected
 cost is a high percentile of the run's bucket's recent `PeakMemMb` and of each run's mean cores (`CpuSeconds` over
-its child's wall time, its `PeakCores` when it has neither); with no history
+its own wall time, its `PeakCores` when it has neither); with no history
 yet, the queue's `cores-default`/`mem-default`. An alias's declared `cores`/`mem` (or the project's,
 in `defaults`) is a **floor** under that estimate: tman measures a run's own process tree, and work
 the run hands to a long-lived server outside it — a `dotnet build`'s reused MSBuild nodes and shared
