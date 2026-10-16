@@ -391,6 +391,92 @@ public class AdmissionBudgetTests : IDisposable
         finally { Admission.MeasureHost = prev; }
     }
 
+    // beagle-ab 2026-10-15: every exclusive ui-gate waited out the starvation bound behind admitted
+    // builds, and for those five minutes each agent turn's hold and each build that fitted was
+    // refused, because the waiting exclusive run sat at the head of the line
+
+    [UnixFact("writes records this process's runner owns")]
+    public async Task AHold_IsAdmittedWhileAnExclusiveRunWaitsAheadOfIt()
+    {
+        _home.WriteFile("tman.kdl", "queue \"q\" {\n    cores 4\n    mem 4g\n}\n");
+        var q = Config.Queue("q") with { Timeout = TimeSpan.FromMilliseconds(700) };
+        var prev = Admission.MeasureHost;
+        try
+        {
+            Admission.MeasureHost = () => new Host.Usage(0, 0);
+            Occupy("finiteocc001", cores: 1, memMb: 512);
+            Wait("uigatewait01", (1, 512), joinedAgo: TimeSpan.FromSeconds(1), exclusive: true);
+
+            // the exclusive run starts beside holds whatever they book, so a hold cannot delay it
+            var hold = Runner.NewRecord("hold", [], new Caps(), "hold", null, "hold@/h", "/tmp");
+            hold.Hold = true;
+            Assert.True(await Admission.ClaimAdmission(hold, q, new Admission.AdmissionCost(1, 512), false, null, null, default),
+                "a hold waited behind an exclusive run that was only waiting");
+        }
+        finally { Admission.MeasureHost = prev; }
+    }
+
+    [UnixFact("writes records this process's runner owns")]
+    public async Task AFiniteRunThatFits_PassesAWaitingExclusiveRun_UntilItStarves()
+    {
+        _home.WriteFile("tman.kdl", "queue \"q\" {\n    cores 4\n    mem 4g\n}\n");
+        var q = Config.Queue("q") with { Timeout = TimeSpan.FromMilliseconds(700) };
+        var prevHost = Admission.MeasureHost;
+        var prevBound = Admission.StarvationBound;
+        try
+        {
+            Admission.MeasureHost = () => new Host.Usage(0, 0);
+            Occupy("finiteocc001", cores: 1, memMb: 512);
+            var gate = Wait("uigatewait01", (1, 512), joinedAgo: TimeSpan.FromSeconds(1), exclusive: true);
+
+            // the exclusive run waits for finite runs to drain, not for room, so a build that fits
+            // beside the admitted work is not taking a gap it could use
+            var build = Runner.NewRecord("build", [], new Caps(), "build", null, "build@/b", "/tmp");
+            Assert.True(await Admission.ClaimAdmission(build, q, new Admission.AdmissionCost(1, 512), false, null, null, default),
+                "a finite run that fits waited behind an exclusive run that was only waiting");
+
+            // past the bound it reserves the queue: a later finite run waits, so the host drains for it
+            Admission.StarvationBound = TimeSpan.FromMilliseconds(500);
+            var test = Runner.NewRecord("test", [], new Caps(), "test", null, "test@/t", "/tmp");
+            Assert.False(await Admission.ClaimAdmission(test, q, new Admission.AdmissionCost(1, 512), false, null, null, default),
+                "a finite run passed an exclusive run past the starvation bound");
+            Assert.Null(Store.Load(gate.Id)!.AdmittedUtc);
+        }
+        finally
+        {
+            Admission.MeasureHost = prevHost;
+            Admission.StarvationBound = prevBound;
+        }
+    }
+
+    [UnixFact("writes records this process's runner owns")]
+    public async Task AHold_IsAdmittedAheadOfAStarvingWaiter_WhichStartsBesideHoldsAnyway()
+    {
+        _home.WriteFile("tman.kdl", "queue \"q\" {\n    cores 4\n    mem 4g\n}\n");
+        var q = Config.Queue("q") with { Timeout = TimeSpan.FromMilliseconds(700) };
+        var prevHost = Admission.MeasureHost;
+        var prevBound = Admission.StarvationBound;
+        Admission.StarvationBound = TimeSpan.FromMilliseconds(100);
+        try
+        {
+            Admission.MeasureHost = () => new Host.Usage(0, 0);
+            Occupy("finiteocc001", cores: 1, memMb: 512);
+            Wait("largewaiting1", (4, 4 * 1024), joinedAgo: TimeSpan.FromSeconds(1));
+
+            // a starving head starts once no finite run is admitted, beside any hold: refusing the
+            // hold buys it nothing and stalls the agent turn the hold books
+            var hold = Runner.NewRecord("hold", [], new Caps(), "hold", null, "hold@/h", "/tmp");
+            hold.Hold = true;
+            Assert.True(await Admission.ClaimAdmission(hold, q, new Admission.AdmissionCost(1, 512), false, null, null, default),
+                "a hold waited behind a starving waiter it cannot delay");
+        }
+        finally
+        {
+            Admission.MeasureHost = prevHost;
+            Admission.StarvationBound = prevBound;
+        }
+    }
+
     void Occupy(string id, double cores, long memMb, string queue = "q", bool hold = false, bool service = false)
     {
         var me = ProcUtil.OwnStart();
@@ -1090,13 +1176,13 @@ public class AdmissionBudgetTests : IDisposable
         Assert.NotNull(run.AdmittedUtc);
     }
 
-    RunRecord Wait(string id, (double Cores, long MemMb) cost, TimeSpan joinedAgo)
+    RunRecord Wait(string id, (double Cores, long MemMb) cost, TimeSpan joinedAgo, bool exclusive = false)
     {
         var me = ProcUtil.OwnStart();
         var r = new RunRecord
         {
             Id = id, Command = "/bin/sh", Args = [], Group = "wait@" + _home.Path, State = RunState.Queued,
-            Queue = "q", AdmittedCores = cost.Cores, AdmittedMemMb = cost.MemMb,
+            Queue = "q", AdmittedCores = cost.Cores, AdmittedMemMb = cost.MemMb, Exclusive = exclusive,
             QueuedUtc = DateTime.UtcNow - joinedAgo, StartedUtc = DateTime.UtcNow, HeartbeatUtc = DateTime.UtcNow,
             Cwd = "/tmp", Pid = Environment.ProcessId,
             RunnerPid = Environment.ProcessId, RunnerStartUtc = me.Utc, RunnerStartTicks = me.Ticks,
