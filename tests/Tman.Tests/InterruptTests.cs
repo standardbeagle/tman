@@ -184,6 +184,50 @@ public class InterruptTests : IDisposable
     }
 
     /// <summary>
+    /// The v0.7.8 release flake (macos-15-intel) made certain rather than raced. A child that exits 0
+    /// on the Ctrl+C that interrupts tman hands tman its exit through the runtime's SIGCHLD path, and
+    /// tman's own handler through a dispatch thread the runtime starts for the SIGINT; a loaded host
+    /// could run that thread after the exit was read, and the run recorded a clean 0. Handlers of one
+    /// dispatch run on one thread, newest registration first, so a registration made after the
+    /// console's (which the first listen makes) is handed the dispatch before tman's handler; holding
+    /// it until the run is over is the late thread, every time. The child signals its parent, this
+    /// host, which holds that cancelling registration, so it survives the signal.
+    /// </summary>
+    [UnixFact("delivers SIGINT to this test host, which holds a cancelling registration")]
+    public async Task AnInterruptWhoseDispatchRunsLate_StillEndsTheRunKilled()
+    {
+        ConsoleCancelEventHandler primeConsole = (_, e) => e.Cancel = true;
+        Interrupt.Listen(primeConsole);
+        Interrupt.Unlisten(primeConsole);
+        using var runOver = new ManualResetEventSlim();
+        var dispatch = new TaskCompletionSource<Thread>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var late = PosixSignalRegistration.Create(PosixSignal.SIGINT, ctx =>
+        {
+            ctx.Cancel = true;
+            dispatch.TrySetResult(Thread.CurrentThread);
+            runOver.Wait();
+        });
+
+        int exit;
+        try
+        {
+            exit = await Runner.RunAsync("sh", ["-c", "kill -INT $PPID; exit 0"], new Caps(), null, null);
+        }
+        finally
+        {
+            runOver.Set();
+        }
+        // the SIGINT reached this host: without it the run's 0 would be honest and the test vacuous
+        var thread = await dispatch.Task.WaitAsync(TimeSpan.FromSeconds(15));
+        Assert.True(thread.Join(TimeSpan.FromSeconds(15)), "the SIGINT dispatch did not finish");
+
+        Assert.Equal(Runner.ExitKilled, exit);
+        var record = Assert.Single(Store.LoadAll());
+        Assert.Equal(RunState.Killed, record.State);
+        Assert.Equal("interrupted", record.KillReason);
+    }
+
+    /// <summary>
     /// Runs tman as the leader of a process group of its own (perl's setpgrp, then exec, so the pid is
     /// tman's), which its child joins, as a shell's foreground job would.
     /// </summary>
