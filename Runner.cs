@@ -10,6 +10,7 @@ public static class Runner
     public const int ExitCulled = 126;
     public const int ExitNotFound = 127;
     public const int ExitKilled = 130;
+    public const int ExitKillRequested = 75;
     /// <summary>EX_NOPERM: the caller may not do this, as opposed to the command failing.</summary>
     public const int ExitRefused = 77;
     /// <summary>sysexits EX_IOERR: tman's run store cannot be written, so no run can be recorded.</summary>

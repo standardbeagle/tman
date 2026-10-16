@@ -71,6 +71,7 @@ public sealed class RunRecord
     /// <summary>The CPUs limit-cpus confined the run to; null when it set none. See <see cref="Confinement"/>.</summary>
     public int[]? Cpus { get; set; }
     public string? KillReason { get; set; }
+    public bool KillRequested { get; set; }
     /// <summary>The named queue the run joined, from the machine config; null when it named none.</summary>
     public string? Queue { get; set; }
     /// <summary>

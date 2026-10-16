@@ -42,21 +42,37 @@ public class KillFlagsTests : IDisposable
     }
 
     [UnixFact("supervises the sleep binary")]
-    public async Task KillingALiveRun_EndsItKilledWithExit130_NotWithItsSignalStatus()
+    public async Task KillingALiveRun_EndsItKilledOnRequestWithItsOwnExit_NotWithItsSignalStatus()
     {
         // The runner and `tman kill` both wrote the record; the runner's final save of its own stale
         // copy landed last, so the run returned 137 and read as exited with no kill reason.
+        // Its own exit, not 130: a caller (worktrack's landing gate) read a deploy's kill as the
+        // gate failing, because 130 is also Ctrl+C and a child dying of SIGINT.
         var run = Runner.RunAsync("sleep", ["30"], new Caps(), "victim", null);
         var r = await Started();
 
         Assert.Equal(0, await Program.Main(["kill", r.Id]));
         var exit = await run.WaitAsync(TimeSpan.FromSeconds(15));
 
-        Assert.Equal(Runner.ExitKilled, exit);
+        Assert.Equal(Runner.ExitKillRequested, exit);
+        Assert.NotEqual(Runner.ExitKilled, Runner.ExitKillRequested);
         var saved = Store.Load(r.Id)!;
         Assert.Equal(RunState.Killed, saved.State);
+        Assert.True(saved.KillRequested);
         Assert.Equal("killed via tman kill", saved.KillReason);
         Assert.Null(saved.ExitCode);
+    }
+
+    [UnixFact("supervises the sleep binary")]
+    public async Task AKillsReason_IsRecordedWithTheKill()
+    {
+        var run = Runner.RunAsync("sleep", ["30"], new Caps(), "victim", null);
+        var r = await Started();
+
+        Assert.Equal(0, await Program.Main(["kill", r.Id, "--reason", "fleet deploy of tman 0.7.6"]));
+
+        Assert.Equal(Runner.ExitKillRequested, await run.WaitAsync(TimeSpan.FromSeconds(15)));
+        Assert.Equal("killed via tman kill: fleet deploy of tman 0.7.6", Store.Load(r.Id)!.KillReason);
     }
 
     [Fact]
