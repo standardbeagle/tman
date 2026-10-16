@@ -100,7 +100,15 @@ internal static class AppHost
     internal const int Sigint = 2;
     internal const nint SigDfl = 0;
     internal const nint SigIgn = 1;
-    internal const nint SigErr = -1;
+
+    /// <summary>
+    /// A `struct sigaction`, held as bytes: 152 on Linux (glibc), 16 on macOS. Both layouts put the
+    /// handler first, so a zeroed buffer is SIG_DFL with an empty mask and no flags, and one whose
+    /// first word is 1 is SIG_IGN. The disposition is saved and restored whole — `signal()` cannot
+    /// restore one, since it reinstalls only the handler pointer: the runtime's SA_SIGINFO handler
+    /// came back called as a one-argument handler, and the next SIGINT to this host crashed it.
+    /// </summary>
+    const int SigactionBytes = 256;
 
     const int SigSetBytes = 128;
 
@@ -136,7 +144,8 @@ internal static class AppHost
             var prevMask = new byte[SigSetBytes];
             Check("pthread_sigmask(SIG_SETMASK, NULL, oldset) reading the current mask",
                 pthread_sigmask(SigSetmask, null, prevMask));
-            var prevHandler = signal(Sigint, SigDfl);
+            InitRuntimeSignalHandling();
+            var prevAction = SetSigint(SigDfl);
             try
             {
                 var unblock = new byte[SigSetBytes];
@@ -160,7 +169,7 @@ internal static class AppHost
             {
                 Check("pthread_sigmask(SIG_SETMASK, oldset, NULL) restoring the signal mask",
                     pthread_sigmask(SigSetmask, prevMask, null));
-                if (prevHandler != SigErr) signal(Sigint, prevHandler);
+                RestoreSigint(prevAction);
             }
         }
     }
@@ -169,10 +178,34 @@ internal static class AppHost
     /// Sets this process's SIGINT to ignored, returning the handler to restore. For a test that pins
     /// what an apphost does when its host inherited an ignored SIGINT.
     /// </summary>
-    internal static nint IgnoreSigint() => signal(Sigint, SigIgn);
+    internal static byte[] IgnoreSigint()
+    {
+        InitRuntimeSignalHandling();
+        return SetSigint(SigIgn);
+    }
+
+    /// <summary>
+    /// Makes the runtime install its own signal handlers before a disposition is saved. It installs
+    /// them on first use — the first Process.Start, Console or PosixSignalRegistration — and if
+    /// that first use is the Process.Start inside <see cref="Start"/>'s SIG_DFL window, the runtime
+    /// records SIG_DFL as the original and the restore then removes its handler: every later
+    /// SIGINT to this host takes the default and kills it. Registering any signal is a first use.
+    /// </summary>
+    static void InitRuntimeSignalHandling() => PosixSignalRegistration.Create(PosixSignal.SIGCONT, _ => { }).Dispose();
 
     /// <summary>Restores the SIGINT handler <paramref name="previous"/> returned by <see cref="IgnoreSigint"/>.</summary>
-    internal static void RestoreSigint(nint previous) => signal(Sigint, previous);
+    internal static void RestoreSigint(byte[] previous) =>
+        Check("sigaction(SIGINT, previous, NULL) restoring SIGINT", sigaction(Sigint, previous, null));
+
+    /// <summary>Sets SIGINT to <paramref name="handler"/> (SIG_DFL or SIG_IGN), returning the whole disposition it replaced.</summary>
+    static byte[] SetSigint(nint handler)
+    {
+        var action = new byte[SigactionBytes];
+        BitConverter.TryWriteBytes(action.AsSpan(0, IntPtr.Size), (long)handler);
+        var previous = new byte[SigactionBytes];
+        Check("sigaction(SIGINT, action, previous) setting SIGINT", sigaction(Sigint, action, previous));
+        return previous;
+    }
 
     /// <summary>Throws naming <paramref name="what"/> when a pthread_sigmask call returned non-zero.</summary>
     static void Check(string what, int rc)
@@ -182,7 +215,7 @@ internal static class AppHost
     }
 
     [DllImport("libc", SetLastError = true)]
-    static extern nint signal(int signum, nint handler);
+    static extern int sigaction(int signum, byte[]? act, byte[]? oldact);
 
     [DllImport("libc", SetLastError = true)]
     static extern int pthread_sigmask(int how, byte[]? set, byte[]? oldset);
