@@ -883,6 +883,9 @@ public class AdmissionBudgetTests : IDisposable
         Assert.Contains("queue timeout", ended.KillReason);
         Assert.True(elapsed < TimeSpan.FromSeconds(3),
             $"the waiter took {elapsed} to honour a one-second queue-timeout");
+        // a named queue's timeout exits as tman stopping the run, and the record says how long it waited
+        Assert.Equal(Runner.ExitStoppedByTman, Runner.ExitCodeFor(ended));
+        Assert.InRange(ended.QueuedSeconds ?? 0, 1, 3);
     }
 
     [UnixFact("writes records this process's runner owns")]
