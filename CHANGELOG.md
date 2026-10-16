@@ -8,6 +8,17 @@ below 1.0, behavior changes land in minor releases.
 
 ## [Unreleased]
 
+### Fixed
+- **A waiting exclusive run no longer holds back every run behind it.** It waits for ordinary runs
+  to drain, not for room, yet it sat at the head of the line and was judged by its cost, which
+  always fits, so every `tman hold` and every ordinary run that fitted was refused for as long as it
+  waited. Now a hold is admitted past it, and an ordinary run that fits is admitted past it until it
+  reaches the starvation bound; from then on ordinary arrivals wait, as before. A hold is likewise
+  admitted past a starving waiter, which starts beside holds anyway. On beagle-ab (2026-10-15) each
+  exclusive `ui-gate` waited out the five-minute bound behind admitted builds while agent turns'
+  holds and builds queued behind it; replaying that host's run records since the bound shipped puts
+  the queue's summed wait at 6.3 h under the old rule and 2.2 h under this one.
+
 ## [0.7.7] - 2026-10-15
 
 ### Changed

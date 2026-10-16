@@ -326,6 +326,9 @@ because the queue waits. While it runs, ordinary runs wait and holds are still a
 own work runs as ordinary tman runs, which wait. An ordinary run may still never end (a dev server
 nobody declared a service), so past the starvation bound an exclusive run stops waiting: it starts
 beside the runs still admitted, says on stderr which ones, and new ordinary runs still wait for it.
+While it only waits it does not head the line: it waits for ordinary runs to drain, not for room,
+so a `tman hold` is admitted past it, and an ordinary run that fits is admitted past it until it
+reaches the starvation bound — from then on ordinary arrivals wait, so the host drains for it.
 
 A project can also put every run in a queue at once, from its `defaults`:
 
@@ -362,6 +365,8 @@ queue is the only limit they all share. A machine that declares no `default` que
   may start ahead of a larger waiting one when its cost fits the gap; a run waiting past a bound is
   admitted next whatever its size, so nothing starves: it starts as soon as no ordinary run is
   admitted, even if `tman hold` bookings, service runs or load outside the queue leave it no room.
+  A run keeps its place only ahead of waiters it could delay, so a hold is admitted past an
+  exclusive or a starving waiter, which starts beside holds anyway.
   None ends because the queue waits — a hold ends with its owner's work, which may be queued behind it. `tman list` shows each waiter's place as
   `queued #1`, `queued #2`, and `tman status` shows it as `queue: compile (position 2)`. A waiter
   whose tman died holds no place.
