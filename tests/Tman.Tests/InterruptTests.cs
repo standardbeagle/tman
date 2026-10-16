@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using Tman;
 using Xunit;
 
@@ -145,6 +146,51 @@ public class InterruptTests : IDisposable
         Assert.Equal((Unblock: 2, Setmask: 3), AppHost.Hows(isMacOS: true));
         var expected = OperatingSystem.IsMacOS() ? (Unblock: 2, Setmask: 3) : (Unblock: 1, Setmask: 2);
         Assert.Equal(expected, AppHost.Hows(OperatingSystem.IsMacOS()));
+    }
+
+    /// <summary>
+    /// .NET dispatches a SIGINT on a thread of its own, with the handlers registered when the signal
+    /// arrived, and a dispatch that no handler cancels ends the process by the signal's default:
+    /// exit 130, nothing on stderr. A run's own handler leaves when the run ends, so a Ctrl+C that
+    /// lands as it ends — or whose dispatch thread runs late on a loaded host — used to kill tman
+    /// that way (the gate failure behind this test, 2026-10-15). Here the order is fixed rather than
+    /// raced: the run is over before the signal is sent, and the dispatch thread is joined before
+    /// anything is asserted. This host keeps a cancelling registration of its own, so it survives
+    /// whatever tman does; what is pinned is that tman still answers.
+    /// </summary>
+    [UnixFact("delivers SIGINT to this test host, which holds a cancelling registration")]
+    public async Task ACtrlCAfterTheRunEnded_IsAnsweredByTman_NotLeftToTheRuntimeDefault()
+    {
+        using var hostGuard = PosixSignalRegistration.Create(PosixSignal.SIGINT, ctx => ctx.Cancel = true);
+        using var proj = new TempDir();
+        var prevCwd = Directory.GetCurrentDirectory();
+        Directory.SetCurrentDirectory(proj.Path);
+        var err = new StringWriter();
+        var prevErr = Console.Error;
+        Console.SetError(err);
+        try
+        {
+            Assert.Equal(0, await Program.Main(["run", "--no-queue", "--", "true"]));
+
+            // registered after the run, so it is handed the dispatch first and names its thread;
+            // every handler of that one dispatch runs on that thread, so joining it is the barrier
+            var dispatch = new TaskCompletionSource<Thread>(TaskCreationOptions.RunContinuationsAsynchronously);
+            using var barrier = PosixSignalRegistration.Create(PosixSignal.SIGINT, _ => dispatch.TrySetResult(Thread.CurrentThread));
+            using (var kill = Process.Start("kill", new[] { "-INT", Environment.ProcessId.ToString() }))
+            {
+                kill!.WaitForExit();
+                Assert.Equal(0, kill.ExitCode);
+            }
+            var thread = await dispatch.Task.WaitAsync(TimeSpan.FromSeconds(15));
+            Assert.True(thread.Join(TimeSpan.FromSeconds(15)), "the SIGINT dispatch did not finish");
+
+            Assert.Contains("interrupted after the run ended", err.ToString());
+        }
+        finally
+        {
+            Console.SetError(prevErr);
+            Directory.SetCurrentDirectory(prevCwd);
+        }
     }
 
     /// <summary>Waits for tman to record its child, so the test signals the real sh and not a pid it guessed.</summary>
