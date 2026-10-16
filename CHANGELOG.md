@@ -8,6 +8,8 @@ below 1.0, behavior changes land in minor releases.
 
 ## [Unreleased]
 
+## [0.7.9] - 2026-10-16
+
 ### Changed
 - **A run that times out in its queue exits 75, not 130.** Waiting out `queue-timeout` — for a
   bucket slot, a named queue's admission, or a `tman hold` — ends a run tman never started, yet it
@@ -662,7 +664,8 @@ reaping; dedup locks; parallel gating; `.tman.kdl` folder aliases with repo-root
 binaries for linux-x64, linux-arm64, win-x64, osx-arm64, and osx-x64, distributed via npm, PyPI,
 PSGallery, and a shell installer.
 
-[Unreleased]: https://github.com/standardbeagle/tman/compare/v0.7.8...HEAD
+[Unreleased]: https://github.com/standardbeagle/tman/compare/v0.7.9...HEAD
+[0.7.9]: https://github.com/standardbeagle/tman/compare/v0.7.8...v0.7.9
 [0.7.8]: https://github.com/standardbeagle/tman/compare/v0.7.7...v0.7.8
 [0.7.7]: https://github.com/standardbeagle/tman/compare/v0.7.6...v0.7.7
 [0.7.6]: https://github.com/standardbeagle/tman/compare/v0.7.5...v0.7.6
