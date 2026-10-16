@@ -8,6 +8,8 @@ below 1.0, behavior changes land in minor releases.
 
 ## [Unreleased]
 
+## [0.7.7] - 2026-10-15
+
 ### Changed
 - **A run ended by `tman kill` exits 75, not 130.** Its record carries `KillRequested: true` beside
   the reason, and `tman kill --reason <text>` records who is stopping it and why
@@ -621,7 +623,8 @@ reaping; dedup locks; parallel gating; `.tman.kdl` folder aliases with repo-root
 binaries for linux-x64, linux-arm64, win-x64, osx-arm64, and osx-x64, distributed via npm, PyPI,
 PSGallery, and a shell installer.
 
-[Unreleased]: https://github.com/standardbeagle/tman/compare/v0.7.6...HEAD
+[Unreleased]: https://github.com/standardbeagle/tman/compare/v0.7.7...HEAD
+[0.7.7]: https://github.com/standardbeagle/tman/compare/v0.7.6...v0.7.7
 [0.7.6]: https://github.com/standardbeagle/tman/compare/v0.7.5...v0.7.6
 [0.7.5]: https://github.com/standardbeagle/tman/compare/v0.7.4...v0.7.5
 [0.7.4]: https://github.com/standardbeagle/tman/compare/v0.7.3...v0.7.4

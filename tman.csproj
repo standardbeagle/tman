@@ -9,7 +9,7 @@
     <InvariantGlobalization>true</InvariantGlobalization>
     <AssemblyName>tman</AssemblyName>
     <RootNamespace>Tman</RootNamespace>
-    <Version>0.7.6</Version>
+    <Version>0.7.7</Version>
   </PropertyGroup>
 
   <ItemGroup>
