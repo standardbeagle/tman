@@ -177,7 +177,8 @@ public static class Admission
     /// exclusive run waits for admitted finite runs to finish — not for holds or outside load — or,
     /// past the starvation bound, starts beside the ones still admitted and names them; it then holds
     /// finite admissions until it exits: a finite run never starts while an exclusive one is
-    /// admitted, and a hold still does. Arrival order is kept,
+    /// admitted, and a hold still does. While an exclusive run only waits it holds back no hold, and a
+    /// finite run that fits passes it until it starves. Arrival order is otherwise kept,
     /// but a small run may start ahead of a larger waiting one when it fits, and a run waiting past
     /// the starvation bound is admitted next whatever its size: it starts once no finite run is
     /// admitted, even beside holds and outside load.
@@ -346,7 +347,15 @@ public static class Admission
             var position = Position(record, all);
             if (position is > 1)
             {
-                var earlier = EarlierWaiters(record, all);
+                // a run keeps its place only ahead of waiters it could delay. An exclusive waiter
+                // waits for finite runs to drain, not for room, so judging a newcomer against its
+                // cost — which always fits — refused everyone behind it for as long as it waited.
+                // A hold delays no waiter that starts beside holds whatever they book (an exclusive
+                // or a starving one); a finite run passes an exclusive waiter until it starves, and
+                // from then on waits, so the host drains for it
+                var earlier = EarlierWaiters(record, all)
+                    .Where(o => record.Hold ? !StartsBesideHolds(o) : !o.Exclusive || Starving(o))
+                    .ToList();
                 // while an exclusive run holds the queue only a hold can start, so a finite waiter
                 // keeps no place ahead of one
                 if (exclusiveHeld) earlier = earlier.Where(o => o.Hold).ToList();
@@ -413,6 +422,12 @@ public static class Admission
     /// <summary>True when <paramref name="run"/> has waited in line past <see cref="StarvationBound"/>.</summary>
     static bool Starving(RunRecord run) =>
         run.QueuedUtc is { } at && DateTime.UtcNow - at >= StarvationBound;
+
+    /// <summary>
+    /// True when waiting <paramref name="waiter"/> starts once no finite run is admitted, beside any
+    /// holds, whatever they book — so no hold can delay it.
+    /// </summary>
+    static bool StartsBesideHolds(RunRecord waiter) => waiter.Exclusive || Starving(waiter);
 
     static List<RunRecord> EarlierWaiters(RunRecord run, IEnumerable<RunRecord> all)
     {
