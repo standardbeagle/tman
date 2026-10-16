@@ -8,6 +8,36 @@ below 1.0, behavior changes land in minor releases.
 
 ## [Unreleased]
 
+## [0.7.6] - 2026-10-15
+
+### Added
+- **A run that never ends can be declared a service.** `service true` on an alias, or
+  `tman run --service`, admits a dev server or watcher and books its cost in the queue like a
+  `tman hold`, so admission still sees what it uses, but no exclusive or starving run waits for it to
+  end. Unlike a hold it is not admitted while an exclusive run holds the queue. `service` cannot be
+  given with `no-queue` or `exclusive`.
+- **A run that queued says when it is admitted:** `tman: admitted to '<queue>' after <wait>` on
+  stderr, the wait as `42s`, `3m05s`, `1h02m` or `2d03h`. A supervisor reading stderr (worktrack's
+  drain) can tell a run that left the queue from one still waiting, without waiting for the child's
+  first output. A run admitted at once writes no queue line.
+
+### Fixed
+- **An exclusive run no longer waits forever behind a run that never ends.** Past the starvation
+  bound it starts beside the runs still admitted and names them on stderr; new ordinary runs still
+  wait for it. An agency `exclusive true` gate sat queued #1 for over two hours behind a dev server
+  admitted as an ordinary run.
+- **An alias's declared `cores`/`mem` is a floor under the measured history, not only a no-history
+  default.** History measures a run's own process tree, and a `dotnet build` does its compile in
+  reused MSBuild nodes and the shared `VBCSCompiler` outside it, so builds were booked at a fraction
+  of a core; seven admitted together drove an 8-core host to load 97. Declare a build alias's cost
+  (`cores 6`) to book what tman cannot measure.
+- **A Ctrl+C that lands as a run ends no longer kills tman by the signal's default.** .NET
+  dispatches a SIGINT on its own thread with the handlers registered when it arrived, and a run's
+  handler left when the run ended, so a late dispatch — common on a loaded host — found nothing to
+  cancel it: exit 130, nothing on stderr, the record possibly never made final. tman now answers
+  Ctrl+C for the rest of the process once a run has listened for it; one no run is listening for
+  is named on stderr and the run's recorded outcome stands.
+
 ## [0.7.5] - 2026-10-14
 
 ### Fixed
@@ -583,7 +613,8 @@ reaping; dedup locks; parallel gating; `.tman.kdl` folder aliases with repo-root
 binaries for linux-x64, linux-arm64, win-x64, osx-arm64, and osx-x64, distributed via npm, PyPI,
 PSGallery, and a shell installer.
 
-[Unreleased]: https://github.com/standardbeagle/tman/compare/v0.7.5...HEAD
+[Unreleased]: https://github.com/standardbeagle/tman/compare/v0.7.6...HEAD
+[0.7.6]: https://github.com/standardbeagle/tman/compare/v0.7.5...v0.7.6
 [0.7.5]: https://github.com/standardbeagle/tman/compare/v0.7.4...v0.7.5
 [0.7.4]: https://github.com/standardbeagle/tman/compare/v0.7.3...v0.7.4
 [0.7.3]: https://github.com/standardbeagle/tman/compare/v0.7.2...v0.7.3
