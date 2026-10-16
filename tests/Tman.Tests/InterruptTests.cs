@@ -34,7 +34,7 @@ public class InterruptTests : IDisposable
 
         var psi = new ProcessStartInfo
         {
-            FileName = tmanPath,
+            FileName = "perl",
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
@@ -43,23 +43,18 @@ public class InterruptTests : IDisposable
             WorkingDirectory = _home.Path,
         };
         psi.Environment["TMAN_HOME"] = _home.Path;
-        foreach (var a in new[] { "run", "--", "sh", "-c", "trap 'kill $!; exit 0' INT; sleep 30 & wait" })
-            psi.ArgumentList.Add(a);
+        InOwnProcessGroup(psi, tmanPath, "run", "--", "sh", "-c", "trap 'kill $!; exit 0' INT; sleep 30 & wait");
 
         using var tman = AppHost.Start(psi);
         var stdout = tman.StandardOutput.ReadToEndAsync();
         var stderr = tman.StandardError.ReadToEndAsync();
         try
         {
-            var child = await AwaitLiveChildPid(tman);
+            await AwaitLiveChildPid(tman);
 
-            // the child first, so it has already exited 0 by the time tman learns it was interrupted —
-            // the ordering in which an honest 0 would be the wrong answer
-            using (var kill = Process.Start("kill", new[] { "-INT", child.ToString(), tman.Id.ToString() }))
-            {
-                kill!.WaitForExit();
-                Assert.Equal(0, kill.ExitCode);
-            }
+            // the child exits 0 on the same Ctrl+C that interrupts tman, the case in which an honest 0
+            // would be the wrong answer
+            InterruptLikeATerminal(tman);
 
             Assert.True(tman.WaitForExit(15_000),
                 "tman did not exit within 15s of SIGINT; either the signal never arrived (is SIGINT " +
@@ -90,27 +85,22 @@ public class InterruptTests : IDisposable
         {
             var psi = new ProcessStartInfo
             {
-                FileName = AppHost.Path,
+                FileName = "perl",
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
                 WorkingDirectory = _home.Path,
             };
             psi.Environment["TMAN_HOME"] = _home.Path;
-            foreach (var a in new[] { "run", "--", "sleep", "30" }) psi.ArgumentList.Add(a);
+            InOwnProcessGroup(psi, AppHost.Path, "run", "--", "sleep", "30");
 
             using var tman = AppHost.Start(psi);
             var stdout = tman.StandardOutput.ReadToEndAsync();
             var stderr = tman.StandardError.ReadToEndAsync();
             try
             {
-                var child = await AwaitLiveChildPid(tman);
-
-                using (var kill = Process.Start("kill", new[] { "-INT", child.ToString(), tman.Id.ToString() }))
-                {
-                    kill!.WaitForExit();
-                    Assert.Equal(0, kill.ExitCode);
-                }
+                await AwaitLiveChildPid(tman);
+                InterruptLikeATerminal(tman);
 
                 Assert.True(tman.WaitForExit(15_000),
                     "the apphost did not answer SIGINT while its host had SIGINT ignored");
@@ -193,7 +183,31 @@ public class InterruptTests : IDisposable
         }
     }
 
-    /// <summary>Waits for tman to record its child, so the test signals the real sh and not a pid it guessed.</summary>
+    /// <summary>
+    /// Runs tman as the leader of a process group of its own (perl's setpgrp, then exec, so the pid is
+    /// tman's), which its child joins, as a shell's foreground job would.
+    /// </summary>
+    static void InOwnProcessGroup(ProcessStartInfo psi, string tmanPath, params string[] args)
+    {
+        psi.ArgumentList.Add("-e");
+        psi.ArgumentList.Add("setpgrp(0, 0); exec { $ARGV[0] } @ARGV or die \"exec: $!\"");
+        psi.ArgumentList.Add(tmanPath);
+        foreach (var a in args) psi.ArgumentList.Add(a);
+    }
+
+    /// <summary>
+    /// SIGINT to tman's whole process group in one kill(2), as a terminal sends Ctrl+C. Two pids in
+    /// one `kill` are two syscalls, and a `kill` descheduled between them let the child exit and tman
+    /// finish its run before tman was signalled at all — a run that ended before Ctrl+C, honestly 0.
+    /// </summary>
+    static void InterruptLikeATerminal(Process tman)
+    {
+        using var kill = Process.Start("kill", new[] { "-INT", "--", "-" + tman.Id })!;
+        kill.WaitForExit();
+        Assert.Equal(0, kill.ExitCode);
+    }
+
+    /// <summary>Waits for tman to record its child, so the group is signalled with the child in it.</summary>
     static async Task<int> AwaitLiveChildPid(Process tman)
     {
         var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
