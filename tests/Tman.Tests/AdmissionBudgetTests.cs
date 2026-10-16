@@ -563,6 +563,54 @@ public class AdmissionBudgetTests : IDisposable
         run.WaitForExit(15_000);
     }
 
+    [UnixFact("writes records this process's runner owns")]
+    public async Task ARunThatWaited_SaysWhenItIsAdmitted_AndOneAdmittedAtOnceDoesNot()
+    {
+        _home.WriteFile("tman.kdl", "queue \"q\" {\n    cores 4\n    mem 4g\n}\n");
+        var prevHost = Admission.MeasureHost;
+        var prevErr = Console.Error;
+        var err = new LineSignallingWriter("queued for 'q'");
+        try
+        {
+            // a supervisor (worktrack's drain) reads stderr to learn when a gate left the queue; the
+            // child's first output may be minutes later, and a run that never queued says nothing
+            Admission.MeasureHost = () => new Host.Usage(0, 0);
+            Occupy("occupy000001", cores: 4, memMb: 4 * 1024);
+            var q = Config.Queue("q") with { Timeout = TimeSpan.FromSeconds(15) };
+            Console.SetError(err);
+
+            var waiter = Runner.NewRecord("go", ["test"], new Caps(), "test", null, "test@/w", "/tmp");
+            var claim = Admission.ClaimAdmission(waiter, q, new Admission.AdmissionCost(1, 512), false, null, null, default);
+            await err.Matched.Task.WaitAsync(TimeSpan.FromSeconds(15));
+            Clear("occupy000001");
+            Assert.True(await claim);
+            // the duration is tman's own short form: 42s, 3m05s, 1h02m, 2d03h
+            Assert.Matches(@"(?m)^tman: admitted to 'q' after \d+(s|m\d\ds|h\d\dm|d\d\dh)\r?$", err.ToString());
+
+            var atOnce = Runner.NewRecord("go", ["test"], new Caps(), "test", null, "test@/n", "/tmp");
+            var before = err.ToString().Length;
+            Assert.True(await Admission.ClaimAdmission(atOnce, q, new Admission.AdmissionCost(1, 512), false, null, null, default));
+            Assert.DoesNotContain("admitted to", err.ToString()[before..]);
+        }
+        finally
+        {
+            Console.SetError(prevErr);
+            Admission.MeasureHost = prevHost;
+        }
+    }
+
+    /// <summary>Captures stderr and completes <see cref="Matched"/> when a line containing the text is written.</summary>
+    sealed class LineSignallingWriter(string text) : StringWriter
+    {
+        public TaskCompletionSource Matched { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public override void WriteLine(string? value)
+        {
+            base.WriteLine(value);
+            if (value?.Contains(text) == true) Matched.TrySetResult();
+        }
+    }
+
     static async Task<RunRecord> AwaitRecord(Func<List<RunRecord>, RunRecord> match)
     {
         for (var i = 0; i < 300; i++)
