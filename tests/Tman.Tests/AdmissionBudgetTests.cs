@@ -322,6 +322,46 @@ public class AdmissionBudgetTests : IDisposable
     }
 
     [UnixFact("writes records this process's runner owns")]
+    public async Task AnExclusiveRunPastTheStarvationBound_WaitsForAnAdmittedExclusiveRunToFinish()
+    {
+        _home.WriteFile("tman.kdl", "queue \"q\" {\n    cores 4\n    mem 4g\n}\n");
+        var prevBound = Admission.StarvationBound;
+        var prevHost = Admission.MeasureHost;
+        Admission.StarvationBound = TimeSpan.FromMilliseconds(100);
+        try
+        {
+            // beagle-ab 2026-10-22: a second exclusive ui-gate starved past the bound and started
+            // beside the first, and each perf audit judged the host busy because of the other. An
+            // exclusive run is finite and holds the queue on purpose, so the escape for a finite run
+            // that may never end does not apply to it
+            Admission.MeasureHost = () => new Host.Usage(0, 0);
+            Occupy("uigatefirst1", cores: 1, memMb: 512, exclusive: true);
+            var q = Config.Queue("q") with { Timeout = TimeSpan.FromSeconds(15) };
+            var second = Runner.NewRecord("ui-gate", [], new Caps(), "ui-gate", null, "ui-gate@/a", "/tmp");
+            var claim = Admission.ClaimAdmission(second, q, new Admission.AdmissionCost(1, 512), exclusive: true, null, null, default);
+
+            // the first attempt is refused and the waiter parks; once it is starving, a queue event
+            // makes it judge again, which is when it used to start beside the first
+            await Task.WhenAny(claim, Task.Delay(TimeSpan.FromMilliseconds(300)));
+            Store.TouchQueue(Admission.QueueKey("q"));
+            await Task.WhenAny(claim, Task.Delay(TimeSpan.FromMilliseconds(1000)));
+            Assert.False(claim.IsCompleted, "a starving exclusive run started beside an admitted exclusive run");
+            Assert.Null(Store.Load(second.Id)!.AdmittedUtc);
+
+            var finished = DateTime.UtcNow;
+            Clear("uigatefirst1");
+            Assert.True(await claim.WaitAsync(TimeSpan.FromSeconds(15)),
+                "an exclusive run kept waiting after the exclusive run ahead of it finished");
+            Assert.True(second.AdmittedUtc >= finished);
+        }
+        finally
+        {
+            Admission.StarvationBound = prevBound;
+            Admission.MeasureHost = prevHost;
+        }
+    }
+
+    [UnixFact("writes records this process's runner owns")]
     public async Task AnExclusiveRun_StartsBesideAnAdmittedService_WithoutWaitingForTheBound()
     {
         _home.WriteFile("tman.kdl", "queue \"q\" {\n    cores 4\n    mem 4g\n}\n");
@@ -501,13 +541,13 @@ public class AdmissionBudgetTests : IDisposable
         }
     }
 
-    void Occupy(string id, double cores, long memMb, string queue = "q", bool hold = false, bool service = false)
+    void Occupy(string id, double cores, long memMb, string queue = "q", bool hold = false, bool service = false, bool exclusive = false)
     {
         var me = ProcUtil.OwnStart();
         Store.Save(new RunRecord
         {
             Id = id, Command = "/bin/sh", Args = [], Group = "hold@" + _home.Path, State = RunState.Running,
-            Hold = hold, Service = service, Queue = queue, AdmittedUtc = DateTime.UtcNow, AdmittedCores = cores, AdmittedMemMb = memMb,
+            Hold = hold, Service = service, Exclusive = exclusive, Queue = queue, AdmittedUtc = DateTime.UtcNow, AdmittedCores = cores, AdmittedMemMb = memMb,
             QueuedUtc = DateTime.UtcNow, StartedUtc = DateTime.UtcNow, HeartbeatUtc = DateTime.UtcNow,
             Cwd = "/tmp", Pid = Environment.ProcessId, ChildStartUtc = me.Utc, ChildStartTicks = me.Ticks,
             RunnerPid = Environment.ProcessId, RunnerStartUtc = me.Utc, RunnerStartTicks = me.Ticks,
