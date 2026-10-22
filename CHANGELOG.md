@@ -8,6 +8,8 @@ below 1.0, behavior changes land in minor releases.
 
 ## [Unreleased]
 
+## [0.7.10] - 2026-10-22
+
 ### Fixed
 - **Two exclusive runs no longer run at once in a queue.** An exclusive run that waited past the
   starvation bound started beside whatever was still admitted, and that included another exclusive
@@ -674,7 +676,8 @@ reaping; dedup locks; parallel gating; `.tman.kdl` folder aliases with repo-root
 binaries for linux-x64, linux-arm64, win-x64, osx-arm64, and osx-x64, distributed via npm, PyPI,
 PSGallery, and a shell installer.
 
-[Unreleased]: https://github.com/standardbeagle/tman/compare/v0.7.9...HEAD
+[Unreleased]: https://github.com/standardbeagle/tman/compare/v0.7.10...HEAD
+[0.7.10]: https://github.com/standardbeagle/tman/compare/v0.7.9...v0.7.10
 [0.7.9]: https://github.com/standardbeagle/tman/compare/v0.7.8...v0.7.9
 [0.7.8]: https://github.com/standardbeagle/tman/compare/v0.7.7...v0.7.8
 [0.7.7]: https://github.com/standardbeagle/tman/compare/v0.7.6...v0.7.7
