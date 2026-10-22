@@ -39,7 +39,8 @@ public static class Help
                               an alias whose block sets `no-queue true` does the same without a flag
           --exclusive         run alone in the queue: wait for admitted work, then hold the queue
                               until this run exits (a perf audit); past the starvation bound it
-                              starts beside what is still admitted and names it
+                              starts beside what is still admitted and names it, but never
+                              beside another exclusive run
           --service           a run that never ends (a dev server, a watch): booked in the queue
                               like a hold, so no exclusive or starving run waits for it to end;
                               an alias whose block sets `service true` does the same

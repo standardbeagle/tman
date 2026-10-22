@@ -105,7 +105,7 @@ tman init --shims --gitignore
 | `--queue-timeout T` | 5m | give up waiting — for a bucket slot, or for a [named queue](#named-queues)'s admission; the run is recorded `killed: queue timeout …` with `QueueTimedOut: true` and how long it waited (`QueuedSeconds`), and exits 75 — tman stopped it, as with `tman kill`, so a supervisor re-runs it rather than charging the work |
 | `--queue Q` | — | wait in the machine-wide [named queue](#named-queues) Q, admitted by measured cost; with no queue named anywhere, the machine's `default` queue if one is declared |
 | `--no-queue` | off | join no queue, even one the alias, `defaults`, or the machine's `default` names |
-| `--exclusive` | off | run alone in its queue: wait for admitted runs to finish — not for `tman hold` bookings, service runs or load outside the queue — then hold the queue until it exits; holds are still admitted beside it. Past the starvation bound it stops waiting and starts beside the runs still admitted, naming them on stderr |
+| `--exclusive` | off | run alone in its queue: wait for admitted runs to finish — not for `tman hold` bookings, service runs or load outside the queue — then hold the queue until it exits; holds are still admitted beside it. Past the starvation bound it stops waiting and starts beside the runs still admitted, naming them on stderr — but never beside another exclusive run |
 | `--service` | off | a long-lived run (a dev server, a watcher): it books its cost in the queue like a `tman hold`, so it never holds back an exclusive or a starving run, which cannot wait for it to end |
 
 Cap precedence: CLI flags > alias block > `defaults` block > built-ins.
@@ -327,6 +327,8 @@ because the queue waits. While it runs, ordinary runs wait and holds are still a
 own work runs as ordinary tman runs, which wait. An ordinary run may still never end (a dev server
 nobody declared a service), so past the starvation bound an exclusive run stops waiting: it starts
 beside the runs still admitted, says on stderr which ones, and new ordinary runs still wait for it.
+It never starts beside another admitted exclusive run, starving or not: that run is finite and
+holds the queue on purpose, so one exclusive run at a time runs in a queue.
 While it only waits it does not head the line: it waits for ordinary runs to drain, not for room,
 so a `tman hold` is admitted past it, and an ordinary run that fits is admitted past it until it
 reaches the starvation bound — from then on ordinary arrivals wait, so the host drains for it.

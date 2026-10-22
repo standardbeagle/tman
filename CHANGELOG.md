@@ -8,6 +8,16 @@ below 1.0, behavior changes land in minor releases.
 
 ## [Unreleased]
 
+### Fixed
+- **Two exclusive runs no longer run at once in a queue.** An exclusive run that waited past the
+  starvation bound started beside whatever was still admitted, and that included another exclusive
+  run. The escape exists because an ordinary run may never end (a dev server nobody declared a
+  service); an exclusive run is finite and holds the queue on purpose. On beagle-ab two runs of an
+  exclusive perf-audit alias overlapped this way: the second waited 307 s, started beside the first,
+  and each judged the host busy because of the other. A waiting exclusive run now waits for an
+  admitted exclusive run to finish, however long it has waited. It still starts beside ordinary runs
+  past the bound, as before.
+
 ## [0.7.9] - 2026-10-16
 
 ### Changed

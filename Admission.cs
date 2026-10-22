@@ -22,7 +22,8 @@ public static class Admission
     /// this, a stream of small runs that always fit would starve one large one forever. A run past
     /// the bound reserves the budget and starts once no finite run is admitted, whatever holds and
     /// load outside the queue remain, since neither ends because the queue waits; an exclusive run
-    /// past it stops waiting for finite runs as well, since one of them may never end. Settable so
+    /// past it stops waiting for finite runs as well, since one of them may never end, but never
+    /// starts beside another admitted exclusive run. Settable so
     /// a test can prove the bound without waiting minutes; production never changes it.
     /// </summary>
     internal static TimeSpan StarvationBound = TimeSpan.FromMinutes(5);
@@ -181,7 +182,8 @@ public static class Admission
     /// retries until the expected cost fits beside what is admitted, or the run is killed,
     /// interrupted, or out of the queue's timeout — which end it as killed and return null. An
     /// exclusive run waits for admitted finite runs to finish — not for holds or outside load — or,
-    /// past the starvation bound, starts beside the ones still admitted and names them; it then holds
+    /// past the starvation bound, starts beside the ones still admitted and names them — never beside
+    /// another admitted exclusive run, which it waits for however long; it then holds
     /// finite admissions until it exits: a finite run never starts while an exclusive one is
     /// admitted, and a hold still does. While an exclusive run only waits it holds back no hold, and a
     /// finite run that fits passes it until it starves. Arrival order is otherwise kept,
@@ -337,7 +339,10 @@ public static class Admission
             // an exclusive run starts once no finite run is admitted, whatever holds and outside
             // load remain, and no finite run starts while it holds the queue. Past the starvation
             // bound it stops waiting for finite runs too: a run admitted as finite may never end
-            // (a dev server), and the exclusive run reserves the queue for everyone behind it
+            // (a dev server), and the exclusive run reserves the queue for everyone behind it.
+            // Another exclusive run is finite and holds the queue on purpose, so it is waited for
+            // starving or not: one exclusive run at a time
+            if (ExclusiveHeld(queue.Name, all)) return AdmitOutcome.NoRoom;
             if (!onlyUndrainable && !starving) return AdmitOutcome.NoRoom;
         }
         else
