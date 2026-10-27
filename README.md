@@ -85,6 +85,7 @@ tman init --shims --gitignore
 | `tman status [id\|name\|id-prefix] [--json]` | summary counts and the host's unattributed load, or one run's detail |
 | `tman init [--shims] [--gitignore]` | scaffold `.tman.kdl` + shims (aliases it cannot detect are left commented out, so `./test` fails loudly instead of faking a pass); shims are named after the aliases in the config on disk, so re-running it in a project that already has one shims that file's aliases; `--gitignore` ignores `.tman/` and the shims, and skips an alias whose name is already a directory, so `/test` never hides a `test/` tree |
 | `tman hold --cores N --mem M [--pid <pid>] [--queue <name>] [--label K=V]...` | book the cost of work another program started into a machine queue, for as long as it lives, so a client such as an agent runner reserves admission without tman knowing what the work is. Without `--pid`, the hold lasts until it is killed (Ctrl+C). The queue defaults to the machine's `default`. Labels work as on `tman run` |
+| `tman queue [<name>] [--json] [--label K=V]... [--cores N] [--mem M]` | each machine queue as admission sees it: budget, admitted runs and what they book, unattributed host load, what is free, the line in order, and whether a run costing `--cores`/`--mem` (default: the queue's `cores-default`/`mem-default`) arriving now would be admitted at once — the queue's own rule, not a copy. `--label` narrows the entries, never the totals. `--json`: see [Reports for another program](#reports-for-another-program). An alias named `queue` is reached with `tman run --alias queue` |
 | `tman probe --pid <pid> [--start-ticks <ticks>]` | is a pid you recorded earlier still that process? Exit 0 mine, 1 gone, 3 not mine (the OS reused the pid); the verdict is also printed. `--start-ticks` is Linux only, read from field 22 of `/proc/<pid>/stat` when you record the pid; without it a live pid counts as yours. Read-only: it never signals or kills, and does not run the housekeeping sweep |
 | `tman help [<command>\|<alias>]`, `tman <command> --help` | the overview, one command's usage, flags and exit codes, or what an alias runs and where (`-h` works too). Help changes nothing — it creates no files and runs no sweep — and every command refuses an argument it does not take with exit 127, rather than skipping it and doing its job. `tman <alias> --help` is not tman's: an alias passes every arg to its command, so that asks the alias's own tool |
 | `tman hook pretooluse` | [Claude Code hook](#claude-code-hook): routes bare test/build commands through tman, and never blocks |
@@ -107,7 +108,7 @@ tman init --shims --gitignore
 | `--no-queue` | off | join no queue, even one the alias, `defaults`, or the machine's `default` names |
 | `--exclusive` | off | run alone in its queue: wait for admitted runs to finish — not for `tman hold` bookings, service runs or load outside the queue — then hold the queue until it exits; holds are still admitted beside it. Past the starvation bound it stops waiting and starts beside the runs still admitted, naming them on stderr — but never beside another exclusive run |
 | `--service` | off | a long-lived run (a dev server, a watcher): it books its cost in the queue like a `tman hold`, so it never holds back an exclusive or a starving run, which cannot wait for it to end |
-| `--label K=V` | — | file the run under scope `K=V`; repeatable. `TMAN_LABELS="k=v,k=v"` in the environment does the same for every tman a shell starts, so a supervisor sets it once in an agent's environment and every run in that turn carries its task, step and attempt without the commands changing; a flag wins a key both name. The run hands the merged set to its children as `TMAN_LABELS`, so a nested run carries its parent's scope. A key is letters, digits, `_`, `-` or `.`; a value is non-empty and holds no comma. A label tman cannot read refuses the run with exit 127. `tman list --label` filters by labels |
+| `--label K=V` | — | file the run under scope `K=V`; repeatable. `TMAN_LABELS="k=v,k=v"` in the environment does the same for every tman a shell starts, so a supervisor sets it once in an agent's environment and every run in that turn carries its task, step and attempt without the commands changing; a flag wins a key both name. The run hands the merged set to its children as `TMAN_LABELS`, so a nested run carries its parent's scope. A key is letters, digits, `_`, `-` or `.`; a value is non-empty and holds no comma. A label tman cannot read refuses the run with exit 127. `tman list` and `tman queue` filter by labels |
 
 Cap precedence: CLI flags > alias block > `defaults` block > built-ins.
 
@@ -639,6 +640,45 @@ bumps it. Times are UTC ISO 8601; a field with nothing to say is `null`, never o
   did not exit by itself.
 - `queuedAt` is when the run joined its named queue, or, while it waits for a bucket slot, when
   that wait began; `startedAt` is `null` for a run that never had a child.
+
+`tman queue --json` is the same kind of document for the machine's queues — what a scheduler asks
+before it starts the next thing:
+
+```json
+{
+  "schema": 1,
+  "host": { "cores": 16, "memMb": 64000 },
+  "queues": [
+    {
+      "name": "default",
+      "budget": { "cores": 12.8, "memMb": 51200 }, "defaultCost": { "cores": 1, "memMb": 1024 },
+      "timeoutSeconds": 28800, "starvationBoundSeconds": 300,
+      "booked": { "cores": 5.1, "memMb": 6400 }, "unattributed": { "cores": 0.4, "memMb": 1200 },
+      "free": { "cores": 7.3, "memMb": 43600 }, "exclusiveHeld": false,
+      "admittedCount": 2, "waitingCount": 1,
+      "probe": { "cores": 3, "memMb": 4096, "admitsNow": false },
+      "admitted": [
+        { "id": "855991438c99", "name": "hold", "alias": null, "command": "hold --pid=4081974",
+          "pid": 2677057, "runnerPid": 2677057, "cores": 3, "memMb": 4096, "currentCores": null,
+          "peakMemMb": 0, "admittedAt": "2026-10-26T14:00:02.1Z", "queuedSeconds": 0.02,
+          "exclusive": false, "hold": true, "service": false, "labels": { "task": "01M4Y2GB4N" } }
+      ],
+      "waiting": [
+        { "id": "0b2e5ee52c4f", "name": "test", "alias": "test", "command": "/usr/bin/dotnet test",
+          "pid": 0, "runnerPid": 41200, "position": 1, "queuedAt": "2026-10-26T14:02:11.5Z",
+          "waitedSeconds": 41.7, "cores": 3.1, "memMb": 2400, "exclusive": false, "hold": false,
+          "service": false, "starving": false, "labels": {} }
+      ]
+    }
+  ]
+}
+```
+
+`probe.admitsNow` is the queue's own verdict on an ordinary run of `probe`'s cost joining the line
+now, behind every waiter: it can slip into a gap the first waiter does not fit, never into one an
+exclusive run holds. `unattributed` is `null` where the host's load cannot be measured (anywhere but
+Linux). `--label` narrows `admitted` and `waiting`; `booked`, `free`, the counts and the verdict
+always count every admission. A machine with no queues declared reports `"queues": []`.
 
 
 | code | meaning |

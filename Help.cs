@@ -47,7 +47,7 @@ public static class Help
           --label K=V         file the run under scope K=V (repeatable); TMAN_LABELS="k=v,k=v" in
                               the environment does the same for every tman a shell starts, a flag
                               winning a key both name. The run hands the merged set to its
-                              children as TMAN_LABELS; `tman list --label` filters by it
+                              children as TMAN_LABELS; `tman list` and `tman queue` filter by it
         """;
 
     const string Sweep = """
@@ -175,6 +175,27 @@ public static class Help
 
             exit: 0 when the held pid exited, 75 when stopped by tman (`tman kill`, queue timeout),
             130 when cancelled or refused.
+            """),
+        new("queue",
+            ["tman queue [<name>] [--json] [--label K=V]... [--cores N] [--mem M]"],
+            "machine queues: budget, admitted, waiting, room",
+            """
+            Each machine queue as admission sees it: its budget, the admitted runs and what they
+            book, the host load no admitted run accounts for (unattributed), what is free, who
+            waits and in what order, and whether a run of a given cost arriving now would be
+            admitted at once — the queue's own rule, asked about a run that has not arrived.
+            Free is the budget less what is booked, the unattributed load counting only while
+            something is admitted; it is negative when the queue is oversubscribed.
+
+              <name>              only that queue; one the machine config does not declare is refused
+              --json              one JSON document for another program: {"schema": 1, "host": ...,
+                                  "queues": [...]}
+              --label K=V         list only entries carrying label K=V (repeatable); the totals
+                                  always count every admission
+              --cores N           the cost to ask the verdict for (default: the queue's cores-default)
+              --mem M             likewise, memory (default: the queue's mem-default)
+
+            exit: 0, or 127 for an undeclared queue or a bad flag.
             """),
         new("probe",
             ["tman probe --pid <pid> [--start-ticks <ticks>]"],

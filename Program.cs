@@ -39,6 +39,7 @@ public static partial class Program
                 case "hook": return CmdHook(rest);
                 case "probe": return CmdProbe(rest);
                 case "hold": return await CmdHold(rest);
+                case "queue": return CmdQueue(rest);
                 case "--version" or "-v": Console.WriteLine($"tman {Version}"); return 0;
                 default:
                     {
@@ -485,6 +486,39 @@ public static partial class Program
         {
             Interrupt.Unlisten(onCancel);
         }
+    }
+
+    /// <summary>
+    /// `tman queue`: the machine queues as admission sees them, for a scheduler choosing what to
+    /// start. Sweeps first, as `list` does, so a dead runner's admission is not reported as held.
+    /// </summary>
+    static int CmdQueue(string[] argv)
+    {
+        var args = ReadReportArgs("queue", argv, ["--json"], positionals: 1, valued: ["--cores", "--mem"]);
+        double? cores = null;
+        long? memMb = null;
+        if (args.Values.TryGetValue("--cores", out var c))
+            cores = double.TryParse(c, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out var v) && v > 0 && double.IsFinite(v)
+                ? v
+                : throw new FormatException($"bad --cores \"{c}\": expected a number of cores above zero");
+        if (args.Values.TryGetValue("--mem", out var m))
+            memMb = Caps.ParseMemMb(m) is { } mb and > 0 ? mb
+                : throw new FormatException($"bad --mem \"{m}\": expected megabytes, or a size such as 512m or 2g");
+        // a queue named is read whole or refused, as a run naming it is
+        IReadOnlyList<NamedQueue> queues = args.Positionals is [var name] ? [Config.Queue(name)] : Config.MachineQueues();
+
+        Reaper.Sweep(Retention(), quiet: true);
+        var all = Store.LoadAll();
+        var now = DateTime.UtcNow;
+        var snapshots = queues.Select(q => QueueReport.Take(q, all, cores, memMb, now)).ToList();
+        if (args.Switches.Contains("--json"))
+            Console.WriteLine(QueueReport.Json(snapshots, args.Filter, now));
+        else if (snapshots.Count == 0)
+            Console.WriteLine($"no queues declared in {Config.MachineConfigPath}");
+        else
+            Console.WriteLine(QueueReport.Text(snapshots, args.Filter, now));
+        return 0;
     }
 
     /// <summary>

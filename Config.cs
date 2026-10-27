@@ -181,6 +181,9 @@ public static class Config
                 $"queue \"{name}\" is not declared in {MachineConfigPath}; declare it there, e.g. queue \"{name}\" {{ cores \"80%\"; mem \"80%\" }}");
     }
 
+    /// <summary>Every queue the machine config declares, in the order it declares them.</summary>
+    public static IReadOnlyList<NamedQueue> MachineQueues() => [.. LoadMachine().Queues.Values];
+
     /// <summary>
     /// The queue a run joins when its alias, its `.tman.kdl` defaults and `--queue` all name none:
     /// the machine's "default" queue, when it declares one. Null when it declares none, which is the

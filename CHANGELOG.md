@@ -25,6 +25,14 @@ below 1.0, behavior changes land in minor releases.
   guessing which record was its run; the files are tman's internal shape. `tman list --label K=V`
   keeps only the runs carrying every pair given, in both forms. A culled run's record now carries
   `CulledBy`, the cap it crossed, and every record its `Alias`; the text `tman list` is unchanged.
+- **`tman queue` shows each machine queue as admission sees it.** Its budget, the admitted runs and
+  what they book, the host load no admitted run accounts for, what is free, the line in order with
+  each waiter's wait, and whether a run of a given cost (`--cores`, `--mem`; the queue's default
+  cost otherwise) arriving now would be admitted at once. The verdict is the admission rule itself,
+  asked about a run that has not arrived, so a scheduler choosing what to start reads the queue's
+  answer instead of re-deriving it from the numbers. `--json` prints it as one document carrying
+  `"schema": 1`; `--label` narrows the entries, never the totals. An alias named `queue` is now
+  reached with `tman run --alias queue`.
 
 ## [0.7.10] - 2026-10-22
 
