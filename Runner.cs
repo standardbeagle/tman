@@ -96,8 +96,10 @@ public static class Runner
     /// it then becomes are one record under one id.
     /// </summary>
     /// <param name="cwd">Directory the child runs in; null means where tman itself is standing.</param>
+    /// <param name="labels">The run's scope, already merged from its doors (see <see cref="Labels.ForNewRun"/>).</param>
     public static RunRecord NewRecord(
-        string command, string[] args, Caps caps, string? name, string? alias, string? group, string? cwd)
+        string command, string[] args, Caps caps, string? name, string? alias, string? group, string? cwd,
+        SortedDictionary<string, string>? labels = null)
     {
         var runnerStart = ProcUtil.OwnStart();
         return new RunRecord
@@ -115,6 +117,7 @@ public static class Runner
             AgentSession = Scope.CurrentSession(),
             Group = group,
             ParentId = Environment.GetEnvironmentVariable(ParentIdEnvVar),
+            Labels = labels,
             Caps = caps,
         };
     }
@@ -144,6 +147,8 @@ public static class Runner
         };
         foreach (var a in record.Args) psi.ArgumentList.Add(a);
         psi.Environment[ParentIdEnvVar] = record.Id;
+        // the merged set, so a tman the child starts files itself under the scope this run carries
+        if (record.Labels is { Count: > 0 } labels) psi.Environment[Labels.EnvVar] = Labels.Format(labels);
 
         // Ctrl+C reaches the child through the terminal at the same moment it reaches tman. Killing
         // the tree from here and letting the loop read whatever exit code the child chose would let

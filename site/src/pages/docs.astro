@@ -34,7 +34,7 @@ curl -fsSL https://raw.githubusercontent.com/standardbeagle/tman/main/install.sh
     <tr><td><code>tman probe --pid &lt;pid&gt; [--start-ticks &lt;ticks&gt;]</code></td><td>is a pid you recorded earlier still that process? exit 0 mine, 1 gone, 3 not mine (pid reused); read-only, <code>--start-ticks</code> is Linux only</td></tr>
     <tr><td><code>tman status [id|name|id-prefix] [--json]</code></td><td>summary counts, or one run's detail</td></tr>
     <tr><td><code>tman init [--shims] [--gitignore]</code></td><td>scaffold <code>.tman.kdl</code> (+ repo-root shims)</td></tr>
-    <tr><td><code>tman hold --cores N --mem M [--pid &lt;pid&gt;] [--queue &lt;name&gt;]</code></td><td>book the cost of work another program started into a machine queue, for as long as it lives, so a client such as an agent runner reserves admission without tman knowing what the work is. Without <code>--pid</code>, the hold lasts until it is killed (Ctrl+C). The queue defaults to the machine's <code>default</code></td></tr>
+    <tr><td><code>tman hold --cores N --mem M [--pid &lt;pid&gt;] [--queue &lt;name&gt;] [--label K=V]...</code></td><td>book the cost of work another program started into a machine queue, for as long as it lives, so a client such as an agent runner reserves admission without tman knowing what the work is. Without <code>--pid</code>, the hold lasts until it is killed (Ctrl+C). The queue defaults to the machine's <code>default</code>. Labels work as on <code>tman run</code></td></tr>
     <tr><td><code>tman hook pretooluse</code></td><td>Claude Code PreToolUse hook: route bare test/build commands through tman</td></tr>
   </table>
 
@@ -55,6 +55,7 @@ curl -fsSL https://raw.githubusercontent.com/standardbeagle/tman/main/install.sh
     <tr><td><code>--no-queue</code></td><td>off</td><td>join no queue, whatever <code>.tman.kdl</code> says, so the run books nothing; an alias can opt out without a flag with <code>no-queue true</code></td></tr>
     <tr><td><code>--exclusive</code></td><td>off</td><td>run alone in its queue: wait for admitted work to finish, then hold the queue until it exits; past the starvation bound it starts beside the runs still admitted and names them, but never beside another exclusive run</td></tr>
     <tr><td><code>--service</code></td><td>off</td><td>a run that never ends — a dev server or watcher: it books its cost in the queue like <code>tman hold</code>, so no exclusive or starving run waits for it to end; an alias declares it with <code>service true</code></td></tr>
+    <tr><td><code>--label K=V</code></td><td>—</td><td>file the run under scope <code>K=V</code> (repeatable). <code>TMAN_LABELS="k=v,k=v"</code> in the environment does the same for every tman a shell starts, a flag winning a key both name; the run hands the merged set to its children as <code>TMAN_LABELS</code>. A label tman cannot read refuses the run with exit 127</td></tr>
   </table>
   <p>Durations accept <code>ms</code>, <code>s</code>, <code>m</code>, <code>h</code> (e.g. <code>90s</code>, <code>10m</code>). Cap precedence: CLI flags &gt; alias block &gt; <code>defaults</code> block &gt; built-ins. A flag whose value cannot be read refuses the run with exit 127 and names the flag (<code>bad --max-cpu</code>); nothing is clamped or defaulted.</p>
   <p>

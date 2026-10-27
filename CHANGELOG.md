@@ -8,6 +8,16 @@ below 1.0, behavior changes land in minor releases.
 
 ## [Unreleased]
 
+### Added
+- **A run can carry its supervisor's scope as labels.** `tman run --label task=T1 --label step=build`,
+  or `TMAN_LABELS="task=T1,step=build"` in the environment, records `Labels` on the run; a flag wins
+  a key both name. A supervisor sets the variable once in an agent's environment and every tman that
+  agent's shell starts carries the task, step and attempt without its command changing. Worktrack
+  matched an agent's runs to its turn by directory and time, which a person running tman in the same
+  worktree, or two builds at once, got wrong. A run hands the merged set to its children as
+  `TMAN_LABELS`, so a nested run carries its parent's scope. `tman hold --label` labels a hold. A
+  label tman cannot read refuses the run with exit 127 rather than filing it under no scope.
+
 ## [0.7.10] - 2026-10-22
 
 ### Fixed

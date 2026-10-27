@@ -82,7 +82,8 @@ public static partial class Program
         return await GatedRun(alias.Command, args, caps, alias.Name, alias.Name, replace: false,
             RunKey.ScopeDir(config), config.Dir, cwd: config.Dir,
             queue: alias.NoQueue ? null : Join(alias.Queue ?? config.DefaultQueue, null, alias.Exclusive, alias.Service),
-            expectedCores: alias.ExpectedCores ?? config.ExpectedCores, expectedMemMb: alias.ExpectedMemMb ?? config.ExpectedMemMb);
+            expectedCores: alias.ExpectedCores ?? config.ExpectedCores, expectedMemMb: alias.ExpectedMemMb ?? config.ExpectedMemMb,
+            labels: Labels.ForNewRun(null));
     }
 
     static async Task<int> CmdRun(string[] argv, string? _)
@@ -92,6 +93,7 @@ public static partial class Program
         string? name = null, aliasName = null, queueName = null;
         bool replace = false, noQueue = false, exclusive = false, service = false;
         var cliCaps = new Caps();
+        var cliLabels = new SortedDictionary<string, string>(StringComparer.Ordinal);
         var cmdArgs = new List<string>();
         var i = 0;
         var sawDashDash = false;
@@ -112,6 +114,7 @@ public static partial class Program
                     case "--no-queue": noQueue = true; break;
                     case "--exclusive": exclusive = true; break;
                     case "--service": service = true; break;
+                    case "--label": Labels.AddFlag(cliLabels, Next()); break;
                     case "--max-time" or "--stall" or "--max-mem" or "--max-cpu" or "--max-parallel" or "--limit-cpus"
                         or "--limit-mem" or "--queue-timeout":
                         cliCaps = Caps.With(cliCaps, a[2..], Next(), a);
@@ -130,6 +133,8 @@ public static partial class Program
             throw new FormatException("--service books its cost in a queue; --no-queue and --service cannot both be given");
         if (service && exclusive)
             throw new FormatException("a run that never ends cannot hold the queue alone; --service and --exclusive cannot both be given");
+        // read before anything waits or is replaced: a scope tman cannot read refuses the run whole
+        var labels = Labels.ForNewRun(cliLabels);
 
         if (aliasName is not null)
         {
@@ -157,7 +162,8 @@ public static partial class Program
                 RunKey.ScopeDir(config), config.Dir, cwd: config.Dir,
                 queue: noQueue || aliasNoQueue ? null : Join(queueName ?? alias.Queue ?? config.DefaultQueue,
                     cliCaps.QueueTimeout, alias.Exclusive || exclusive, alias.Service || service),
-                expectedCores: alias.ExpectedCores ?? config.ExpectedCores, expectedMemMb: alias.ExpectedMemMb ?? config.ExpectedMemMb);
+                expectedCores: alias.ExpectedCores ?? config.ExpectedCores, expectedMemMb: alias.ExpectedMemMb ?? config.ExpectedMemMb,
+                labels: labels);
         }
 
         if (cmdArgs.Count == 0) throw new FormatException("run requires a command");
@@ -168,7 +174,7 @@ public static partial class Program
                 cmdArgs[0], cmdArgs[1..].ToArray(), caps, name, null, replace,
                 RunKey.ScopeDir(config), config?.Dir,
                 queue: noQueue ? null : Join(queueName ?? config?.DefaultQueue, cliCaps.QueueTimeout, exclusive, service),
-                expectedCores: config?.ExpectedCores, expectedMemMb: config?.ExpectedMemMb);
+                expectedCores: config?.ExpectedCores, expectedMemMb: config?.ExpectedMemMb, labels: labels);
         }
     }
 
@@ -221,7 +227,7 @@ public static partial class Program
     internal static async Task<int> GatedRun(
         string command, string[] args, Caps caps, string? name, string? alias, bool replace,
         string scopeDir, string? logDir = null, string? cwd = null, QueueJoin? queue = null,
-        double? expectedCores = null, long? expectedMemMb = null)
+        double? expectedCores = null, long? expectedMemMb = null, SortedDictionary<string, string>? labels = null)
     {
         // before any waiting: a run this machine can never confine must not sit in a queue first
         if (Confinement.Refusal(caps) is { } refusal) throw new FormatException(refusal);
@@ -295,7 +301,7 @@ public static partial class Program
         };
         Interrupt.Listen(onCancel);
 
-        var record = Runner.NewRecord(command, args, caps, name, alias, group, cwd);
+        var record = Runner.NewRecord(command, args, caps, name, alias, group, cwd, labels);
         FileStream? slotFile = null;
         try
         {
@@ -379,7 +385,8 @@ public static partial class Program
     /// </summary>
     static async Task<int> CmdHold(string[] argv)
     {
-        const string usage = "usage: tman hold --cores N --mem M [--pid <pid>] [--queue <name>]";
+        const string usage = "usage: tman hold --cores N --mem M [--pid <pid>] [--queue <name>] [--label k=v]...";
+        var cliLabels = new SortedDictionary<string, string>(StringComparer.Ordinal);
         double? cores = null;
         long? memMb = null;
         int? pid = null;
@@ -402,11 +409,13 @@ public static partial class Program
                     pid = int.TryParse(Next(), out var p) && p > 0 ? p : throw new FormatException(usage);
                     break;
                 case "--queue": queueName = Next(); break;
+                case "--label": Labels.AddFlag(cliLabels, Next()); break;
                 default:
                     throw new FormatException(usage);
             }
         }
         if (cores is null || memMb is null) throw new FormatException(usage);
+        var labels = Labels.ForNewRun(cliLabels);
 
         var join = Join(queueName, null, exclusive: false)
             ?? throw new FormatException("no machine queue to hold: declare one in the machine config, or pass --queue");
@@ -429,6 +438,7 @@ public static partial class Program
             ProjectRoot = Scope.CurrentProjectRoot(),
             AgentSession = Scope.CurrentSession(),
             Group = RunKey.For("hold", "hold", RunKey.ScopeDir(Config.Load())),
+            Labels = labels,
             Caps = new Caps(),
             State = RunState.Queued,
             Hold = true,

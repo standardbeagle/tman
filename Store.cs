@@ -27,6 +27,8 @@ public sealed class RunRecord
     public int Schema { get; set; } = CurrentSchema;
     public required string Id { get; set; }
     public string? Name { get; set; }
+    /// <summary>The scope its supervisor named, see <see cref="Tman.Labels"/>; null when it named none.</summary>
+    public SortedDictionary<string, string>? Labels { get; set; }
     public int Pid { get; set; }
     public int RunnerPid { get; set; }
     public DateTime RunnerStartUtc { get; set; }

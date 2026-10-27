@@ -44,6 +44,10 @@ public static class Help
           --service           a run that never ends (a dev server, a watch): booked in the queue
                               like a hold, so no exclusive or starving run waits for it to end;
                               an alias whose block sets `service true` does the same
+          --label K=V         file the run under scope K=V (repeatable); TMAN_LABELS="k=v,k=v" in
+                              the environment does the same for every tman a shell starts, a flag
+                              winning a key both name. The run hands the merged set to its
+                              children as TMAN_LABELS
         """;
 
     const string Sweep = """
@@ -148,7 +152,7 @@ public static class Help
               --gitignore         ignore .tman/ and the shims in .gitignore
             """),
         new("hold",
-            ["tman hold --cores N --mem M [--pid <pid>] [--queue <name>]"],
+            ["tman hold --cores N --mem M [--pid <pid>] [--queue <name>] [--label K=V]..."],
             "reserve a queue admission for work tman did not start",
             """
             Books the cost of a process tree another program started into a machine queue, for as
@@ -161,6 +165,7 @@ public static class Help
               --mem M             memory the held work is expected to use (4096, 4g)
               --pid P             release when pid P exits; without it, hold until killed
               --queue Q           the machine queue to hold in (default: "default")
+              --label K=V         file the hold under scope K=V, as `tman run --label` does
 
             exit: 0 when the held pid exited, 75 when stopped by tman (`tman kill`, queue timeout),
             130 when cancelled or refused.
