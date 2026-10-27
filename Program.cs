@@ -352,17 +352,18 @@ public static partial class Program
 
     static int CmdList(string[] argv)
     {
-        TakesOnly("list", argv, ["--all"]);
+        var args = ReadReportArgs("list", argv, ["--all", "--json"], positionals: 0);
         Reaper.Sweep(Retention(), quiet: true);
-        var all = argv.Contains("--all");
-        var runs = Store.LoadAll()
-            .Where(r => all || !r.IsFinished)
+        var all = args.Switches.Contains("--all");
+        var records = Store.LoadAll();
+        var runs = records
+            .Where(r => (all || !r.IsFinished) && Labels.Match(r.Labels, args.Filter))
             .OrderByDescending(r => r.StartedUtc)
             .ToList();
+        if (args.Switches.Contains("--json")) { Console.WriteLine(JsonReport.Runs(runs, records)); return 0; }
         if (runs.Count == 0) { Console.WriteLine("no runs"); return 0; }
 
         var now = DateTime.UtcNow;
-        var records = Store.LoadAll();
         Console.WriteLine($"{"ID",-14}{"NAME",-16}{"PROJECT",-26}{"PID",-8}{"STATE",-12}{"AGE",-8}{"PEAKMEM",-9}COMMAND");
         foreach (var r in runs)
         {
@@ -768,6 +769,42 @@ public static partial class Program
             return 0;
         }
         throw new FormatException($"no command or alias '{topic}' to describe (tman help lists the commands)");
+    }
+
+    /// <summary>
+    /// The arguments of a report command — `list`, `queue`: its switches, the flags in
+    /// <paramref name="valued"/> with their values, the `--label K=V` filter (every pair must match),
+    /// and up to <paramref name="positionals"/> positional arguments. Refused whole, as
+    /// <see cref="TakesOnly"/> refuses, when any is not one the command takes.
+    /// </summary>
+    static ReportArgs ReadReportArgs(string command, string[] argv, string[] switches, int positionals, string[]? valued = null)
+    {
+        var args = new ReportArgs();
+        for (var i = 0; i < argv.Length; i++)
+        {
+            var a = argv[i];
+            if (switches.Contains(a)) { args.Switches.Add(a); continue; }
+            if (a == "--label" || (valued?.Contains(a) ?? false))
+            {
+                if (i + 1 >= argv.Length) throw new FormatException($"flag {a} requires a value");
+                if (a == "--label") Labels.AddFlag(args.Filter, argv[++i]);
+                else args.Values[a] = argv[++i];
+                continue;
+            }
+            if (a.StartsWith('-')) throw new FormatException($"unknown flag {a} for '{command}' (see tman {command} --help)");
+            if (args.Positionals.Count >= positionals)
+                throw new FormatException($"unexpected argument '{a}' for '{command}' (see tman {command} --help)");
+            args.Positionals.Add(a);
+        }
+        return args;
+    }
+
+    sealed class ReportArgs
+    {
+        public HashSet<string> Switches { get; } = new(StringComparer.Ordinal);
+        public Dictionary<string, string> Values { get; } = new(StringComparer.Ordinal);
+        public SortedDictionary<string, string> Filter { get; } = new(StringComparer.Ordinal);
+        public List<string> Positionals { get; } = [];
     }
 
     /// <summary>

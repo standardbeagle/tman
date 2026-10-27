@@ -17,6 +17,14 @@ below 1.0, behavior changes land in minor releases.
   worktree, or two builds at once, got wrong. A run hands the merged set to its children as
   `TMAN_LABELS`, so a nested run carries its parent's scope. `tman hold --label` labels a hold. A
   label tman cannot read refuses the run with exit 127 rather than filing it under no scope.
+- **`tman list --json` prints the run store for another program.** One document carrying
+  `"schema": 1`, with each run's id, name, alias, cwd, pid, labels, `state` (queued, running,
+  exited), `endReason` (exit, max-time, stall, mem, cpu, queue-timeout, killed, reaped,
+  start-failed), the child's `exitCode` and tman's own `tmanExit`, and its queued, admitted, started
+  and ended times. Worktrack read tman's record files directly, decoding the state number and
+  guessing which record was its run; the files are tman's internal shape. `tman list --label K=V`
+  keeps only the runs carrying every pair given, in both forms. A culled run's record now carries
+  `CulledBy`, the cap it crossed, and every record its `Alias`; the text `tman list` is unchanged.
 
 ## [0.7.10] - 2026-10-22
 

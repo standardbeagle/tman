@@ -27,6 +27,8 @@ public sealed class RunRecord
     public int Schema { get; set; } = CurrentSchema;
     public required string Id { get; set; }
     public string? Name { get; set; }
+    /// <summary>The .tman.kdl alias the run was started as; null for a bare `tman run -- cmd`.</summary>
+    public string? Alias { get; set; }
     /// <summary>The scope its supervisor named, see <see cref="Tman.Labels"/>; null when it named none.</summary>
     public SortedDictionary<string, string>? Labels { get; set; }
     public int Pid { get; set; }
@@ -73,6 +75,12 @@ public sealed class RunRecord
     /// <summary>The CPUs limit-cpus confined the run to; null when it set none. See <see cref="Confinement"/>.</summary>
     public int[]? Cpus { get; set; }
     public string? KillReason { get; set; }
+    /// <summary>
+    /// The cap a <see cref="RunState.Culled"/> run crossed — max-mem, max-cpu or limit-mem — so a
+    /// reader tells a memory kill from a CPU one by this field, never by the reason's wording. Null
+    /// for any other outcome, and on a culled record written before tman recorded it.
+    /// </summary>
+    public string? CulledBy { get; set; }
     /// <summary>
     /// The run was ended on a kill request (`tman kill`, `--replace`): <see cref="KillReason"/> is
     /// the request's own words, and the run exits <see cref="Runner.ExitStoppedByTman"/>. Set by

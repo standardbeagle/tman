@@ -47,7 +47,7 @@ public static class Help
           --label K=V         file the run under scope K=V (repeatable); TMAN_LABELS="k=v,k=v" in
                               the environment does the same for every tman a shell starts, a flag
                               winning a key both name. The run hands the merged set to its
-                              children as TMAN_LABELS
+                              children as TMAN_LABELS; `tman list --label` filters by it
         """;
 
     const string Sweep = """
@@ -87,7 +87,7 @@ public static class Help
             what an alias runs, use `tman help <alias>`.
             """),
         new("list",
-            ["tman list [--all]"],
+            ["tman list [--all] [--json] [--label K=V]..."],
             "list live (or all) runs",
             """
             Lists live runs: running ones, and ones queued for a slot (pid `-`; a waiter in a named
@@ -95,6 +95,12 @@ public static class Help
             `tman kill all` works within.
 
               --all               every record still within retention, finished runs included
+              --json              one JSON document for another program: {"schema": 1, "runs": [...]},
+                                  each run's id, name, alias, cwd, pid, labels, state (queued,
+                                  running, exited), endReason (exit, max-time, stall, mem, cpu,
+                                  queue-timeout, killed, reaped, start-failed), exitCode, tmanExit,
+                                  queuedAt/admittedAt/startedAt/endedAt, peakMemMb and cpu
+              --label K=V         only runs carrying label K=V (repeatable; every pair must match)
             """,
             ["ls"]),
         new("kill",

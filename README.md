@@ -21,7 +21,7 @@ Works with **[Claude Code](https://dev.standardbeagle.com/tman/setup/claude-code
 **Contents** — [Why](#why) · [Install](#install) · [Quick start](#quick-start) ·
 [Commands](#commands) · [Run flags](#run-flags) · [Buckets](#buckets) ·
 [.tman.kdl](#tmankdl) · [Run logs](#run-logs) · [AI agent setup](#ai-agent-setup) · [Housekeeping](#housekeeping) ·
-[Exit codes](#exit-codes) · [Scope](#scope)
+[Reports for another program](#reports-for-another-program) · [Exit codes](#exit-codes) · [Scope](#scope)
 
 ## Why
 
@@ -79,7 +79,7 @@ tman init --shims --gitignore
 | --- | --- |
 | `tman run [flags] -- <cmd> [args]` | run a process under supervision |
 | `tman run --alias <name> [args]` / `tman <alias>` | run a `.tman.kdl` alias |
-| `tman list [--all]` | list live runs — running, and queued for a slot (pid `-`) — or all records; PROJECT is the run's project root, the scope `kill all` works within |
+| `tman list [--all] [--json] [--label K=V]...` | list live runs — running, and queued for a slot (pid `-`) — or all records; PROJECT is the run's project root, the scope `kill all` works within. `--label K=V` keeps only runs carrying every pair given. `--json` prints one document for another program — see [Reports for another program](#reports-for-another-program) |
 | `tman kill <id\|name\|all> [--reason <text>]` | kill run(s), queued ones included. `all` means *your* runs: the same project root (nearest `.tman.kdl` above the cwd, else the cwd) and, when both sides have one, the same agent session (`CLAUDE_CODE_SESSION_ID`); other projects' and sessions' runs are left alone and counted, so one agent cannot stop its siblings' runs. A run named by id or name is killed wherever it is, with its owner printed when that is outside your scope. `kill all --everywhere` lifts the scope but needs a controlling terminal (`/dev/tty`); without one it refuses with exit 77 and names the command a person runs — a queued run ends without ever starting its child; the killed run ends `killed: killed via tman kill` (`killed via tman kill: <text>` with `--reason <text>`, which says who is stopping it and why), its record carries `KillRequested: true`, and its `tman` exits 75 — its own code, so a supervisor tells a deploy's or an operator's kill from the run failing or a Ctrl+C (130) without reading the reason's words. `kill` leaves the reason in `~/.tman/runs/<id>.kill` before killing, and the run's own runner writes the outcome from it, so the two never race to save the record. An unknown flag refuses the command with exit 127 rather than being skipped; exits 1 when part of a run's tree could not be killed |
 | `tman clean` | run the housekeeping sweep now and report what it did |
 | `tman status [id\|name\|id-prefix] [--json]` | summary counts and the host's unattributed load, or one run's detail |
@@ -107,7 +107,7 @@ tman init --shims --gitignore
 | `--no-queue` | off | join no queue, even one the alias, `defaults`, or the machine's `default` names |
 | `--exclusive` | off | run alone in its queue: wait for admitted runs to finish — not for `tman hold` bookings, service runs or load outside the queue — then hold the queue until it exits; holds are still admitted beside it. Past the starvation bound it stops waiting and starts beside the runs still admitted, naming them on stderr — but never beside another exclusive run |
 | `--service` | off | a long-lived run (a dev server, a watcher): it books its cost in the queue like a `tman hold`, so it never holds back an exclusive or a starving run, which cannot wait for it to end |
-| `--label K=V` | — | file the run under scope `K=V`; repeatable. `TMAN_LABELS="k=v,k=v"` in the environment does the same for every tman a shell starts, so a supervisor sets it once in an agent's environment and every run in that turn carries its task, step and attempt without the commands changing; a flag wins a key both name. The run hands the merged set to its children as `TMAN_LABELS`, so a nested run carries its parent's scope. A key is letters, digits, `_`, `-` or `.`; a value is non-empty and holds no comma. A label tman cannot read refuses the run with exit 127 |
+| `--label K=V` | — | file the run under scope `K=V`; repeatable. `TMAN_LABELS="k=v,k=v"` in the environment does the same for every tman a shell starts, so a supervisor sets it once in an agent's environment and every run in that turn carries its task, step and attempt without the commands changing; a flag wins a key both name. The run hands the merged set to its children as `TMAN_LABELS`, so a nested run carries its parent's scope. A key is letters, digits, `_`, `-` or `.`; a value is non-empty and holds no comma. A label tman cannot read refuses the run with exit 127. `tman list --label` filters by labels |
 
 Cap precedence: CLI flags > alias block > `defaults` block > built-ins.
 
@@ -600,7 +600,46 @@ store-wide lock, which is a poor trade for reclaiming a few megabytes a year.
 absolute resolved command paths, absolute cwd, one nested `Caps` object, and a schema version, so a
 record written by a different tman version is discarded rather than half-read.
 
-## Exit codes
+## Reports for another program
+
+`tman list --json` prints the run store as one document a supervisor reads instead of tman's
+record files, whose shape is tman's own and changes with it. The document carries `"schema": 1`;
+a field may be added under the same number, and a field removed, renamed or changed in meaning
+bumps it. Times are UTC ISO 8601; a field with nothing to say is `null`, never omitted.
+
+```json
+{
+  "schema": 1,
+  "runs": [
+    {
+      "id": "0b2e5ee52c4f", "name": "test", "alias": "test", "parentId": null,
+      "cwd": "/home/me/proj", "projectRoot": "/home/me/proj", "agentSession": null,
+      "command": "/usr/bin/dotnet", "args": ["test"], "pid": 41213, "runnerPid": 41200,
+      "state": "exited", "endReason": "exit", "exitCode": 0, "tmanExit": 0,
+      "killReason": null, "killRequested": false, "culledBy": null,
+      "queuedAt": "2026-10-26T14:02:11.52Z", "admittedAt": "2026-10-26T14:02:11.58Z",
+      "startedAt": "2026-10-26T14:02:11.60Z", "endedAt": "2026-10-26T14:05:40.11Z",
+      "heartbeatAt": "2026-10-26T14:05:40.11Z", "queue": "default", "position": null,
+      "queuedSeconds": 0.06, "admittedCores": 3.1, "admittedMemMb": 2400,
+      "exclusive": false, "hold": false, "service": false,
+      "peakMemMb": 2311, "peakCores": 7.9, "currentCores": 2.2, "cpuSeconds": 655.3,
+      "labels": { "attempt": "2", "step": "implement", "task": "01M4Y2GB4N" }
+    }
+  ]
+}
+```
+
+- `state` is `queued` (no child yet; `pid` 0), `running`, or `exited` (over, for any reason).
+- `endReason`, `null` while the run is live: `exit` (the child exited; `exitCode` is its code),
+  `max-time`, `stall`, `mem` (max-mem or limit-mem, named in `culledBy`), `cpu` (max-cpu),
+  `queue-timeout`, `killed` (`tman kill` or `--replace` when `killRequested`; otherwise Ctrl+C or an
+  exit status nobody read, named in `killReason`), `reaped` (its runner died and the orphan was
+  killed), `start-failed`. `culled` is a cap kill recorded by a tman that did not name the cap.
+- `tmanExit` is what that run's `tman` exited with; `exitCode` is the child's own, `null` when it
+  did not exit by itself.
+- `queuedAt` is when the run joined its named queue, or, while it waits for a bucket slot, when
+  that wait began; `startedAt` is `null` for a run that never had a child.
+
 
 | code | meaning |
 | --- | --- |

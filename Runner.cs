@@ -106,6 +106,7 @@ public static class Runner
         {
             Id = Guid.NewGuid().ToString("N")[..12],
             Name = name ?? alias,
+            Alias = alias,
             RunnerPid = Environment.ProcessId,
             RunnerStartUtc = runnerStart.Utc,
             RunnerStartTicks = runnerStart.Ticks,
@@ -238,6 +239,7 @@ public static class Runner
 
         string? killReason = null;
         RunState killState = RunState.Killed;
+        string? culledBy = null;
         var killRequested = false;
         var prevCpu = TimeSpan.Zero;
         var prevTick = clock.GetTimestamp();
@@ -336,19 +338,19 @@ public static class Runner
                 if (Store.ReadKillRequest(record.Id) is { } requested)
                 { killReason = requested; killState = RunState.Killed; killRequested = true; }
                 else if (confinement.Breach() is { } breach)
-                { killReason = breach; killState = RunState.Culled; }
+                { killReason = breach; killState = RunState.Culled; culledBy = "limit-mem"; }
                 else if (caps.MaxTime is { } mt && clock.GetElapsedTime(startedAt, now) > mt)
                 { killReason = $"exceeded max-time {mt}"; killState = RunState.TimedOut; }
                 else if (caps.Stall is { } st && clock.GetElapsedTime(lastProgress, now) > st &&
                          (sampleOk || sampleFailures >= SampleFailLimit))
                 { killReason = $"no output or activity for {st} (tree: {treeDiag})"; killState = RunState.Stalled; }
                 else if (caps.MaxMemMb is { } mm && memMb > mm)
-                { killReason = $"tree memory {memMb}MB > max-mem {mm}MB"; killState = RunState.Culled; }
+                { killReason = $"tree memory {memMb}MB > max-mem {mm}MB"; killState = RunState.Culled; culledBy = "max-mem"; }
                 else if (caps.MaxCpuPct is { } mc)
                 {
                     cpuBreaches = cpuPct > mc ? cpuBreaches + 1 : 0;
                     if (cpuBreaches >= CpuBreachLimit)
-                    { killReason = $"cpu {cpuPct:F0}% > max-cpu {mc:F0}% sustained"; killState = RunState.Culled; }
+                    { killReason = $"cpu {cpuPct:F0}% > max-cpu {mc:F0}% sustained"; killState = RunState.Culled; culledBy = "max-cpu"; }
                 }
 
                 if (killReason is not null) break;
@@ -408,6 +410,7 @@ public static class Runner
                 Console.Error.WriteLine($"tman: pid {record.Pid} ended: {verdict}");
                 killReason = verdict;
                 killState = RunState.Culled;
+                culledBy = "limit-mem";
             }
             confinement.Dispose();
 
@@ -420,6 +423,7 @@ public static class Runner
             {
                 record.State = killState;
                 record.KillReason = killReason;
+                if (killState == RunState.Culled) record.CulledBy = culledBy;
             }
             else if (TryReadExitCode(proc) is { } exitCode)
             {
