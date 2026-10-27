@@ -86,9 +86,11 @@ public class QueueJsonTests : IDisposable
         Assert.Equal(3600, q.GetProperty("timeoutSeconds").GetDouble());
         Assert.Equal(3, q.GetProperty("booked").GetProperty("cores").GetDouble());
         Assert.Equal(2048, q.GetProperty("booked").GetProperty("memMb").GetInt64());
-        // the suite fakes an unmeasured host, so nothing outside the queue is booked beside it
-        Assert.Equal(JsonValueKind.Null, q.GetProperty("unattributed").ValueKind);
-        Assert.Equal(1, q.GetProperty("free").GetProperty("cores").GetDouble());
+        // the tman read here measures this host's real load, which no test controls: free is the
+        // budget less the admissions and whatever outside load it measured beside them
+        var outside = q.GetProperty("unattributed");
+        var outsideCores = outside.ValueKind == JsonValueKind.Null ? 0 : outside.GetProperty("cores").GetDouble();
+        Assert.Equal(4 - 3 - outsideCores, q.GetProperty("free").GetProperty("cores").GetDouble(), precision: 6);
         Assert.False(q.GetProperty("exclusiveHeld").GetBoolean());
 
         var admitted = Assert.Single(q.GetProperty("admitted").EnumerateArray());
@@ -105,18 +107,47 @@ public class QueueJsonTests : IDisposable
         Assert.Equal(2, line[0].GetProperty("cores").GetDouble());
         Assert.False(line[0].GetProperty("starving").GetBoolean());
 
-        // the default cost (1 core, 1 GiB) fits the core left, and the earlier 2-core waiter does
-        // not, so it may slip into the gap — the queue's own rule, not one re-derived here
+        // the verdict under this host's load is not the test's to know; the cost it was asked for is
         Assert.Equal(1, q.GetProperty("probe").GetProperty("cores").GetDouble());
-        Assert.True(q.GetProperty("probe").GetProperty("admitsNow").GetBoolean());
-        // a 2-core arrival fits no better than the waiter ahead of it, so it queues behind
+        Assert.Equal(1024, q.GetProperty("probe").GetProperty("memMb").GetInt64());
+        Assert.Contains(q.GetProperty("probe").GetProperty("admitsNow").ValueKind, new[] { JsonValueKind.True, JsonValueKind.False });
         var bigger = Named(await Queues("--cores", "2", "--mem", "1g"), "q");
         Assert.Equal(2, bigger.GetProperty("probe").GetProperty("cores").GetDouble());
-        Assert.False(bigger.GetProperty("probe").GetProperty("admitsNow").GetBoolean());
 
+        // an empty queue admits a lone run whatever the host is doing
         var idle = Named(root, "idle");
         Assert.Empty(idle.GetProperty("admitted").EnumerateArray());
         Assert.True(idle.GetProperty("probe").GetProperty("admitsNow").GetBoolean());
+    }
+
+    [UnixFact("probes this test's own pid as the seeded runs' runner")]
+    public void TheVerdict_IsTheAdmissionRule_AskedAboutARunArrivingNow()
+    {
+        // in process, where the suite fakes an unmeasured host, so the verdict is the rule's alone
+        Seed("admitted0001", cores: 3, memMb: 2048, admitted: true, TimeSpan.FromMinutes(2));
+        Seed("waiting00001", cores: 2, memMb: 1024, admitted: false, TimeSpan.FromMinutes(1));
+        var queue = Config.Queue("q");
+        var all = Store.LoadAll();
+
+        // the default cost (1 core, 1 GiB) fits the core left and the earlier 2-core waiter does
+        // not, so the arrival may slip into the gap
+        var small = QueueReport.Take(queue, all, null, null, DateTime.UtcNow);
+        Assert.Equal(new Admission.AdmissionCost(1, 1024), small.Probe);
+        Assert.Equal(new Admission.AdmissionCost(1, 6144), small.Free);
+        Assert.True(small.AdmitsProbe);
+        // a 2-core arrival fits no better than the waiter ahead of it, so it queues behind
+        Assert.False(QueueReport.Take(queue, all, 2, 1024, DateTime.UtcNow).AdmitsProbe);
+        // nor does a 1-core one once outside load fills the gap
+        var prevHost = Admission.MeasureHost;
+        try
+        {
+            Admission.MeasureHost = () => new Host.Usage(Cores: 3 + 0.5, MemMb: 2048);
+            var loaded = QueueReport.Take(queue, all, null, null, DateTime.UtcNow);
+            Assert.Equal(new Admission.AdmissionCost(0.5, 0), loaded.Unattributed);
+            Assert.Equal(0.5, loaded.Free.Cores, precision: 6);
+            Assert.False(loaded.AdmitsProbe);
+        }
+        finally { Admission.MeasureHost = prevHost; }
     }
 
     [UnixFact("probes this test's own pid as the seeded run's runner")]
