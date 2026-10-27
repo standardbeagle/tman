@@ -8,6 +8,8 @@ below 1.0, behavior changes land in minor releases.
 
 ## [Unreleased]
 
+## [0.7.11] - 2026-10-27
+
 ### Added
 - **A run can carry its supervisor's scope as labels.** `tman run --label task=T1 --label step=build`,
   or `TMAN_LABELS="task=T1,step=build"` in the environment, records `Labels` on the run; a flag wins
@@ -31,8 +33,12 @@ below 1.0, behavior changes land in minor releases.
   cost otherwise) arriving now would be admitted at once. The verdict is the admission rule itself,
   asked about a run that has not arrived, so a scheduler choosing what to start reads the queue's
   answer instead of re-deriving it from the numbers. `--json` prints it as one document carrying
-  `"schema": 1`; `--label` narrows the entries, never the totals. An alias named `queue` is now
-  reached with `tman run --alias queue`.
+  `"schema": 1`; `--label` narrows the entries, never the totals.
+
+### Changed
+- **`tman queue` is now a command, so an alias named `queue` needs `tman run --alias queue`.** The
+  `tman <alias>` shorthand resolves built-in commands first; a `.tman.kdl` that declares an alias
+  called `queue` and a script that runs it as `tman queue` now gets the queue report instead.
 
 ## [0.7.10] - 2026-10-22
 
@@ -702,7 +708,8 @@ reaping; dedup locks; parallel gating; `.tman.kdl` folder aliases with repo-root
 binaries for linux-x64, linux-arm64, win-x64, osx-arm64, and osx-x64, distributed via npm, PyPI,
 PSGallery, and a shell installer.
 
-[Unreleased]: https://github.com/standardbeagle/tman/compare/v0.7.10...HEAD
+[Unreleased]: https://github.com/standardbeagle/tman/compare/v0.7.11...HEAD
+[0.7.11]: https://github.com/standardbeagle/tman/compare/v0.7.10...v0.7.11
 [0.7.10]: https://github.com/standardbeagle/tman/compare/v0.7.9...v0.7.10
 [0.7.9]: https://github.com/standardbeagle/tman/compare/v0.7.8...v0.7.9
 [0.7.8]: https://github.com/standardbeagle/tman/compare/v0.7.7...v0.7.8
