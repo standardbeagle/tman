@@ -323,69 +323,11 @@ public static class Admission
 
         var all = Store.LoadAll();
         var admitted = AdmittedRuns(queue.Name, all);
-        var costs = admitted.Select(r => new AdmissionCost(r.AdmittedCores ?? 0, r.AdmittedMemMb ?? 0)).ToList();
         // load outside the admitted runs is booked beside them, but only beside them: with nothing
         // admitted the head starts whatever the host is doing, or outside load could hold the
         // queue forever
-        if (costs.Count > 0 && UnattributedLoad(admitted) is { } outside) costs.Add(outside);
-
-        // holds end with their owners' work, which runs as finite tman runs queued behind whoever
-        // waits, services never end, and outside load ends on its own clock: waiting for any of
-        // them to make room would hold a run that reserves the queue, and everyone behind it, forever
-        var onlyUndrainable = admitted.All(Undrainable);
-        var starving = Starving(record);
-        if (exclusive)
-        {
-            // an exclusive run starts once no finite run is admitted, whatever holds and outside
-            // load remain, and no finite run starts while it holds the queue. Past the starvation
-            // bound it stops waiting for finite runs too: a run admitted as finite may never end
-            // (a dev server), and the exclusive run reserves the queue for everyone behind it.
-            // Another exclusive run is finite and holds the queue on purpose, so it is waited for
-            // starving or not: one exclusive run at a time
-            if (ExclusiveHeld(queue.Name, all)) return AdmitOutcome.NoRoom;
-            if (!onlyUndrainable && !starving) return AdmitOutcome.NoRoom;
-        }
-        else
-        {
-            // a finite run may not start while an exclusive one is admitted, whatever its cost; a
-            // hold may, since the work it books runs as finite tman runs, which wait
-            var exclusiveHeld = ExclusiveHeld(queue.Name, all);
-            if (exclusiveHeld && !record.Hold) return AdmitOutcome.NoRoom;
-
-            // arrival order, unless a small run can slip into a gap a larger earlier waiter cannot
-            // take: the earlier waiter's own cost is what the gap is judged against, so an equal or
-            // larger newcomer always queues behind it
-            var position = Position(record, all);
-            if (position is > 1)
-            {
-                // a run keeps its place only ahead of waiters it could delay. An exclusive waiter
-                // waits for finite runs to drain, not for room, so judging a newcomer against its
-                // cost — which always fits — refused everyone behind it for as long as it waited.
-                // A hold delays no waiter that starts beside holds whatever they book (an exclusive
-                // or a starving one); a finite run passes an exclusive waiter until it starves, and
-                // from then on waits, so the host drains for it
-                var earlier = EarlierWaiters(record, all)
-                    .Where(o => record.Hold ? !StartsBesideHolds(o) : !o.Exclusive || Starving(o))
-                    .ToList();
-                // while an exclusive run holds the queue only a hold can start, so a finite waiter
-                // keeps no place ahead of one
-                if (exclusiveHeld) earlier = earlier.Where(o => o.Hold).ToList();
-                if (earlier.Count > 0)
-                {
-                    // a starving waiter reserves the budget: it starts once the finite runs
-                    // drain, whatever holds and outside load remain (see below)
-                    if (earlier.Any(Starving)) return AdmitOutcome.NoRoom;
-                    var first = earlier.OrderBy(o => o.QueuedUtc).ThenBy(o => o.Id, StringComparer.Ordinal).First();
-                    var firstCost = new AdmissionCost(first.AdmittedCores ?? 0, first.AdmittedMemMb ?? 0);
-                    if (Fits(firstCost, costs, queue) || !Fits(cost, costs, queue)) return AdmitOutcome.NoRoom;
-                }
-            }
-        }
-
-        // an exclusive run that got here starts whatever the budget, and a starving one once no
-        // finite run is admitted (see above); the lone-run rule in Fits is the same guarantee for
-        // an empty queue
-        if (!exclusive && !(starving && onlyUndrainable) && !Fits(cost, costs, queue)) return AdmitOutcome.NoRoom;
+        var outside = admitted.Count > 0 ? UnattributedLoad(admitted) : null;
+        if (!Admits(record, queue, cost, exclusive, all, admitted, outside)) return AdmitOutcome.NoRoom;
 
         record.State = RunState.Queued;
         record.AdmittedUtc = DateTime.UtcNow;
@@ -403,6 +345,80 @@ public static class Admission
                 $"'{queue.Name}'; starting beside {beside.Count} admitted run(s) that did not end: " +
                 string.Join(", ", beside.Select(r => $"{r.Name ?? Path.GetFileName(r.Command)} ({r.Id})")));
         return AdmitOutcome.Admitted;
+    }
+
+    /// <summary>
+    /// The admission rule: whether <paramref name="candidate"/>, costing <paramref name="cost"/>, is
+    /// admitted now beside <paramref name="admitted"/> and the <paramref name="outside"/> load no
+    /// admitted run accounts for (null while nothing is admitted, or where it cannot be measured).
+    /// It reads and books nothing: <see cref="TryAdmit"/> applies it under the queue's gate and
+    /// records the admission, and `tman queue` asks it about a run that has not arrived, so the
+    /// verdict a scheduler reads is this rule and not a copy of it.
+    /// </summary>
+    internal static bool Admits(
+        RunRecord candidate, NamedQueue queue, AdmissionCost cost, bool exclusive,
+        List<RunRecord> all, List<RunRecord> admitted, AdmissionCost? outside)
+    {
+        var costs = admitted.Select(r => new AdmissionCost(r.AdmittedCores ?? 0, r.AdmittedMemMb ?? 0)).ToList();
+        if (outside is { } load) costs.Add(load);
+
+        // holds end with their owners' work, which runs as finite tman runs queued behind whoever
+        // waits, services never end, and outside load ends on its own clock: waiting for any of
+        // them to make room would hold a run that reserves the queue, and everyone behind it, forever
+        var onlyUndrainable = admitted.All(Undrainable);
+        var starving = Starving(candidate);
+        if (exclusive)
+        {
+            // an exclusive run starts once no finite run is admitted, whatever holds and outside
+            // load remain, and no finite run starts while it holds the queue. Past the starvation
+            // bound it stops waiting for finite runs too: a run admitted as finite may never end
+            // (a dev server), and the exclusive run reserves the queue for everyone behind it.
+            // Another exclusive run is finite and holds the queue on purpose, so it is waited for
+            // starving or not: one exclusive run at a time
+            if (ExclusiveHeld(queue.Name, all)) return false;
+            if (!onlyUndrainable && !starving) return false;
+        }
+        else
+        {
+            // a finite run may not start while an exclusive one is admitted, whatever its cost; a
+            // hold may, since the work it books runs as finite tman runs, which wait
+            var exclusiveHeld = ExclusiveHeld(queue.Name, all);
+            if (exclusiveHeld && !candidate.Hold) return false;
+
+            // arrival order, unless a small run can slip into a gap a larger earlier waiter cannot
+            // take: the earlier waiter's own cost is what the gap is judged against, so an equal or
+            // larger newcomer always queues behind it
+            var position = Position(candidate, all);
+            if (position is > 1)
+            {
+                // a run keeps its place only ahead of waiters it could delay. An exclusive waiter
+                // waits for finite runs to drain, not for room, so judging a newcomer against its
+                // cost — which always fits — refused everyone behind it for as long as it waited.
+                // A hold delays no waiter that starts beside holds whatever they book (an exclusive
+                // or a starving one); a finite run passes an exclusive waiter until it starves, and
+                // from then on waits, so the host drains for it
+                var earlier = EarlierWaiters(candidate, all)
+                    .Where(o => candidate.Hold ? !StartsBesideHolds(o) : !o.Exclusive || Starving(o))
+                    .ToList();
+                // while an exclusive run holds the queue only a hold can start, so a finite waiter
+                // keeps no place ahead of one
+                if (exclusiveHeld) earlier = earlier.Where(o => o.Hold).ToList();
+                if (earlier.Count > 0)
+                {
+                    // a starving waiter reserves the budget: it starts once the finite runs
+                    // drain, whatever holds and outside load remain (see below)
+                    if (earlier.Any(Starving)) return false;
+                    var first = earlier.OrderBy(o => o.QueuedUtc).ThenBy(o => o.Id, StringComparer.Ordinal).First();
+                    var firstCost = new AdmissionCost(first.AdmittedCores ?? 0, first.AdmittedMemMb ?? 0);
+                    if (Fits(firstCost, costs, queue) || !Fits(cost, costs, queue)) return false;
+                }
+            }
+        }
+
+        // an exclusive run that got here starts whatever the budget, and a starving one once no
+        // finite run is admitted (see above); the lone-run rule in Fits is the same guarantee for
+        // an empty queue
+        return exclusive || (starving && onlyUndrainable) || Fits(cost, costs, queue);
     }
 
     /// <summary>
