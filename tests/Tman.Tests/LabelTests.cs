@@ -87,6 +87,8 @@ public class LabelTests : IDisposable
         // and a supervisor that counts its runs by label would never see it
         Assert.Equal(127, result.Exit);
         Assert.Contains("label", result.Err);
+        // refused for the label, not for a flag a tman without labels never heard of
+        Assert.DoesNotContain("unknown flag", result.Err);
         Assert.Empty(Directory.Exists(Path.Combine(_home.Path, "runs"))
             ? Directory.GetFiles(Path.Combine(_home.Path, "runs"), "*.json")
             : []);
