@@ -255,10 +255,14 @@ public static class Store
 
     /// <summary>
     /// How many times a rename refused by another writer replacing the same record is re-attempted
-    /// before it is reported. The swap being waited on takes microseconds; the escalating pause adds
-    /// up to about 70ms, which is long enough that only a fault outlives it.
+    /// before it is reported. The swap being waited on takes microseconds, but on Windows a virus
+    /// scanner opening the freshly written file holds it the same way for tens of milliseconds, and
+    /// under load (several agents, each with queued runs polling the store) the old 70ms bound ran
+    /// out. The escalating pause (capped at 50ms) now adds up to about one second.
     /// </summary>
-    const int RenameAttempts = 12;
+    const int RenameAttempts = 30;
+
+    static int RenamePauseMs(int attempt) => Math.Min(attempt * 2, 50);
 
     /// <summary>
     /// Writes a record whole. A reader sees the previous record or this one and never a half-written
@@ -273,13 +277,13 @@ public static class Store
     /// settled by the end of the bound is thrown, never swallowed — a save that reported success
     /// without placing the record would leave the run's state silently behind.
     ///
-    /// File.Move(overwrite: true) rather than File.Replace: Replace requires the destination to
-    /// already exist, so every record's first save would need a second path, and Replace's backup
-    /// slot buys nothing here — the record it would preserve is the one being superseded. Both are
-    /// a rename, so neither gives up atomicity; Move keeps one path for first and later saves alike.
+    /// The rename is <see cref="StoreRename.Replace"/>: on Windows a POSIX-semantics rename, which
+    /// replaces the record even while another tman is reading it (MoveFileEx refuses that outright,
+    /// and under several agents it refused often enough to kill runs); elsewhere, and on a volume
+    /// without it, File.Move(overwrite: true), which is rename(2) on POSIX.
     /// </summary>
     public static void Save(RunRecord r) =>
-        Save(r, (from, to) => File.Move(from, to, overwrite: true));
+        Save(r, StoreRename.Replace);
 
     /// <summary>
     /// Save with the rename injected. The one case this has to get right — another writer replacing
@@ -310,7 +314,7 @@ public static class Store
                                       && attempt < RenameAttempts
                                       && OnlyTheDestinationIsLeftToBlame(tmp))
             {
-                Thread.Sleep(attempt);
+                Thread.Sleep(RenamePauseMs(attempt));
             }
         }
     });
@@ -339,16 +343,37 @@ public static class Store
         EnsureDirs();
         var tmp = $"{KillRequestPathFor(id)}.{Environment.ProcessId}-{Environment.CurrentManagedThreadId}.tmp";
         File.WriteAllText(tmp, reason);
-        File.Move(tmp, KillRequestPathFor(id), overwrite: true);
+        StoreRename.Replace(tmp, KillRequestPathFor(id));
     });
 
     /// <summary>The reason a kill was requested for, or null when none was.</summary>
     public static string? ReadKillRequest(string id)
     {
-        try { return File.ReadAllText(KillRequestPathFor(id)); }
+        try { return ReadShared(KillRequestPathFor(id)); }
         catch (FileNotFoundException) { return null; }
         catch (DirectoryNotFoundException) { return null; }
     }
+
+    /// <summary>
+    /// Reads a store file without standing in the way of a writer replacing it. File.ReadAllText
+    /// opens without FILE_SHARE_DELETE, and on Windows a rename onto a file someone holds that way is
+    /// refused even to a POSIX-semantics rename (<see cref="StoreRename"/>): with several tman
+    /// processes listing the store at once (every queued run polls it), a runner's save kept landing
+    /// on a record another tman was reading, ran out of retries, and the run was killed as one tman
+    /// "can no longer record". Sharing delete lets that rename through; the reader keeps the version
+    /// it opened.
+    /// </summary>
+    static string ReadShared(string path)
+    {
+        using var reader = new StreamReader(OpenForRead(path));
+        return reader.ReadToEnd();
+    }
+
+    /// <summary>How every reader opens a store file (see <see cref="ReadShared"/>).</summary>
+    internal static FileStream OpenForRead(string path) =>
+        new(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+
+    internal static string RecordPathFor(string id) => PathFor(id);
 
     public static List<RunRecord> LoadAll()
     {
@@ -370,11 +395,15 @@ public static class Store
     {
         try
         {
-            var r = JsonSerializer.Deserialize(File.ReadAllText(path), RunRecordJsonContext.Default.RunRecord);
+            var r = JsonSerializer.Deserialize(ReadShared(path), RunRecordJsonContext.Default.RunRecord);
             return r?.Schema == RunRecord.CurrentSchema ? r : null;
         }
         catch (JsonException) { return null; }
         catch (IOException) { return null; }
+        // Windows: a record removed (pruned, replaced) while it was being listed is "delete pending",
+        // and opening it is refused as access denied. It is gone, not a store fault; skipped like an
+        // IOException above.
+        catch (UnauthorizedAccessException) { return null; }
     }
 
     public static void Remove(string id)

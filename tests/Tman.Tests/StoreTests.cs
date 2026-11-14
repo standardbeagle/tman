@@ -42,6 +42,23 @@ public class StoreTests : IDisposable
         Assert.Equal(new[] { "hi" }, loaded.Args);
     }
 
+    // Several tman processes list the store at once (every queued run polls it). On Windows a reader
+    // opened without FILE_SHARE_DELETE made a runner's save of that record fail its rename until the
+    // retries ran out, and the run was killed as "tman can no longer record this run".
+    [Fact]
+    public void Save_WhileAnotherTmanIsReadingTheRecord_Lands()
+    {
+        Store.Save(NewRecord("busy01"));
+        var next = NewRecord("busy01");
+        next.Name = "second";
+        using (var reader = Store.OpenForRead(Store.RecordPathFor("busy01")))
+        {
+            Store.Save(next);
+            Assert.True(reader.ReadByte() >= 0);   // the reader keeps the version it opened
+        }
+        Assert.Equal("second", Store.Load("busy01")!.Name);
+    }
+
     [Fact]
     public void Load_Missing_ReturnsNull()
     {
