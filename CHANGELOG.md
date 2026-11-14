@@ -8,6 +8,21 @@ below 1.0, behavior changes land in minor releases.
 
 ## [Unreleased]
 
+## [0.7.12] - 2026-11-14
+
+### Fixed
+- **Runs on Windows are no longer killed because tman "can no longer record this run".** Every tman
+  lists the run store, and every queued run polls it, so with several agents building and testing
+  at once a runner's save of its record often landed while another tman was reading that record.
+  Windows refuses a classic replacing rename (MoveFileEx) while anyone has the destination open, the
+  retries (about 70 ms) ran out, the run was killed mid-command, and tman printed "cannot write its
+  run store ...: Access to the path is denied", blaming permissions that were fine. Saves now use a
+  POSIX-semantics rename (Windows 10 1709+ on NTFS, falling back to the old rename elsewhere), which
+  replaces a record that is open, and every reader opens records sharing delete, so the reader keeps
+  the version it opened. The retry budget for a rename that is still refused (a virus scanner
+  holding the fresh file) grows to about a second. A record removed while it was being listed is
+  skipped instead of failing the listing.
+
 ## [0.7.11] - 2026-10-27
 
 ### Added
@@ -708,7 +723,8 @@ reaping; dedup locks; parallel gating; `.tman.kdl` folder aliases with repo-root
 binaries for linux-x64, linux-arm64, win-x64, osx-arm64, and osx-x64, distributed via npm, PyPI,
 PSGallery, and a shell installer.
 
-[Unreleased]: https://github.com/standardbeagle/tman/compare/v0.7.11...HEAD
+[Unreleased]: https://github.com/standardbeagle/tman/compare/v0.7.12...HEAD
+[0.7.12]: https://github.com/standardbeagle/tman/compare/v0.7.11...v0.7.12
 [0.7.11]: https://github.com/standardbeagle/tman/compare/v0.7.10...v0.7.11
 [0.7.10]: https://github.com/standardbeagle/tman/compare/v0.7.9...v0.7.10
 [0.7.9]: https://github.com/standardbeagle/tman/compare/v0.7.8...v0.7.9
