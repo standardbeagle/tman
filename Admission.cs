@@ -109,16 +109,20 @@ public static class Admission
     }
 
     /// <summary>
-    /// A finished run's mean cores; its peak when it has no CPU-seconds or no wall time to divide by.
-    /// The wall time is <see cref="RunRecord.StartedUtc"/> to the final heartbeat, both read off the
-    /// one clock the runner timed the run on. Not <see cref="RunRecord.ChildStartUtc"/>: Linux
-    /// recomputes that from boot time, which drifts from the wall clock, and on beagle-ab (WSL2) a
-    /// 61 s run whose start read 59 s late booked 96.8 cores.
+    /// A finished run's mean cores; its peak when it has no CPU-seconds or no run time to divide by.
+    /// The run time is <see cref="RunRecord.WallSeconds"/>, read off the runner's monotonic clock. Not
+    /// a span of wall-clock stamps: WSL2 steps its wall clock, and on 2026-11-22 a 2 s lint whose
+    /// start-to-heartbeat span read 0.185 s booked 15.8 cores of an 8-core queue. Nor
+    /// <see cref="RunRecord.ChildStartUtc"/>, which Linux recomputes from boot time (a 61 s run on
+    /// beagle-ab whose start read 59 s late booked 96.8). A record from before
+    /// <see cref="RunRecord.WallSeconds"/> has only the wall-clock span; a mean above the host's cores
+    /// is no tree's real use, so such a sample counts as none (0) rather than as a cost.
     /// </summary>
     static double BookedCores(RunRecord r)
     {
-        var wallSeconds = (r.HeartbeatUtc - r.StartedUtc).TotalSeconds;
-        return r.CpuSeconds > 0 && wallSeconds > 0 ? r.CpuSeconds / wallSeconds : r.PeakCores;
+        var runSeconds = r.WallSeconds ?? (r.HeartbeatUtc - r.StartedUtc).TotalSeconds;
+        var cores = r.CpuSeconds > 0 && runSeconds > 0 ? r.CpuSeconds / runSeconds : r.PeakCores;
+        return cores > Environment.ProcessorCount ? 0 : cores;
     }
 
     /// <summary>

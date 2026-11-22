@@ -268,6 +268,17 @@ public class RunnerTests : IDisposable
         Assert.Equal(Runner.ExitTimeout, await run.WaitAsync(TimeSpan.FromSeconds(15)));
     }
 
+    [UnixFact("supervises the sleep binary")]
+    public async Task AWallClockSteppedBack_DoesNotShortenTheRecordedRunTime()
+    {
+        // the wall-clock span of this run reads about 0.5 s; the run took 2.5, and the record says so
+        await Runner.RunAsync("sleep", ["2.5"], new Caps(), null, null,
+            null, default, sampler: null, clock: new SteppedWallClock(TimeSpan.FromSeconds(-2)));
+
+        var r = Assert.Single(Store.LoadAll());
+        Assert.InRange(r.WallSeconds ?? 0, 2.4, 10);
+    }
+
     /// <summary>Runs `sh -c script` and returns its exit, what it printed, and how long the run took.</summary>
     static async Task<(int Exit, string Out, string Err, TimeSpan Took)> Timed(string script, Caps caps)
     {

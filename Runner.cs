@@ -270,6 +270,7 @@ public static class Runner
                 var now = clock.GetTimestamp();
                 var nowUtc = Utc();
                 record.HeartbeatUtc = nowUtc;
+                record.WallSeconds = clock.GetElapsedTime(startedAt, now).TotalSeconds;
 
                 var outNow = Interlocked.Read(ref outputBytes);
                 var progressed = outNow != prevOutputBytes;
@@ -415,6 +416,7 @@ public static class Runner
             confinement.Dispose();
 
             record.HeartbeatUtc = Utc();
+            record.WallSeconds = clock.GetElapsedTime(startedAt).TotalSeconds;
             if (killReason is not null && killRequested)
             {
                 record.EndOnKillRequest(killReason);

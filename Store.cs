@@ -68,6 +68,12 @@ public sealed class RunRecord
     public long PeakMemMb { get; set; }
     /// <summary>CPU the whole process tree used, in seconds, from the first tree sample to the last.</summary>
     public double CpuSeconds { get; set; }
+    /// <summary>
+    /// How long the child has run, in seconds, on the runner's monotonic clock: written at every tick and
+    /// at the end. A step of the wall clock (NTP, a WSL resync) moves <see cref="StartedUtc"/> and
+    /// <see cref="HeartbeatUtc"/> apart by the step; this it cannot move. Null on records from before it.
+    /// </summary>
+    public double? WallSeconds { get; set; }
     /// <summary>Most cores the tree kept busy over one sample interval, to one decimal.</summary>
     public double PeakCores { get; set; }
     /// <summary>Cores the tree kept busy over its latest sample interval; null before the first.</summary>

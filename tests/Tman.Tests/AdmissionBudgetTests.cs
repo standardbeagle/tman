@@ -182,6 +182,56 @@ public class AdmissionBudgetTests : IDisposable
     }
 
     [Fact]
+    public void ExpectedCost_DividesCpuByTheRunsMonotonicTime_WhenTheWallClockStepped()
+    {
+        _home.WriteFile("tman.kdl", "queue \"q\" {\n    cores 8\n    mem 64g\n}\n");
+        var q = Config.Queue("q");
+        // 2026-11-22 (WSL2, 8 cores): the host's wall clock stepped back about 2 s during a 2 s eslint
+        // run, so its start-to-last-heartbeat span read 0.185 s and its 2.92 CPU-seconds booked 15.8
+        // cores. A cost past the budget fits beside nothing, and the next lint waited two hours at the
+        // head of the queue, holding every run behind it. Timed on the monotonic clock it is 1.46
+        for (var i = 0; i < 5; i++)
+        {
+            var r = Finished("stepped" + i, "lint@/st", cores: 1.8, memMb: 350);
+            r.HeartbeatUtc = r.StartedUtc.AddSeconds(0.185);
+            r.WallSeconds = 2.0;
+            r.CpuSeconds = 2.92;
+            Store.Save(r);
+        }
+
+        var cost = Admission.ExpectedCost(
+            Runner.NewRecord("eslint", ["src"], new Caps(), "lint", null, "lint@/st", "/st"), q, null, null);
+
+        Assert.InRange(cost.Cores, 1.4, 1.5);
+    }
+
+    [Fact]
+    public void ExpectedCost_IgnoresARecordedMeanAboveTheHostsCores()
+    {
+        _home.WriteFile("tman.kdl", "queue \"q\" {\n    cores 8\n    mem 64g\n}\n");
+        var q = Config.Queue("q");
+        // a record written before runs carried their monotonic time, timed across a clock step: no tree
+        // keeps busy more cores than the host has, so its mean is a measurement fault, not a cost
+        for (var i = 0; i < 4; i++)
+        {
+            var r = Finished("sane" + i, "lint@/legacy", cores: 1.5, memMb: 350);
+            r.HeartbeatUtc = r.StartedUtc.AddSeconds(4);
+            r.CpuSeconds = 3;
+            Store.Save(r);
+        }
+        var stepped = Finished("stepped00001", "lint@/legacy", cores: 1.8, memMb: 350);
+        stepped.HeartbeatUtc = stepped.StartedUtc.AddSeconds(0.5);
+        stepped.CpuSeconds = Environment.ProcessorCount;
+        Store.Save(stepped);
+
+        var cost = Admission.ExpectedCost(
+            Runner.NewRecord("eslint", ["src"], new Caps(), "lint", null, "lint@/legacy", "/legacy"), q, null, null);
+
+        // nearest-rank p90 of five samples is the largest: the stepped record's, had it been kept
+        Assert.Equal(0.75, cost.Cores, 3);
+    }
+
+    [Fact]
     public void ExpectedCost_FallsBackToTheAliasThenTheQueue_WithNoHistory()
     {
         _home.WriteFile("tman.kdl", "queue \"q\" {\n    cores 8\n    mem 64g\n    cores-default 2\n    mem-default 3g\n}\n");

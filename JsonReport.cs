@@ -86,6 +86,7 @@ public static class JsonReport
         w.WriteNumber("peakCores", r.PeakCores);
         Number(w, "currentCores", r.CurrentCores);
         w.WriteNumber("cpuSeconds", r.CpuSeconds);
+        Number(w, "wallSeconds", r.WallSeconds);
         WriteLabels(w, r.Labels);
         w.WriteEndObject();
     }
