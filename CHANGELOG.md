@@ -8,6 +8,27 @@ below 1.0, behavior changes land in minor releases.
 
 ## [Unreleased]
 
+### Added
+- **A finished run's docker containers are removed.** A test fixture's Postgres or broker is
+  dockerd's child, not the run's, so it outlived the run and held its port. A fixture that labels
+  its container `tman.run=$TMAN_RUN_ID` (`docker run --label`, compose `labels:`, Testcontainers'
+  `WithLabel`) now has it removed with `docker rm -f -v` once that run, and every run above it, has
+  ended: by the run's own tman as it finishes, which says so on stderr and in `tman status`, or by
+  the housekeeping sweep for a run whose tman died. A nested run hands its children its own id, and
+  its containers stay up until the outermost live run ends, so a database a nested step started
+  serves the rest of the outer run. An empty or missing label is never tman's. Docker is asked only
+  when an ended run is waiting on it, or hourly, with a 5 s bound and a 10 min backoff after it
+  fails to answer, so no command pays for a `docker ps` and no run waits on a dead daemon; without
+  `docker` on PATH, or with `TMAN_DOCKER=off`, nothing is asked. `TMAN_DOCKER` also names another
+  CLI. `tman clean` asks docker at once and counts the containers it removed.
+
+### Changed
+- **Run ids are 16 hex characters, the last six naming the store that issued them.** Every tman on
+  a host shares the docker daemon but not the run store — another user's, a Windows tman beside
+  WSL's, a test's own `TMAN_HOME` — so a container whose run has no record here is removed only when
+  its id carries this store's tag. A 12-character id from an earlier tman is still matched by its
+  record, and never removed on a guess. `tman list` and `tman queue` widen their ID column to fit.
+
 ## [0.7.13] - 2026-11-22
 
 ### Fixed

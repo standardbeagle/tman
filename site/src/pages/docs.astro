@@ -116,6 +116,17 @@ curl -fsSL https://raw.githubusercontent.com/standardbeagle/tman/main/install.sh
       <strong>Finished records past <code>retain</code> are deleted</strong> (24h by default), along with
       record files this tman cannot read, which nothing else would ever revisit.
     </li>
+    <li>
+      <strong>A finished run's containers are removed.</strong> A test fixture that labels its docker
+      container <code>--label tman.run="$TMAN_RUN_ID"</code> has it removed
+      (<code>docker rm -f -v</code>) once that run, and every run above it, has ended — by the run's own
+      tman at its end, or by the sweep when that tman died. A nested run's containers stay up until its
+      outermost live run ends. An empty or missing label is never tman's, and a store removes only
+      containers of the runs it issued: a run id's last six hex characters name its store. Docker is
+      asked only when an ended run is waiting on it, or hourly, so <code>tman list</code> pays for no
+      <code>docker ps</code>; with no <code>docker</code> on <code>PATH</code>, or
+      <code>TMAN_DOCKER=off</code>, this is skipped.
+    </li>
   </ul>
   <p>
     <strong>Lock files are not part of the sweep.</strong> A lock is claimed by holding its file open

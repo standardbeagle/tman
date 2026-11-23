@@ -55,6 +55,13 @@ public static class Help
         past the retention window are pruned. Set the window with `retain` in .tman.kdl defaults
         (24h by default). Lock files are not part of it — a bucket whose holder died is taken over
         in place by the next run that claims it.
+
+        docker containers labelled tman.run=<id> are removed (`docker rm -f -v`) once run <id> and
+        every run above it have ended: by the run's own tman at its end, or by the sweep for a run
+        whose tman died. A nested run's containers stay up until its outermost live run ends. An
+        empty or missing label is never tman's. Label a fixture with
+        `--label tman.run="$TMAN_RUN_ID"`. docker is asked only when an ended run is waiting on it,
+        or hourly; TMAN_DOCKER names another CLI, or `off` turns this off.
         """;
 
     public static readonly IReadOnlyList<Command> Commands =
@@ -128,10 +135,11 @@ public static class Help
             """),
         new("clean",
             ["tman clean"],
-            "reap orphans, prune old records",
+            "reap orphans, remove finished runs' containers, prune old records",
             """
             Runs the housekeeping sweep now and prints what it did. Every command already sweeps
-            before it acts; this is the same sweep, on demand, with the counts.
+            before it acts; this is the same sweep, on demand, with the counts. It asks docker for
+            labelled containers now, rather than waiting for the sweep's hourly look.
             """),
         new("status",
             ["tman status [<id|name|id-prefix>] [--json]"],

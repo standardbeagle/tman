@@ -579,6 +579,10 @@ same sweep before it does anything else:
 - deletes kill requests (`<id>.kill`, see `tman kill` below) once they pass the same window
 - deletes finished records older than `retain` (default 24h), along with unreadable or
   off-schema record files that nothing else would ever revisit
+- removes the docker containers a finished run's fixtures labelled `tman.run=<id>`, as
+  `docker rm -f -v` — see [Test fixtures in containers](#test-fixtures-in-containers). It asks
+  docker only when an ended run is waiting on it, or once an hour otherwise, so `tman list` does not
+  pay for a `docker ps`
 
 Lock files are not part of it. A lock is claimed by holding its file open exclusively, so the
 kernel releases it when its runner dies and the next run of that bucket takes the same file over
@@ -597,9 +601,71 @@ while no runs are live, from the same cleanup step that clears the workspace. tm
 does not do this for you: making it safe against a concurrent claim costs every `tman run` a
 store-wide lock, which is a poor trade for reclaiming a few megabytes a year.
 
-`tman clean` runs that sweep on demand and prints the counts. Records are canonical on disk:
-absolute resolved command paths, absolute cwd, one nested `Caps` object, and a schema version, so a
-record written by a different tman version is discarded rather than half-read.
+`tman clean` runs that sweep on demand and prints the counts; it asks docker now rather than
+waiting for the hour. Records are canonical on disk: absolute resolved command paths, absolute cwd,
+one nested `Caps` object, and a schema version, so a record written by a different tman version is
+discarded rather than half-read.
+
+## Test fixtures in containers
+
+A test that starts a database or a broker in docker leaves it to dockerd, outside the process tree
+tman supervises, so it outlives the run: a test Postgres up for the afternoon, holding its port.
+Label the container with the run that started it and tman removes it once that run is over. Every
+supervised child has its run's id in `TMAN_RUN_ID`:
+
+```sh
+docker run -d --label tman.run="$TMAN_RUN_ID" --name testpg postgres:17
+```
+
+```yaml
+# compose.yaml
+services:
+  db:
+    image: postgres:17
+    labels:
+      tman.run: "${TMAN_RUN_ID:-}"
+```
+
+```csharp
+// Testcontainers for .NET
+new ContainerBuilder()
+    .WithImage("postgres:17")
+    .WithLabel("tman.run", Environment.GetEnvironmentVariable("TMAN_RUN_ID") ?? "")
+    .Build();
+```
+
+Outside tman the variable is unset and the label is empty, and **a container with an empty or no
+`tman.run` label is never tman's** — the same fixture works under tman and without it.
+
+**When it goes.** A container labelled `tman.run=<id>` is removed, with its anonymous volumes
+(`docker rm -f -v`), once run `<id>` has ended and so has every run above it:
+
+- **At the run's end.** Once its outcome is recorded, the run's own `tman` removes its containers
+  and says so on stderr — `tman: removed 1 container labelled tman.run=<id>: testpg` — and the
+  names go in the record (`tman status <id>`).
+- **In the sweep,** for a run whose `tman` died before it could (a suspend, a SIGKILL): every
+  command's housekeeping finds the ended run and removes what it labelled.
+- **Nested runs.** A `tman` inside a supervised tree hands its children its own id, so a fixture
+  started inside a nested run is labelled with the nested run. It belongs to the outermost run still
+  going: it stays up when the nested run ends — `tman: 1 container labelled tman.run=<inner> stays
+  up until outer run <outer> ends: testpg` — and goes when that outer run does. An `npm test` under
+  `tman test` that runs `tman run -- docker compose up` keeps its database for the rest of the test
+  run, not just the compose step.
+- **No record left.** A container whose run's record is gone (pruned before docker could be
+  reached, or the store wiped) is removed by the hourly look once it is an hour old, if the id is
+  this store's own.
+
+**Whose it is.** Every tman on a host shares one docker daemon but not one run store: another
+user's, a Windows tman beside the one in WSL, a test's throwaway `TMAN_HOME`. A run id is 16 hex
+characters whose last six name the store that issued it, so a store only ever removes containers
+of its own runs. An id from a tman before 0.7.14 (12 characters) is removed only while its record
+still exists.
+
+**When docker is not there.** tman runs whatever `docker` resolves to on `PATH` (on Windows, a
+`.exe`, `.cmd` or `.bat` — Docker Desktop's CLI, or a wrapper into WSL); with none, cleanup is
+skipped without a word. Set `TMAN_DOCKER` to use another CLI (`podman`, a full path), or to `off`
+to turn cleanup off. A docker that does not answer within 5 seconds, or refuses a removal, is left
+alone for 10 minutes; nothing here changes a run's outcome or its exit code.
 
 ## Reports for another program
 
@@ -613,7 +679,7 @@ bumps it. Times are UTC ISO 8601; a field with nothing to say is `null`, never o
   "schema": 1,
   "runs": [
     {
-      "id": "0b2e5ee52c4f", "name": "test", "alias": "test", "parentId": null,
+      "id": "0b2e5ee52c4f3a91", "name": "test", "alias": "test", "parentId": null,
       "cwd": "/home/me/proj", "projectRoot": "/home/me/proj", "agentSession": null,
       "command": "/usr/bin/dotnet", "args": ["test"], "pid": 41213, "runnerPid": 41200,
       "state": "exited", "endReason": "exit", "exitCode": 0, "tmanExit": 0,
@@ -658,13 +724,13 @@ before it starts the next thing:
       "admittedCount": 2, "waitingCount": 1,
       "probe": { "cores": 3, "memMb": 4096, "admitsNow": false },
       "admitted": [
-        { "id": "855991438c99", "name": "hold", "alias": null, "command": "hold --pid=4081974",
+        { "id": "855991438c99e2b7", "name": "hold", "alias": null, "command": "hold --pid=4081974",
           "pid": 2677057, "runnerPid": 2677057, "cores": 3, "memMb": 4096, "currentCores": null,
           "peakMemMb": 0, "admittedAt": "2026-10-26T14:00:02.1Z", "queuedSeconds": 0.02,
           "exclusive": false, "hold": true, "service": false, "labels": { "task": "01M4Y2GB4N" } }
       ],
       "waiting": [
-        { "id": "0b2e5ee52c4f", "name": "test", "alias": "test", "command": "/usr/bin/dotnet test",
+        { "id": "0b2e5ee52c4f3a91", "name": "test", "alias": "test", "command": "/usr/bin/dotnet test",
           "pid": 0, "runnerPid": 41200, "position": 1, "queuedAt": "2026-10-26T14:02:11.5Z",
           "waitedSeconds": 41.7, "cores": 3.1, "memMb": 2400, "exclusive": false, "hold": false,
           "service": false, "starving": false, "labels": {} }
@@ -701,7 +767,8 @@ be seen, and the run's outcome is read from that count.
 
 tman is built for one machine at a time — a developer's laptop, or a department-sized CI host with
 a handful of runners. At that size it does what it says: a rogue test runner does not sit in a loop
-on your battery, and a test server does not hold a port for the rest of the afternoon.
+on your battery, and a test server — a process, or a container its fixture labelled — does not
+hold a port for the rest of the afternoon.
 
 It is not a fleet scheduler. There is no cross-machine coordination, no central store, and nothing
 here is tuned for dozens of simultaneous runs or for hosts that accumulate work indefinitely. If
