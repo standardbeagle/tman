@@ -31,8 +31,13 @@ public class ContainerRunTests : IDisposable
         if [ -e "$state/down" ]; then echo "Cannot connect to the Docker daemon" >&2; exit 1; fi
         case "$1" in
           ps)
+            if [ -e "$state/vanishing" ]; then echo f1x7ure; fi
             if [ -s "$state/label" ] && [ ! -e "$state/removed" ]; then echo c0ffee; fi ;;
           inspect)
+            # a fixture's container that removes itself as tman looks: gone by the time it is inspected
+            if [ -e "$state/vanishing" ]; then
+              rm -f "$state/vanishing"; echo '[]'; echo "Error response from daemon: No such container: f1x7ure" >&2; exit 1
+            fi
             printf '[{"Id":"c0ffee","Created":"2026-01-01T00:00:00Z","Name":"/fixture-pg","Config":{"Labels":{"tman.run":"%s"}}}]\n' "$(cat "$state/label")" ;;
           rm)
             shift
@@ -120,6 +125,24 @@ public class ContainerRunTests : IDisposable
         Assert.Equal(0, clean.Exit);
         Assert.Contains("removed 1 container(s)", clean.Out);
         Assert.Contains("rm -f -v c0ffee", Calls);
+    }
+
+    [UnixFact("runs sh and a docker script through the built tman")]
+    public async Task AContainerThatRemovedItselfAsARunEnded_DoesNotKeepTheNextRunsContainerUp()
+    {
+        // build3, 2026-11-23: a container vanishing between tman's `ps` and `inspect` read as docker
+        // not answering, and the backoff that started kept every run's containers in the store up
+        // for ten minutes, silently, until `tman clean`
+        var env = Env();
+        var first = await TmanProcess.Run(_home.Path, _cwd.Path, env, "run", "--no-queue", "--", "sh", "-c",
+            "touch \"$FAKE_DOCKER_STATE/vanishing\"");
+        Assert.Equal(0, first.Exit);
+
+        var ran = await TmanProcess.Run(_home.Path, _cwd.Path, env, "run", "--no-queue", "--", "sh", "-c", LabelAContainer);
+
+        Assert.Equal(0, ran.Exit);
+        Assert.Contains("rm -f -v c0ffee", Calls);
+        Assert.Contains($"labelled tman.run={Label}: fixture-pg", ran.Err);
     }
 
     [UnixFact("runs sh through the built tman")]

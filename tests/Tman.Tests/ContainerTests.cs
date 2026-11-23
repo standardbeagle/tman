@@ -595,6 +595,91 @@ public class DockerCliTests : IDisposable
     [InlineData("{\"Id\":\"x\"}")]
     public void InspectOutputThatIsNotDockersArray_IsNoAnswer(string output) =>
         Assert.Null(DockerCli.ParseInspect(output));
+
+    // Containers come and go while tman looks: a fixture removes its own as its run ends
+    // (Testcontainers' dispose, its Ryuk reaper, a `--rm` container exiting), on a daemon every
+    // agent on the host shares. Docker is a script here whose `ps` answers from what its state
+    // directory says is still there, as the daemon would.
+
+    DockerCli Docker(string script)
+    {
+        var path = _bin.WriteFile("docker", "#!/bin/sh\nstate=\"$(dirname \"$0\")\"\n" + script.Replace("\r\n", "\n") + "\n");
+        File.SetUnixFileMode(path, File.GetUnixFileMode(path) | UnixFileMode.UserExecute);
+        return new DockerCli(path);
+    }
+
+    [UnixFact("runs a docker script")]
+    public void AContainerGoneBetweenListingAndInspecting_IsNoContainer_NotDockerFailing()
+    {
+        // `docker inspect` of an id that has just gone prints [] and fails: read as docker not
+        // answering, it started the backoff, and every run's containers in the store stayed up
+        var docker = Docker("""
+            case "$1" in
+              ps) [ -e "$state/gone" ] || echo f1x7ure ;;
+              inspect) touch "$state/gone"; echo '[]'; echo "Error response from daemon: No such container: f1x7ure" >&2; exit 1 ;;
+            esac
+            """);
+
+        var listed = docker.ListLabelled();
+
+        Assert.NotNull(listed);
+        Assert.Empty(listed);
+    }
+
+    [UnixFact("runs a docker script")]
+    public void InspectFailingForContainersDockerStillLists_IsDockerFailing()
+    {
+        var docker = Docker("""
+            case "$1" in
+              ps) echo f1x7ure ;;
+              inspect) echo '[]'; echo "Error response from daemon: i/o timeout" >&2; exit 1 ;;
+            esac
+            """);
+
+        Assert.Null(docker.ListLabelled());
+    }
+
+    [UnixFact("runs a docker script")]
+    public void AContainerAlreadyGoneWhenTmanRemovesIt_HasGone()
+    {
+        // a --rm container that exited, or another remover that got there first
+        var docker = Docker("""
+            case "$1" in
+              ps) ;;
+              rm) echo "Error response from daemon: No such container: f1x7ure" >&2; exit 1 ;;
+            esac
+            """);
+
+        Assert.Equal(["f1x7ure"], docker.Remove([new LabelledContainer("f1x7ure", "testpg", "r")]));
+    }
+
+    [UnixFact("runs a docker script")]
+    public void AContainerDockerIsAlreadyRemoving_HasGone()
+    {
+        var docker = Docker("""
+            case "$1" in
+              ps) echo "f1x7ure removing" ;;
+              rm) echo "Error response from daemon: removal of container f1x7ure is already in progress" >&2; exit 1 ;;
+            esac
+            """);
+
+        Assert.Equal(["f1x7ure"], docker.Remove([new LabelledContainer("f1x7ure", "testpg", "r")]));
+    }
+
+    [UnixFact("runs a docker script")]
+    public void AContainerDockerRefusesAndStillHolds_HasNotGone()
+    {
+        var docker = Docker("""
+            case "$1" in
+              ps) echo "stuck0 running" ;;
+              rm) echo went0; echo "Error response from daemon: cannot remove container stuck0: device or resource busy" >&2; exit 1 ;;
+            esac
+            """);
+
+        var gone = docker.Remove([new LabelledContainer("stuck0", "a", "r"), new LabelledContainer("went0", "b", "r")]);
+
+        Assert.Equal(["went0"], gone);
+    }
 }
 
 /// <summary>TMAN_DOCKER, read from the environment every tman inherits.</summary>
