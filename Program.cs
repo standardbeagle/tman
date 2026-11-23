@@ -708,7 +708,12 @@ public static partial class Program
         Row("caps", DescribeCaps(r.Caps));
         Row("cpus", r.Cpus is null ? null : string.Join(",", r.Cpus));
         Row("killed", r.KillReason);
-        Row("containers", r.RemovedContainers is { Length: > 0 } names ? "removed " + string.Join(", ", names) : null);
+        // what went, then what is still owed: a reap the docker backoff deferred
+        Row("containers", string.Join("; ", new[]
+        {
+            r.RemovedContainers is { Length: > 0 } names ? "removed " + string.Join(", ", names) : null,
+            Containers.Pending(r, Store.LoadAll()),
+        }.OfType<string>()));
     }
 
     internal static string DescribeCaps(Caps c)

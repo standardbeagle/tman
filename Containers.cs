@@ -55,14 +55,34 @@ public static class Containers
     /// <summary>How often the sweep asks docker for labelled containers when no ended run is waiting on it.</summary>
     public static readonly TimeSpan OrphanInterval = TimeSpan.FromHours(1);
 
-    /// <summary>How long docker is left alone after it failed to answer or refused a removal.</summary>
+    /// <summary>
+    /// How long docker is left alone after it failed to answer or refused a removal, while no ended
+    /// run is waiting on it: a dead daemon is not asked on every command.
+    /// </summary>
     public static readonly TimeSpan Backoff = TimeSpan.FromMinutes(10);
 
-    /// <summary>The backoff while an ended run's containers wait on docker.</summary>
-    public static readonly TimeSpan PendingBackoff = Backoff;
+    /// <summary>
+    /// The backoff while an ended run's containers wait on docker — a reap the backoff deferred.
+    /// Short, so a fixture outlives its run by a minute of outage, not ten; the cost is one bounded
+    /// look at docker a minute, and only while something is owed.
+    /// </summary>
+    public static readonly TimeSpan PendingBackoff = TimeSpan.FromMinutes(1);
 
-    /// <summary>What `tman status` says of <paramref name="r"/>'s containers still waiting on docker.</summary>
-    internal static string? Pending(RunRecord r, IReadOnlyList<RunRecord> records) => null;
+    /// <summary>
+    /// What `tman status` says of <paramref name="r"/>'s containers while they wait on docker; null
+    /// once they have been dealt with, or when the run never started a child. The run's own record,
+    /// unswept, is the pending reap: every command's sweep retries it once the backoff is up.
+    /// </summary>
+    internal static string? Pending(RunRecord r, IReadOnlyList<RunRecord> records)
+    {
+        if (!Unswept(r)) return null;
+        var byId = ById(records);
+        if (ChainLive(r, byId))
+            return OutermostLive(r, byId) is { } outer ? $"kept up until outer run {outer.Id} ends" : "kept up until the run above it ends";
+        return BackoffEnds(PendingBackoff) is { } until
+            ? $"removal pending: docker failed; next try after {Clock(until)}"
+            : "removal pending: the next tman command removes them";
+    }
 
     /// <summary>
     /// The youngest a container with no record behind it may be and still be removed. A run's record
@@ -156,9 +176,10 @@ public static class Containers
 
     /// <summary>
     /// The housekeeping sweep's part: asks docker only when an ended run is waiting on it, or the
-    /// <see cref="OrphanInterval"/> since the last look is up, and never inside the
-    /// <see cref="Backoff"/> — so `tman list` costs a docker round-trip once an hour at most, not
-    /// every time. <paramref name="now"/> (`tman clean`) asks whatever the gates say.
+    /// <see cref="OrphanInterval"/> since the last look is up, and never inside the backoff
+    /// (<see cref="BackoffWindow"/>) — so `tman list` costs a docker round-trip once an hour at most,
+    /// not every time. An ended run still waiting is a reap the backoff deferred, and this is where
+    /// it is retried. <paramref name="now"/> (`tman clean`) asks whatever the gates say.
     /// </summary>
     /// <returns>The containers removed.</returns>
     public static IReadOnlyList<LabelledContainer> Sweep(IReadOnlyList<RunRecord> records, bool now, bool quiet)
@@ -166,8 +187,9 @@ public static class Containers
         var byId = ById(records);
         if (!now)
         {
-            if (!records.Any(r => Due(r, byId)) && !Stale(CheckedStampPath, OrphanInterval)) return [];
-            if (!Stale(BackoffStampPath, Backoff)) return [];
+            var pending = records.Any(r => Due(r, byId));
+            if (!pending && !Stale(CheckedStampPath, OrphanInterval)) return [];
+            if (BackoffEnds(pending ? PendingBackoff : Backoff) is not null) return [];
         }
         return Pass(records, byId, quiet)?.Removed ?? [];
     }
@@ -175,8 +197,10 @@ public static class Containers
     /// <summary>
     /// A run's own part, once its outcome is recorded: removes the containers labelled with it, and
     /// says so on stderr. A nested run's are left up for the run above it, which it also says.
-    /// Bounded by docker's timeouts and skipped inside the <see cref="Backoff"/>; nothing here can
-    /// change the run's outcome or its exit.
+    /// Bounded by docker's timeouts. Inside the backoff, or when docker fails now, the reap is
+    /// deferred, not dropped: the run stays unswept in the store, which every command's sweep retries
+    /// once the backoff is up, and the run says so on stderr. Nothing here can change the run's
+    /// outcome or its exit.
     /// </summary>
     public static void AfterRun(RunRecord record)
     {
@@ -187,17 +211,58 @@ public static class Containers
             var own = records.FirstOrDefault(r => r.Id == record.Id);
             // another tman's sweep got here first, and has said what it removed
             if (own is null || !Unswept(own)) return;
-            if (!Stale(BackoffStampPath, Backoff)) return;
             var byId = ById(records);
+            // a nested run's containers are its outer run's to remove, and to speak for
+            var owed = !ChainLive(own, byId);
+            if (BackoffEnds(BackoffWindow(records, byId)) is { } until)
+            {
+                if (owed) SayDeferred(own, until, []);
+                return;
+            }
             var pass = Pass(records, byId, quiet: false);
-            if (pass is null) return;
+            if (pass is null)
+            {
+                if (owed) SayDeferred(own, BackoffEnds(PendingBackoff), []);
+                return;
+            }
             var kept = pass.Remaining.Where(c => c.RunId == own.Id).ToList();
-            if (kept.Count > 0 && ChainLive(own, byId) && OutermostLive(own, byId) is { } outer)
+            if (kept.Count == 0) return;
+            if (owed) SayDeferred(own, BackoffEnds(PendingBackoff), kept);
+            else if (OutermostLive(own, byId) is { } outer)
                 Console.Error.WriteLine(
                     $"tman: {Count(kept.Count)} labelled {Label}={own.Id} {(kept.Count == 1 ? "stays" : "stay")} up until outer run {outer.Id} ends: " +
                     string.Join(", ", kept.Select(c => c.Name)));
         }
         catch (KnownError) { }
+    }
+
+    /// <summary>
+    /// The one line a run's end prints when its reap was deferred. Docker did not answer, so how
+    /// many containers carry the label is not known; when it answered but would not remove them,
+    /// <paramref name="kept"/> names them.
+    /// </summary>
+    static void SayDeferred(RunRecord run, DateTime? untilUtc, IReadOnlyList<LabelledContainer> kept)
+    {
+        var until = untilUtc is { } u ? $"backoff until {Clock(u)}" : "docker failed";
+        Console.Error.WriteLine(kept.Count == 0
+            ? $"tman: docker cleanup deferred ({until}); containers labelled {Label}={run.Id} are removed by the first tman command after it"
+            : $"tman: docker cleanup deferred ({until}); {Count(kept.Count)} labelled {Label}={run.Id} {(kept.Count == 1 ? "is" : "are")} removed by the first tman command after it: " +
+              string.Join(", ", kept.Select(c => c.Name)));
+    }
+
+    /// <summary>A time on this machine's clock, to the second: the pending backoff is a minute long.</summary>
+    static string Clock(DateTime utc) => utc.ToLocalTime().ToString("HH:mm:ss", CultureInfo.InvariantCulture);
+
+    /// <summary>The backoff in force: short while an ended run's containers wait on docker, long otherwise.</summary>
+    static TimeSpan BackoffWindow(IReadOnlyList<RunRecord> records, IReadOnlyDictionary<string, RunRecord> byId) =>
+        records.Any(r => Due(r, byId)) ? PendingBackoff : Backoff;
+
+    /// <summary>When a backoff of <paramref name="window"/> from the last failure ends; null once it has.</summary>
+    static DateTime? BackoffEnds(TimeSpan window)
+    {
+        if (Stale(BackoffStampPath, window)) return null;
+        try { return File.GetLastWriteTimeUtc(BackoffStampPath) + window; }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return null; }
     }
 
     static RunRecord? OutermostLive(RunRecord r, IReadOnlyDictionary<string, RunRecord> byId)
@@ -241,7 +306,8 @@ public static class Containers
         var doomed = Doomed(found, byId, DateTime.UtcNow);
         var gone = doomed.Count == 0 ? new HashSet<string>() : engine.Remove(doomed);
         var removed = doomed.Where(c => gone.Contains(c.Id)).ToList();
-        // a container docker would not remove is retried after the backoff, not on every command
+        // a container docker would not remove is retried after the backoff, not on every command;
+        // its run stays unswept, so that backoff is the short one
         if (removed.Count < doomed.Count) Touch(BackoffStampPath);
         var remaining = found.Where(c => !gone.Contains(c.Id)).ToList();
 
