@@ -299,6 +299,10 @@ public sealed partial class Confinement : IDisposable
         psi.ArgumentList.Clear();
         foreach (var a in (string[])[
                      "--user", "--scope", "--quiet", $"--unit={unit}",
+                     // systemd 259 expands a scope's command line as it does a unit's ExecStart, so a
+                     // command's `$$` arrived as "$" and its `${HOME}` as the user manager's value.
+                     // Since systemd 254; an older one refuses the flag before the command starts.
+                     "--expand-environment=no",
                      "-p", $"MemoryMax={limitMemMb * 1024 * 1024}",
                      // a ceiling the tree can swap past is not a ceiling on what it takes from the machine
                      "-p", "MemorySwapMax=0",

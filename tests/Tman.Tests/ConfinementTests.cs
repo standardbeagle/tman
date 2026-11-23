@@ -243,6 +243,20 @@ public class ConfinementRunTests : IDisposable
     }
 
     [MemScopeFact]
+    public async Task LimitMem_PassesTheCommandLineThroughUnexpanded()
+    {
+        // systemd 259 (Ubuntu 26.04) expands a scope's command line as it does a unit's ExecStart:
+        // `$$` reached the command as "$" and `${HOME}` as the user manager's value. The command must
+        // see exactly the arguments it was given.
+        var (exit, stderr) = await Tman("run", "--limit-mem", "96m", "--", "sh", "-c",
+            "echo \"$$\" > pid; printf '%s\\n' \"$1\" > arg", "sh", "${HOME}");
+
+        Assert.True(exit == 0, stderr);
+        Assert.Matches("^[0-9]+$", File.ReadAllText(Path.Combine(_work.Path, "pid")).Trim());
+        Assert.Equal("${HOME}", File.ReadAllText(Path.Combine(_work.Path, "arg")).Trim());
+    }
+
+    [MemScopeFact]
     public async Task LimitMem_TheKernelEndsTheWholeTree_AndTheRunIsCulled()
     {
         Assert.NotNull(Confinement_FindOnPath("python3"));
@@ -375,7 +389,10 @@ public class ConfinementRunTests : IDisposable
         psi.Environment["TMAN_HOME"] = _home.Path;
         psi.Environment.Remove(Runner.ParentIdEnvVar);
         psi.Environment.Remove(Confinement.MemScopeEnvVar);
-        foreach (var a in new[] { "--user", "--scope", "--quiet", "-p", "Delegate=yes", "--", "sh", "-c", setup,
+        // --expand-environment=no: systemd 259 (Ubuntu 26.04) expands a scope's command line as it
+        // does a unit's ExecStart, so the script's $$ reached sh as a literal "$" and writing it to
+        // cgroup.procs failed with an I/O error. The flag exists since systemd 254.
+        foreach (var a in new[] { "--user", "--scope", "--quiet", "--expand-environment=no", "-p", "Delegate=yes", "--", "sh", "-c", setup,
                      Path.Combine(AppContext.BaseDirectory, "tman") }.Concat(argv))
             psi.ArgumentList.Add(a);
         using var p = Process.Start(psi)!;

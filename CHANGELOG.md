@@ -19,6 +19,11 @@ below 1.0, behavior changes land in minor releases.
   runner's monotonic clock (also in `tman list --json`), and booking divides by that. A record from
   before it still uses the wall-clock span, and a mean above the queue's cores counts as no sample
   rather than as a cost.
+- **`--limit-mem` passes the command line through as given on systemd 259.** Ubuntu 26.04's
+  `systemd-run --scope` expands a command line as it does a unit's ExecStart, so a command's `$$`
+  arrived as `$` and `${HOME}` as the user manager's value. tman now passes
+  `--expand-environment=no`, which systemd has had since 254; an older systemd refuses the flag
+  before the command starts rather than rewriting its arguments.
 
 ## [0.7.12] - 2026-11-14
 
