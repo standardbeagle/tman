@@ -163,6 +163,9 @@ public sealed class RunRecord
     /// </summary>
     public double? QueuedSeconds { get; set; }
 
+    /// <summary>A fresh run id. Not yet tagged with its store.</summary>
+    public static string NewId() => Guid.NewGuid().ToString("N")[..12];
+
     public bool IsNested => ParentId is not null;
 
     /// <summary>True once the run reached a terminal state and can be pruned.</summary>
@@ -204,6 +207,12 @@ public static class Store
         ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".tman");
 
     static string RunsDir => Path.Combine(Root, "runs");
+
+    /// <summary>Not yet implemented: the tag this store's run ids end in.</summary>
+    public static string Tag => "";
+
+    /// <summary>Not yet implemented: whether this store issued <paramref name="id"/>.</summary>
+    public static bool Issued(string id) => false;
 
     public static void EnsureDirs() => Writing(() => Directory.CreateDirectory(RunsDir));
 

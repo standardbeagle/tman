@@ -44,7 +44,7 @@ public class ListJsonTests : IDisposable
         Assert.Equal(3, ran.Exit);
 
         var run = Assert.Single(await Runs("--all"));
-        Assert.Equal(12, Str(run, "id")!.Length);
+        Assert.Equal(16, Str(run, "id")!.Length);
         Assert.Equal("build", Str(run, "name"));
         Assert.True(IsNull(run, "alias"));
         Assert.Equal(TempDir.RealPath(_cwd.Path), Str(run, "cwd"));
