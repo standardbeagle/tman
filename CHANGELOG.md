@@ -8,6 +8,8 @@ below 1.0, behavior changes land in minor releases.
 
 ## [Unreleased]
 
+## [0.7.14] - 2026-11-23
+
 ### Added
 - **A finished run's docker containers are removed.** A test fixture's Postgres or broker is
   dockerd's child, not the run's, so it outlived the run and held its port. A fixture that labels
@@ -761,7 +763,9 @@ reaping; dedup locks; parallel gating; `.tman.kdl` folder aliases with repo-root
 binaries for linux-x64, linux-arm64, win-x64, osx-arm64, and osx-x64, distributed via npm, PyPI,
 PSGallery, and a shell installer.
 
-[Unreleased]: https://github.com/standardbeagle/tman/compare/v0.7.12...HEAD
+[Unreleased]: https://github.com/standardbeagle/tman/compare/v0.7.14...HEAD
+[0.7.14]: https://github.com/standardbeagle/tman/compare/v0.7.13...v0.7.14
+[0.7.13]: https://github.com/standardbeagle/tman/compare/v0.7.12...v0.7.13
 [0.7.12]: https://github.com/standardbeagle/tman/compare/v0.7.11...v0.7.12
 [0.7.11]: https://github.com/standardbeagle/tman/compare/v0.7.10...v0.7.11
 [0.7.10]: https://github.com/standardbeagle/tman/compare/v0.7.9...v0.7.10
