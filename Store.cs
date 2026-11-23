@@ -174,6 +174,16 @@ public sealed class RunRecord
     public static string NewId() =>
         Guid.NewGuid().ToString("N")[..(IdLength - Store.TagLength)] + Store.Tag;
 
+    /// <summary>
+    /// True once the containers labelled with this run (see <see cref="Containers"/>) have been dealt
+    /// with: docker was asked after the run ended and none were left up, or there is no docker to
+    /// ask. Until then an ended run is what sends the sweep to docker. False on records from before.
+    /// </summary>
+    public bool ContainersSwept { get; set; }
+
+    /// <summary>The names of the containers labelled with this run that tman removed once it was over; null for none.</summary>
+    public string[]? RemovedContainers { get; set; }
+
     public bool IsNested => ParentId is not null;
 
     /// <summary>True once the run reached a terminal state and can be pruned.</summary>
@@ -274,6 +284,9 @@ public static class Store
         cause);
 
     static string PathFor(string id) => Path.Combine(RunsDir, id + ".json");
+
+    /// <summary>A housekeeping stamp file in the store, named <paramref name="name"/>.</summary>
+    internal static string MarkerPath(string name) => Path.Combine(RunsDir, name);
 
     public static string LockPathFor(string runKey) =>
         Path.Combine(RunsDir, RunKey.LockStem(runKey) + ".lock");

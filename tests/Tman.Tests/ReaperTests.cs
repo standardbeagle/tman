@@ -33,10 +33,10 @@ public class ReaperTests : IDisposable
         Store.Save(Finished("expired00001", TimeSpan.FromHours(48)));
         Store.Save(Finished("recent000001", TimeSpan.FromMinutes(5)));
 
-        var (reaped, pruned) = Reaper.Sweep(TimeSpan.FromHours(24), quiet: true);
+        var swept = Reaper.Sweep(TimeSpan.FromHours(24), quiet: true);
 
-        Assert.Empty(reaped);
-        Assert.Equal(1, pruned);
+        Assert.Empty(swept.Reaped);
+        Assert.Equal(1, swept.Pruned);
         Assert.Null(Store.Load("expired00001"));
         Assert.NotNull(Store.Load("recent000001"));
     }

@@ -633,9 +633,9 @@ public static partial class Program
     {
         TakesOnly("clean", argv, []);
         var retain = Retention();
-        var (reaped, pruned) = Reaper.Sweep(retain);
+        var swept = Reaper.Sweep(retain, containersNow: true);
         Console.WriteLine(
-            $"tman: reaped {reaped.Count} orphan(s), pruned {pruned} record(s) older than " +
+            $"tman: reaped {swept.Reaped.Count} orphan(s), pruned {swept.Pruned} record(s) older than " +
             Canon.Duration(retain));
         return 0;
     }

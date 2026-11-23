@@ -4,17 +4,24 @@ public static class Reaper
 {
     public static readonly TimeSpan DefaultRetain = TimeSpan.FromHours(24);
 
+    /// <summary>What one sweep did.</summary>
+    public sealed record SweepReport(List<RunRecord> Reaped, int Pruned, IReadOnlyList<LabelledContainer> RemovedContainers);
+
     /// <summary>
-    /// The full housekeeping pass every tman command performs: kill orphans, drop expired and
-    /// unreadable records. Old data is never left for a `tman clean` that may never be run. Lock
-    /// files are not part of it — see the ownership invariant in <see cref="Store"/> for why one is
-    /// never removed once created.
+    /// The full housekeeping pass every tman command performs: kill orphans, remove the containers
+    /// ended runs labelled, drop expired and unreadable records. Old data is never left for a
+    /// `tman clean` that may never be run. Lock files are not part of it — see the ownership
+    /// invariant in <see cref="Store"/> for why one is never removed once created.
     /// </summary>
-    public static (List<RunRecord> Reaped, int Pruned) Sweep(TimeSpan retain, bool quiet = false)
+    /// <param name="containersNow">
+    /// Ask docker now, whatever its gates say (`tman clean`); otherwise only when an ended run is
+    /// waiting on it or the hourly look is due (see <see cref="Containers.Sweep"/>).
+    /// </param>
+    public static SweepReport Sweep(TimeSpan retain, bool quiet = false, bool containersNow = false)
     {
         var reaped = ReapOrphans(quiet);
         var pruned = Store.Prune(retain);
-        return (reaped, pruned);
+        return new SweepReport(reaped, pruned, []);
     }
 
     public static List<RunRecord> ReapOrphans(bool quiet = false)
