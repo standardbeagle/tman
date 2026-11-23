@@ -7,17 +7,32 @@ defaults {
     max-parallel 2
 }
 
+// Floors (`cores`, `mem`) on the dotnet aliases: with dotnet's defaults (Windows, or any shell
+// without the fleet's MSBUILDDISABLENODEREUSE/UseSharedCompilation=false) the compile runs in a
+// reused MSBuild node and the shared VBCSCompiler, outside the run's tree, so the queue's measured
+// history books only the client. Measured on build3, 2026-11-23, from a clean tree with build
+// servers on, run tree (tman record) plus the servers' /proc deltas over the run's wall time.
+// test: tree 31.3 cpu-s / 127 s, peak 721 MB; servers 26.1 cpu-s (VBCSCompiler 10.8, five new
+// MSBuild nodes 15.3) and 874 MB of new nodes alive through the test phase. Mean 0.45 cores,
+// 721 + 874 = 1595 MB.
 alias "test" {
     command "dotnet"
     args "test" "tests/Tman.Tests/Tman.Tests.csproj"
+    cores 0.5
+    mem "1600m"
 }
 
 // Builds the application and the test project together (Tman.Tests references tman.csproj);
 // the root has no solution, so a bare `dotnet build` would skip the tests.
+// Floors, measured as for "test": tree 0.9 cpu-s / 2.0 s, peak 189 MB, while VBCSCompiler did
+// 7.2 cpu-s at 490 MB resident. Mean 4.1 cores, 189 + 490 = 679 MB. (Servers off: 11.8 cpu-s /
+// 5.0 s in the tree, peak 578 MB, which the history already books.)
 alias "build" {
     command "dotnet"
     args "build" "tests/Tman.Tests/Tman.Tests.csproj"
     max-time "15m"
+    cores 4
+    mem "680m"
 }
 
 // Compiles the Astro site so a change under site/ is caught before it lands; `npm test`
