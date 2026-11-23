@@ -101,7 +101,7 @@ public static class Admission
             .OrderByDescending(r => r.StartedUtc)
             .Take(HistoryDepth)
             .ToList();
-        var cores = Math.Max(Percentile(history.Select(BookedCores).Where(v => v > 0).ToList()), aliasCores ?? 0);
+        var cores = Math.Max(Percentile(history.Select(r => BookedCores(r, queue)).Where(v => v > 0).ToList()), aliasCores ?? 0);
         var memMb = Math.Max(Percentile(history.Select(r => (double)r.PeakMemMb).Where(v => v > 0).ToList()), aliasMemMb ?? 0);
         return new AdmissionCost(
             cores > 0 ? cores : queue.DefaultCores,
@@ -115,14 +115,17 @@ public static class Admission
     /// start-to-heartbeat span read 0.185 s booked 15.8 cores of an 8-core queue. Nor
     /// <see cref="RunRecord.ChildStartUtc"/>, which Linux recomputes from boot time (a 61 s run on
     /// beagle-ab whose start read 59 s late booked 96.8). A record from before
-    /// <see cref="RunRecord.WallSeconds"/> has only the wall-clock span; a mean above the host's cores
-    /// is no tree's real use, so such a sample counts as none (0) rather than as a cost.
+    /// <see cref="RunRecord.WallSeconds"/> has only the wall-clock span. A mean above the queue's
+    /// cores counts as no sample (0): booked, it fits beside nothing and waits at the head of the
+    /// queue forever. Only a mean is judged so; a peak is a sampled reading. Not the host's cores:
+    /// a record's real cost does not change with the machine judging it, and CI runs on 2-4 cores.
     /// </summary>
-    static double BookedCores(RunRecord r)
+    static double BookedCores(RunRecord r, NamedQueue queue)
     {
         var runSeconds = r.WallSeconds ?? (r.HeartbeatUtc - r.StartedUtc).TotalSeconds;
-        var cores = r.CpuSeconds > 0 && runSeconds > 0 ? r.CpuSeconds / runSeconds : r.PeakCores;
-        return cores > Environment.ProcessorCount ? 0 : cores;
+        if (r.CpuSeconds <= 0 || runSeconds <= 0) return r.PeakCores;
+        var mean = r.CpuSeconds / runSeconds;
+        return mean > queue.Cores ? 0 : mean;
     }
 
     /// <summary>

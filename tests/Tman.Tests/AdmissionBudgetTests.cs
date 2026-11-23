@@ -206,12 +206,12 @@ public class AdmissionBudgetTests : IDisposable
     }
 
     [Fact]
-    public void ExpectedCost_IgnoresARecordedMeanAboveTheHostsCores()
+    public void ExpectedCost_IgnoresARecordedMeanAboveTheQueuesCores()
     {
         _home.WriteFile("tman.kdl", "queue \"q\" {\n    cores 8\n    mem 64g\n}\n");
         var q = Config.Queue("q");
-        // a record written before runs carried their monotonic time, timed across a clock step: no tree
-        // keeps busy more cores than the host has, so its mean is a measurement fault, not a cost
+        // a record written before runs carried their monotonic time, timed across a clock step: a mean
+        // above the queue's 8 cores fits beside nothing, so booked it would hold the queue forever
         for (var i = 0; i < 4; i++)
         {
             var r = Finished("sane" + i, "lint@/legacy", cores: 1.5, memMb: 350);
@@ -221,7 +221,7 @@ public class AdmissionBudgetTests : IDisposable
         }
         var stepped = Finished("stepped00001", "lint@/legacy", cores: 1.8, memMb: 350);
         stepped.HeartbeatUtc = stepped.StartedUtc.AddSeconds(0.5);
-        stepped.CpuSeconds = Environment.ProcessorCount;
+        stepped.CpuSeconds = 8; // over 0.5 s: 16 cores
         Store.Save(stepped);
 
         var cost = Admission.ExpectedCost(

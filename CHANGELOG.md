@@ -17,8 +17,8 @@ below 1.0, behavior changes land in minor releases.
   cores of an 8-core queue, a cost that fits beside nothing, and the next lint waited two hours at
   the head of the queue holding every run behind it. Runs now record `wallSeconds`, their time on the
   runner's monotonic clock (also in `tman list --json`), and booking divides by that. A record from
-  before it still uses the wall-clock span, and a mean above the host's core count counts as no
-  sample rather than as a cost.
+  before it still uses the wall-clock span, and a mean above the queue's cores counts as no sample
+  rather than as a cost.
 
 ## [0.7.12] - 2026-11-14
 
