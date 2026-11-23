@@ -8,6 +8,8 @@ below 1.0, behavior changes land in minor releases.
 
 ## [Unreleased]
 
+## [0.7.15] - 2026-11-23
+
 ### Fixed
 - **A run's labelled containers are removed at its end even after another fixture removed its
   own.** The docker daemon is shared by every run's fixtures, and a fixture removes its container
@@ -772,7 +774,8 @@ reaping; dedup locks; parallel gating; `.tman.kdl` folder aliases with repo-root
 binaries for linux-x64, linux-arm64, win-x64, osx-arm64, and osx-x64, distributed via npm, PyPI,
 PSGallery, and a shell installer.
 
-[Unreleased]: https://github.com/standardbeagle/tman/compare/v0.7.14...HEAD
+[Unreleased]: https://github.com/standardbeagle/tman/compare/v0.7.15...HEAD
+[0.7.15]: https://github.com/standardbeagle/tman/compare/v0.7.14...v0.7.15
 [0.7.14]: https://github.com/standardbeagle/tman/compare/v0.7.13...v0.7.14
 [0.7.13]: https://github.com/standardbeagle/tman/compare/v0.7.12...v0.7.13
 [0.7.12]: https://github.com/standardbeagle/tman/compare/v0.7.11...v0.7.12
