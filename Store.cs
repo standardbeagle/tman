@@ -163,8 +163,16 @@ public sealed class RunRecord
     /// </summary>
     public double? QueuedSeconds { get; set; }
 
-    /// <summary>A fresh run id. Not yet tagged with its store.</summary>
-    public static string NewId() => Guid.NewGuid().ToString("N")[..12];
+    /// <summary>Length of a run id: random hex, then the issuing store's <see cref="Store.Tag"/>.</summary>
+    public const int IdLength = 16;
+
+    /// <summary>
+    /// A fresh run id: ten random hex digits, then the tag of the store issuing it, so the id says
+    /// whose it is wherever it travels — into TMAN_RUN_ID, and from there into a container's label.
+    /// The random part leads, so an id prefix typed at `tman status` still tells runs apart.
+    /// </summary>
+    public static string NewId() =>
+        Guid.NewGuid().ToString("N")[..(IdLength - Store.TagLength)] + Store.Tag;
 
     public bool IsNested => ParentId is not null;
 
@@ -208,11 +216,30 @@ public static class Store
 
     static string RunsDir => Path.Combine(Root, "runs");
 
-    /// <summary>Not yet implemented: the tag this store's run ids end in.</summary>
-    public static string Tag => "";
+    public const int TagLength = 6;
 
-    /// <summary>Not yet implemented: whether this store issued <paramref name="id"/>.</summary>
-    public static bool Issued(string id) => false;
+    /// <summary>
+    /// The tag every run id this store issues ends in: a hash of the machine and the store's path.
+    /// Every tman on a host shares its docker daemon, but not its store — another user's, a Windows
+    /// tman beside the one in WSL, a test's throwaway TMAN_HOME — so a container labelled with a run
+    /// this store has no record of is only this store's to remove when the id carries this tag.
+    /// </summary>
+    public static string Tag
+    {
+        get
+        {
+            var identity = Environment.MachineName + "\n" + Path.GetFullPath(Root);
+            var hash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(identity));
+            return Convert.ToHexStringLower(hash)[..TagLength];
+        }
+    }
+
+    /// <summary>
+    /// True when this store issued <paramref name="id"/>. An id from before ids carried a tag is
+    /// claimed by no store: nothing in it says whose it was.
+    /// </summary>
+    public static bool Issued(string id) =>
+        id.Length == RunRecord.IdLength && id.EndsWith(Tag, StringComparison.Ordinal);
 
     public static void EnsureDirs() => Writing(() => Directory.CreateDirectory(RunsDir));
 

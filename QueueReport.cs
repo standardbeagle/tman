@@ -145,7 +145,7 @@ public static class QueueReport
             var admitted = q.Admitted.Where(r => Labels.Match(r.Labels, filter)).ToList();
             var waiting = Line(q, filter).ToList();
             if (admitted.Count == 0 && waiting.Count == 0) continue;
-            sb.AppendLine($"  {"",-4}{"ID",-14}{"NAME",-16}{"CORES",-7}{"MEM",-9}{"AGE",-8}COMMAND");
+            sb.AppendLine($"  {"",-4}{"ID",-18}{"NAME",-16}{"CORES",-7}{"MEM",-9}{"AGE",-8}COMMAND");
             foreach (var r in admitted)
                 Row(sb, "run", r, r.AdmittedUtc!.Value, now);
             foreach (var (r, position) in waiting)
@@ -160,7 +160,7 @@ public static class QueueReport
 
     static void Row(StringBuilder sb, string place, RunRecord r, DateTime since, DateTime now) =>
         sb.AppendLine(
-            $"  {place,-4}{r.Id,-14}{Canon.Ellipsize(r.Name ?? "-", 15),-16}{r.AdmittedCores ?? 0,-7:0.#}" +
+            $"  {place,-4}{r.Id,-18}{Canon.Ellipsize(r.Name ?? "-", 15),-16}{r.AdmittedCores ?? 0,-7:0.#}" +
             $"{Canon.Mem(r.AdmittedMemMb ?? 0),-9}{Canon.Duration(now - since),-8}{Canon.CommandLine(r.Command, r.Args)}");
 
     static string Describe(Admission.AdmissionCost c) => Describe(c.Cores, c.MemMb);

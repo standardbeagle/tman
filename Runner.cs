@@ -104,7 +104,7 @@ public static class Runner
         var runnerStart = ProcUtil.OwnStart();
         return new RunRecord
         {
-            Id = Guid.NewGuid().ToString("N")[..12],
+            Id = RunRecord.NewId(),
             Name = name ?? alias,
             Alias = alias,
             RunnerPid = Environment.ProcessId,

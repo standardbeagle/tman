@@ -365,13 +365,13 @@ public static partial class Program
         if (runs.Count == 0) { Console.WriteLine("no runs"); return 0; }
 
         var now = DateTime.UtcNow;
-        Console.WriteLine($"{"ID",-14}{"NAME",-16}{"PROJECT",-26}{"PID",-8}{"STATE",-12}{"AGE",-8}{"PEAKMEM",-9}COMMAND");
+        Console.WriteLine($"{"ID",-18}{"NAME",-16}{"PROJECT",-26}{"PID",-8}{"STATE",-12}{"AGE",-8}{"PEAKMEM",-9}COMMAND");
         foreach (var r in runs)
         {
             // a nested run is the same work as its parent, marked so the list is not read as two runs
             var name = r.IsNested ? "└ " + (r.Name ?? "-") : r.Name ?? "-";
             Console.WriteLine(
-                $"{r.Id,-14}{Canon.Ellipsize(name, 15),-16}{Scope.Short(Scope.RootOf(r)),-26}{PidLabel(r),-8}" +
+                $"{r.Id,-18}{Canon.Ellipsize(name, 15),-16}{Scope.Short(Scope.RootOf(r)),-26}{PidLabel(r),-8}" +
                 $"{StateLabel(r, records),-12}{Canon.Duration(now - r.StartedUtc),-8}" +
                 $"{Canon.Mem(r.PeakMemMb),-9}{Canon.CommandLine(r.Command, r.Args)}");
         }
@@ -426,7 +426,7 @@ public static partial class Program
         var own = ProcUtil.OwnStart();
         var record = new RunRecord
         {
-            Id = Guid.NewGuid().ToString("N")[..12],
+            Id = RunRecord.NewId(),
             Name = "hold",
             Command = "hold",
             Args = pid is { } target ? [$"--pid={target}"] : [],
