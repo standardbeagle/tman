@@ -61,7 +61,9 @@ public static class Help
         whose tman died. A nested run's containers stay up until its outermost live run ends. An
         empty or missing label is never tman's. Label a fixture with
         `--label tman.run="$TMAN_RUN_ID"`. docker is asked only when an ended run is waiting on it,
-        or hourly; TMAN_DOCKER names another CLI, or `off` turns this off.
+        or hourly; TMAN_DOCKER names another CLI, or `off` turns this off. A run ending while docker
+        fails says its cleanup is deferred; the first tman command after the backoff (1 minute while
+        anything is owed, 10 otherwise) removes the containers, and `tman status <id>` shows it pending.
         """;
 
     public static readonly IReadOnlyList<Command> Commands =

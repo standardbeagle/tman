@@ -125,7 +125,9 @@ curl -fsSL https://raw.githubusercontent.com/standardbeagle/tman/main/install.sh
       containers of the runs it issued: a run id's last six hex characters name its store. Docker is
       asked only when an ended run is waiting on it, or hourly, so <code>tman list</code> pays for no
       <code>docker ps</code>; with no <code>docker</code> on <code>PATH</code>, or
-      <code>TMAN_DOCKER=off</code>, this is skipped.
+      <code>TMAN_DOCKER=off</code>, this is skipped. A run that ends while docker is failing says its
+      cleanup is deferred, <code>tman status</code> shows it pending, and the first tman command after
+      the backoff (1 minute while anything is owed, 10 otherwise) removes the containers.
     </li>
   </ul>
   <p>

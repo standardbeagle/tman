@@ -8,6 +8,15 @@ below 1.0, behavior changes land in minor releases.
 
 ## [Unreleased]
 
+### Changed
+- **A run's container cleanup deferred by a docker outage is said, shown, and retried within a
+  minute.** A run that ended while docker failed, or inside the backoff after it did, returned
+  without a word, and every run's cleanup in the store waited out a 10-minute backoff. Now the run's
+  end prints `tman: docker cleanup deferred (backoff until HH:MM:SS); containers labelled
+  tman.run=<id> are removed by the first tman command after it`, `tman status <id>` shows
+  `removal pending`, and the backoff is 1 minute while any ended run's containers are owed (10
+  minutes only when none are), so the first command after it removes them, no `tman clean` needed.
+
 ## [0.7.15] - 2026-11-23
 
 ### Fixed

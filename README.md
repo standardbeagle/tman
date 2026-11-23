@@ -651,6 +651,14 @@ Outside tman the variable is unset and the label is empty, and **a container wit
   up until outer run <outer> ends: testpg` — and goes when that outer run does. An `npm test` under
   `tman test` that runs `tman run -- docker compose up` keeps its database for the rest of the test
   run, not just the compose step.
+- **After a docker outage.** A run that ends while docker is failing, or inside the backoff below,
+  has its removal deferred, not dropped, and says so on stderr — `tman: docker cleanup deferred
+  (backoff until 14:05:12); containers labelled tman.run=<id> are removed by the first tman command
+  after it` — and `tman status <id>` shows `removal pending` until it is done. The run's record,
+  left unswept, is the pending removal: the first `tman` command after the backoff, whatever it is
+  (`run`, `list`, `status`), removes the containers. With docker down, tman cannot count them, so
+  the line names the label; when docker answered but would not remove one, it names the containers.
+  There is no daemon: the removal waits for that next command.
 - **No record left.** A container whose run's record is gone (pruned before docker could be
   reached, or the store wiped) is removed by the hourly look once it is an hour old, if the id is
   this store's own.
@@ -665,7 +673,9 @@ still exists.
 `.exe`, `.cmd` or `.bat` — Docker Desktop's CLI, or a wrapper into WSL); with none, cleanup is
 skipped without a word. Set `TMAN_DOCKER` to use another CLI (`podman`, a full path), or to `off`
 to turn cleanup off. A docker that does not answer within 5 seconds, or refuses a removal, is left
-alone for 10 minutes; nothing here changes a run's outcome or its exit code. A container that goes
+alone for a while: 1 minute while any ended run's containers are still owed, so an outage keeps a
+fixture up a minute past its run, and 10 minutes when nothing is owed, so a dead daemon is not
+asked on every command. Nothing here changes a run's outcome or its exit code. A container that goes
 on its own while tman looks — Testcontainers disposing it, a `--rm` container exiting — is neither:
 tman asks docker again, and a container docker no longer holds, or is already removing, has gone.
 
