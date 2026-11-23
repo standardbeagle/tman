@@ -635,8 +635,8 @@ public static partial class Program
         var retain = Retention();
         var swept = Reaper.Sweep(retain, containersNow: true);
         Console.WriteLine(
-            $"tman: reaped {swept.Reaped.Count} orphan(s), pruned {swept.Pruned} record(s) older than " +
-            Canon.Duration(retain));
+            $"tman: reaped {swept.Reaped.Count} orphan(s), removed {swept.RemovedContainers.Count} container(s), " +
+            $"pruned {swept.Pruned} record(s) older than {Canon.Duration(retain)}");
         return 0;
     }
 
@@ -708,6 +708,7 @@ public static partial class Program
         Row("caps", DescribeCaps(r.Caps));
         Row("cpus", r.Cpus is null ? null : string.Join(",", r.Cpus));
         Row("killed", r.KillReason);
+        Row("containers", r.RemovedContainers is { Length: > 0 } names ? "removed " + string.Join(", ", names) : null);
     }
 
     internal static string DescribeCaps(Caps c)

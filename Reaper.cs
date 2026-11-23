@@ -20,8 +20,16 @@ public static class Reaper
     public static SweepReport Sweep(TimeSpan retain, bool quiet = false, bool containersNow = false)
     {
         var reaped = ReapOrphans(quiet);
-        var pruned = Store.Prune(retain);
-        return new SweepReport(reaped, pruned, []);
+        // after the reap: a run whose runner died is finished by it, and its containers go in this same sweep
+        var records = Store.LoadAll();
+        IReadOnlyList<LabelledContainer> removed;
+        try { removed = Containers.Sweep(records, containersNow, quiet); }
+        // a store that cannot take the swept mark is reported by whatever writes it next; the
+        // command this sweep runs ahead of is not failed for it
+        catch (KnownError) { removed = []; }
+        var byId = records.ToDictionary(r => r.Id, StringComparer.Ordinal);
+        var pruned = Store.Prune(retain, keep: r => Containers.HeldForAnOuterRun(r, byId));
+        return new SweepReport(reaped, pruned, removed);
     }
 
     public static List<RunRecord> ReapOrphans(bool quiet = false)

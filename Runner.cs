@@ -445,6 +445,8 @@ public static class Runner
             proc.Dispose();
         }
         if (unrecorded is not null) throw unrecorded;
+        // after the outcome is on disk: the run is over in the store before its fixtures are judged
+        Containers.AfterRun(record);
 
         return ExitCodeFor(record);
     }

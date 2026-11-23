@@ -285,6 +285,17 @@ public static class Store
 
     static string PathFor(string id) => Path.Combine(RunsDir, id + ".json");
 
+    /// <summary>
+    /// True when a record file for <paramref name="id"/> is on disk, readable or not. The id may come
+    /// from a container label anyone could have written, so only a plain token is looked up.
+    /// </summary>
+    public static bool RecordExists(string id)
+    {
+        if (id.Length == 0 || !id.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_')) return false;
+        try { return File.Exists(PathFor(id)); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return false; }
+    }
+
     /// <summary>A housekeeping stamp file in the store, named <paramref name="name"/>.</summary>
     internal static string MarkerPath(string name) => Path.Combine(RunsDir, name);
 
@@ -485,7 +496,8 @@ public static class Store
     /// unparsable JSON and off-schema records would otherwise accumulate forever, since nothing
     /// else ever revisits them.
     /// </summary>
-    public static int Prune(TimeSpan retain)
+    /// <param name="keep">Finished records kept whatever their age (see <see cref="Containers.HeldForAnOuterRun"/>).</param>
+    public static int Prune(TimeSpan retain, Func<RunRecord, bool>? keep = null)
     {
         EnsureDirs();
         var cutoff = DateTime.UtcNow - retain;
@@ -499,7 +511,7 @@ public static class Store
                 if (File.GetLastWriteTimeUtc(f) < cutoff && Delete(f)) removed++;
                 continue;
             }
-            if (r.IsFinished && r.HeartbeatUtc < cutoff && Delete(f)) removed++;
+            if (r.IsFinished && r.HeartbeatUtc < cutoff && keep?.Invoke(r) != true && Delete(f)) removed++;
         }
         // a kill request outlives its record by at most the retention window, like a temp file
         foreach (var f in Directory.EnumerateFiles(RunsDir, "*.tmp").Concat(Directory.EnumerateFiles(RunsDir, "*.kill")))
