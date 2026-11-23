@@ -357,33 +357,70 @@ sealed class DockerCli(string path) : IContainerEngine
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException) { return false; }
     }
 
+    // Containers come and go while tman looks. The daemon is the host's, shared by every agent's
+    // fixtures, and a fixture removes its own as its run ends: Testcontainers' dispose and its Ryuk
+    // reaper, a `--rm` container exiting, a compose `down`. One that went between two docker calls
+    // is not docker failing and not docker refusing; read as either, it started the backoff, which
+    // skips every run's cleanup in the store for its whole window (build3, 2026-11-23). So a call
+    // that failed over containers is checked against a fresh listing before it counts as a failure.
+
     public IReadOnlyList<LabelledContainer>? ListLabelled()
     {
-        var ids = Run(["ps", "-a", "-q", "--no-trunc", "--filter", "label=" + Containers.Label], ListTimeout);
-        if (ids is not { Exit: 0 }) return null;
-        var list = ids.Out.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        if (list.Length == 0) return [];
+        var listed = Listed();
+        if (listed is null) return null;
+        if (listed.Count == 0) return [];
         // a container removed between the two calls fails inspect for that one, and the rest still print
-        var inspected = Run(["inspect", "--type", "container", .. list], ListTimeout);
+        var inspected = Run(["inspect", "--type", "container", .. listed.Keys], ListTimeout);
         if (inspected is null) return null;
         var parsed = ParseInspect(inspected.Out);
-        // a failure that printed nothing is docker failing, not every container vanishing at once
-        return inspected.Exit != 0 && parsed is { Count: 0 } ? null : parsed;
+        if (parsed is null || inspected.Exit == 0 || parsed.Count > 0) return parsed;
+        // a failure that printed none of them: every one went between the calls, or docker is failing
+        return AllGone(listed.Keys) ? parsed : null;
     }
 
     public IReadOnlySet<string> Remove(IReadOnlyList<LabelledContainer> containers)
     {
         var gone = new HashSet<string>(StringComparer.Ordinal);
         if (containers.Count == 0) return gone;
-        // docker prints each container it removed, as it was named; one already gone is an error
-        // for that one alone
+        // docker prints each container it removed, as it was named; one already gone, or already
+        // being removed by something else, is an error for that one alone
         var removed = Run(["rm", "-f", "-v", .. containers.Select(c => c.Id)], RemoveTimeout);
         if (removed is null) return gone;
         var printed = removed.Out.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet();
         foreach (var c in containers)
             if (printed.Contains(c.Id)) gone.Add(c.Id);
+        if (gone.Count == containers.Count) return gone;
+        // only a container docker still holds is one it would not remove
+        var still = Listed();
+        if (still is null) return gone;
+        foreach (var c in containers)
+            if (Going(still, c.Id)) gone.Add(c.Id);
         return gone;
     }
+
+    /// <summary>
+    /// Every labelled container docker holds, by full id, with its state (`running`, `exited`,
+    /// `removing`, …); null when docker could not answer.
+    /// </summary>
+    Dictionary<string, string>? Listed()
+    {
+        var ps = Run(["ps", "-a", "--no-trunc", "--filter", "label=" + Containers.Label, "--format", "{{.ID}} {{.State}}"], ListTimeout);
+        if (ps is not { Exit: 0 }) return null;
+        var listed = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var line in ps.Out.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var fields = line.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            listed[fields[0]] = fields.Length > 1 ? fields[1] : "";
+        }
+        return listed;
+    }
+
+    /// <summary>True when docker, asked again, holds none of <paramref name="ids"/> but to remove it.</summary>
+    bool AllGone(IEnumerable<string> ids) => Listed() is { } still && ids.All(id => Going(still, id));
+
+    /// <summary>Gone from docker, or on its way: docker is already removing it.</summary>
+    static bool Going(IReadOnlyDictionary<string, string> listed, string id) =>
+        !listed.TryGetValue(id, out var state) || state.Equals("removing", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// `docker inspect` output as labelled containers; null when it is not the array docker prints.
