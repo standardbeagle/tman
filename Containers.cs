@@ -58,6 +58,12 @@ public static class Containers
     /// <summary>How long docker is left alone after it failed to answer or refused a removal.</summary>
     public static readonly TimeSpan Backoff = TimeSpan.FromMinutes(10);
 
+    /// <summary>The backoff while an ended run's containers wait on docker.</summary>
+    public static readonly TimeSpan PendingBackoff = Backoff;
+
+    /// <summary>What `tman status` says of <paramref name="r"/>'s containers still waiting on docker.</summary>
+    internal static string? Pending(RunRecord r, IReadOnlyList<RunRecord> records) => null;
+
     /// <summary>
     /// The youngest a container with no record behind it may be and still be removed. A run's record
     /// exists before its child starts, so a young container with no record is one whose record was

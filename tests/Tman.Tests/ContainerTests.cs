@@ -498,6 +498,115 @@ public class ContainerSweepTests : IDisposable
         Assert.Equal(1, _docker.Lists);
     }
 
+    // Through a genuine docker outage the ended run stays unswept in the store — its record is the
+    // pending reap — and every command's sweep retries it. These pin that a run's end says so, and
+    // that the backoff is short while anything is pending, so no fixture outlives its run by 10 min.
+
+    static string Clock(DateTime utc) => utc.ToLocalTime().ToString("HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture);
+
+    [Fact]
+    public void ARunsEnd_WhenDockerDoesNotAnswer_SaysItsCleanupIsDeferred_AndUntilWhen()
+    {
+        _docker.Unreachable = true;
+        var run = Ended();
+
+        var err = CaptureStderr(() => Containers.AfterRun(run));
+
+        var until = File.GetLastWriteTimeUtc(Containers.BackoffStampPath) + Containers.PendingBackoff;
+        Assert.Contains("docker cleanup deferred", err);
+        Assert.Contains($"backoff until {Clock(until)}", err);
+        Assert.Contains($"tman.run={run.Id}", err);
+        Assert.False(Store.Load(run.Id)!.ContainersSwept);
+    }
+
+    [Fact]
+    public void ARunsEnd_InsideTheBackoff_SaysItsCleanupIsDeferred()
+    {
+        _docker.Unreachable = true;
+        Ended();
+        Reaper.Sweep(Retain, quiet: true);
+        var run = Ended();
+
+        var err = CaptureStderr(() => Containers.AfterRun(run));
+
+        Assert.Equal(1, _docker.Lists);
+        Assert.Contains("docker cleanup deferred", err);
+        Assert.Contains($"tman.run={run.Id}", err);
+    }
+
+    [Fact]
+    public void ARunsEnd_WhenDockerWillNotRemoveItsContainer_SaysItIsDeferred_AndNamesIt()
+    {
+        var run = Ended();
+        var stuck = ContainerOwnershipTests.Box(run.Id, "fixture-pg");
+        _docker.Present.Add(stuck);
+        _docker.Stuck.Add(stuck.Id);
+
+        var err = CaptureStderr(() => Containers.AfterRun(run));
+
+        Assert.Contains("docker cleanup deferred", err);
+        Assert.Contains($"1 container labelled tman.run={run.Id}", err);
+        Assert.Contains("fixture-pg", err);
+    }
+
+    [Fact]
+    public void ANestedRunsEnd_InsideTheBackoff_LeavesTheSayingToItsOuterRun()
+    {
+        var outer = Live();
+        _docker.Unreachable = true;
+        var nested = Ended(parent: outer.Id);
+
+        var err = CaptureStderr(() => Containers.AfterRun(nested));
+
+        Assert.DoesNotContain("deferred", err);
+    }
+
+    [Fact]
+    public void ADeferredReap_IsRetriedOnceAMinuteIsUp_NotTen()
+    {
+        _docker.Unreachable = true;
+        var run = Ended();
+        Containers.AfterRun(run);
+        File.SetLastWriteTimeUtc(Containers.BackoffStampPath, DateTime.UtcNow - TimeSpan.FromSeconds(70));
+        _docker.Unreachable = false;
+        _docker.Present.Add(ContainerOwnershipTests.Box(run.Id, "fixture-pg"));
+
+        Reaper.Sweep(Retain, quiet: true);
+
+        Assert.Equal(["id-fixture-pg"], _docker.RemovedIds);
+        Assert.True(Store.Load(run.Id)!.ContainersSwept);
+    }
+
+    [Fact]
+    public void WithNoReapPending_TheBackoffKeepsItsTenMinutes()
+    {
+        // the hourly look found docker down; nothing ended is waiting, so a dead daemon is not asked again soon
+        _docker.Unreachable = true;
+        Reaper.Sweep(Retain, quiet: true);
+        File.SetLastWriteTimeUtc(Containers.BackoffStampPath, DateTime.UtcNow - TimeSpan.FromMinutes(2));
+
+        Reaper.Sweep(Retain, quiet: true);
+
+        Assert.Equal(1, _docker.Lists);
+    }
+
+    [Fact]
+    public void APendingReap_IsDescribedForStatus_UntilItIsDone()
+    {
+        _docker.Unreachable = true;
+        var run = Ended();
+        Containers.AfterRun(run);
+
+        var until = File.GetLastWriteTimeUtc(Containers.BackoffStampPath) + Containers.PendingBackoff;
+        Assert.Equal($"removal pending: docker failed; next try after {Clock(until)}",
+            Containers.Pending(Store.Load(run.Id)!, Store.LoadAll()));
+
+        File.SetLastWriteTimeUtc(Containers.BackoffStampPath, DateTime.UtcNow - TimeSpan.FromMinutes(2));
+        _docker.Unreachable = false;
+        Reaper.Sweep(Retain, quiet: true);
+        Assert.Null(Containers.Pending(Store.Load(run.Id)!, Store.LoadAll()));
+    }
+
     [UnixFact("supervises true")]
     public async Task ARunsSupervisor_RemovesItsContainersOnceItsOutcomeIsRecorded()
     {

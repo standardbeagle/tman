@@ -128,6 +128,30 @@ public class ContainerRunTests : IDisposable
     }
 
     [UnixFact("runs sh and a docker script through the built tman")]
+    public async Task AContainerLabelledWhileDockerWasDown_IsRemovedAfterTheBackoff_WithoutClean()
+    {
+        var env = Env();
+        File.WriteAllText(Path.Combine(_docker.Path, "down"), "");
+
+        var ran = await TmanProcess.Run(_home.Path, _cwd.Path, env, "run", "--no-queue", "--", "sh", "-c", LabelAContainer);
+
+        Assert.Equal(0, ran.Exit);
+        Assert.Contains($"docker cleanup deferred", ran.Err);
+        Assert.Contains($"tman.run={Label}", ran.Err);
+        Assert.Contains("removal pending", (await TmanProcess.Run(_home.Path, _cwd.Path, env, "status", Label)).Out);
+
+        // docker is back, and the short backoff a pending reap gets is up
+        File.Delete(Path.Combine(_docker.Path, "down"));
+        File.SetLastWriteTimeUtc(Path.Combine(_home.Path, "runs", "containers.backoff"), DateTime.UtcNow - TimeSpan.FromSeconds(70));
+        Assert.Equal(0, (await TmanProcess.Run(_home.Path, _cwd.Path, env, "list")).Exit);
+
+        Assert.Contains("rm -f -v c0ffee", Calls);
+        var status = await TmanProcess.Run(_home.Path, _cwd.Path, env, "status", Label);
+        Assert.Contains("removed fixture-pg", status.Out);
+        Assert.DoesNotContain("pending", status.Out);
+    }
+
+    [UnixFact("runs sh and a docker script through the built tman")]
     public async Task AContainerThatRemovedItselfAsARunEnded_DoesNotKeepTheNextRunsContainerUp()
     {
         // build3, 2026-11-23: a container vanishing between tman's `ps` and `inspect` read as docker
