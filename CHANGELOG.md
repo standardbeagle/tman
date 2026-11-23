@@ -8,6 +8,18 @@ below 1.0, behavior changes land in minor releases.
 
 ## [Unreleased]
 
+## [0.7.13] - 2026-11-22
+
+### Fixed
+- **A step of the wall clock no longer wedges a queue.** Admission books a run by its mean cores,
+  CPU-seconds over run time, and took the run time from the wall-clock stamps of its start and last
+  heartbeat. WSL2 steps its wall clock: on 2026-11-22 a 2 s lint whose span read 0.185 s booked 15.8
+  cores of an 8-core queue, a cost that fits beside nothing, and the next lint waited two hours at
+  the head of the queue holding every run behind it. Runs now record `wallSeconds`, their time on the
+  runner's monotonic clock (also in `tman list --json`), and booking divides by that. A record from
+  before it still uses the wall-clock span, and a mean above the host's core count counts as no
+  sample rather than as a cost.
+
 ## [0.7.12] - 2026-11-14
 
 ### Fixed
