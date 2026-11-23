@@ -665,7 +665,9 @@ still exists.
 `.exe`, `.cmd` or `.bat` — Docker Desktop's CLI, or a wrapper into WSL); with none, cleanup is
 skipped without a word. Set `TMAN_DOCKER` to use another CLI (`podman`, a full path), or to `off`
 to turn cleanup off. A docker that does not answer within 5 seconds, or refuses a removal, is left
-alone for 10 minutes; nothing here changes a run's outcome or its exit code.
+alone for 10 minutes; nothing here changes a run's outcome or its exit code. A container that goes
+on its own while tman looks — Testcontainers disposing it, a `--rm` container exiting — is neither:
+tman asks docker again, and a container docker no longer holds, or is already removing, has gone.
 
 ## Reports for another program
 

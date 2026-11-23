@@ -8,6 +8,15 @@ below 1.0, behavior changes land in minor releases.
 
 ## [Unreleased]
 
+### Fixed
+- **A run's labelled containers are removed at its end even after another fixture removed its
+  own.** The docker daemon is shared by every run's fixtures, and a fixture removes its container
+  as its run ends (Testcontainers' dispose, a `--rm` container exiting). When one went between
+  tman's `docker ps` and `docker inspect`, or before its `docker rm -f`, tman read docker's error as
+  docker failing and started its 10-minute backoff, which skips every run's end-of-run cleanup in
+  the store: a run's container stayed up, with no message, until `tman clean`. tman now asks docker
+  again, and a container docker no longer holds, or is already removing, has gone.
+
 ## [0.7.14] - 2026-11-23
 
 ### Added
