@@ -396,6 +396,31 @@ public class NamedQueueRunTests : IDisposable
         Assert.True(ended.KillRequested);
     }
 
+    [UnixFact("runs the sleep binary")]
+    public async Task CoresAndMem_BookAFirstRunAtItsDeclaredCost()
+    {
+        // A command the queue has never measured books the built-in guess; --cores/--mem lift it, as an
+        // alias's `cores`/`mem` do, so a big first build is not admitted as if it were small.
+        Machine(cores: 8, mem: "16g");
+        var run = Task.Run(() => Program.Main(["run", "--queue", "compile", "--cores", "6", "--mem", "5g", "--", "sleep", "30"]));
+
+        var admitted = (await AwaitRecords(all => all.Any(r => r.State == RunState.Running && r.RunnerPid == Environment.ProcessId)))
+            .Single(r => r.State == RunState.Running && r.RunnerPid == Environment.ProcessId);
+        Assert.True(admitted.AdmittedCores >= 6, $"booked {admitted.AdmittedCores} cores");
+        Assert.True(admitted.AdmittedMemMb >= 5 * 1024, $"booked {admitted.AdmittedMemMb} MB");
+        Assert.Equal(0, await Program.Main(["kill", admitted.Id]));
+        await run.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    [Theory]
+    [InlineData("--cores", "0")]
+    [InlineData("--cores", "many")]
+    [InlineData("--mem", "0")]
+    public async Task ACostTmanCannotRead_RefusesTheRun(string flag, string value)
+    {
+        Assert.Equal(127, await Program.Main(["run", flag, value, "--", "true"]));
+    }
+
     [UnixFact("runs the true binary")]
     public async Task NoQueue_KeepsARunOutOfTheDefaultsQueue()
     {

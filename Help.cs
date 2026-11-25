@@ -44,6 +44,9 @@ public static class Help
           --service           a run that never ends (a dev server, a watch): booked in the queue
                               like a hold, so no exclusive or starving run waits for it to end;
                               an alias whose block sets `service true` does the same
+          --cores N           the run's expected cores: a floor under what the queue has measured
+                      for this command (an alias's `cores`), so a first run books its cost
+          --mem M             the run's expected memory, a floor the same way (4096, 2g)
           --label K=V         file the run under scope K=V (repeatable); TMAN_LABELS="k=v,k=v" in
                               the environment does the same for every tman a shell starts, a flag
                               winning a key both name. The run hands the merged set to its

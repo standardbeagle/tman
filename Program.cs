@@ -95,6 +95,8 @@ public static partial class Program
         bool replace = false, noQueue = false, exclusive = false, service = false;
         var cliCaps = new Caps();
         var cliLabels = new SortedDictionary<string, string>(StringComparer.Ordinal);
+        double? cliCores = null;
+        long? cliMemMb = null;
         var cmdArgs = new List<string>();
         var i = 0;
         var sawDashDash = false;
@@ -116,6 +118,17 @@ public static partial class Program
                     case "--exclusive": exclusive = true; break;
                     case "--service": service = true; break;
                     case "--label": Labels.AddFlag(cliLabels, Next()); break;
+                    // The run's expected cost, as an alias's `cores`/`mem` declare it: a floor under the
+                    // bucket's measured history, for a command the queue has not measured yet.
+                    case "--cores":
+                        cliCores = double.TryParse(Next(), System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture, out var fc) && fc > 0
+                            ? fc : throw new FormatException("--cores takes a number of cores above 0");
+                        break;
+                    case "--mem":
+                        cliMemMb = Caps.ParseMemMb(Next()) is { } fm and > 0
+                            ? fm : throw new FormatException("--mem takes a size above 0 (4096, 2g)");
+                        break;
                     case "--max-time" or "--stall" or "--max-mem" or "--max-cpu" or "--max-parallel" or "--limit-cpus"
                         or "--limit-mem" or "--queue-timeout":
                         cliCaps = Caps.With(cliCaps, a[2..], Next(), a);
@@ -163,7 +176,8 @@ public static partial class Program
                 RunKey.ScopeDir(config), config.Dir, cwd: config.Dir,
                 queue: noQueue || aliasNoQueue ? null : Join(queueName ?? alias.Queue ?? config.DefaultQueue,
                     cliCaps.QueueTimeout, alias.Exclusive || exclusive, alias.Service || service),
-                expectedCores: alias.ExpectedCores ?? config.ExpectedCores, expectedMemMb: alias.ExpectedMemMb ?? config.ExpectedMemMb,
+                expectedCores: cliCores ?? alias.ExpectedCores ?? config.ExpectedCores,
+                expectedMemMb: cliMemMb ?? alias.ExpectedMemMb ?? config.ExpectedMemMb,
                 labels: labels);
         }
 
@@ -175,7 +189,8 @@ public static partial class Program
                 cmdArgs[0], cmdArgs[1..].ToArray(), caps, name, null, replace,
                 RunKey.ScopeDir(config), config?.Dir,
                 queue: noQueue ? null : Join(queueName ?? config?.DefaultQueue, cliCaps.QueueTimeout, exclusive, service),
-                expectedCores: config?.ExpectedCores, expectedMemMb: config?.ExpectedMemMb, labels: labels);
+                expectedCores: cliCores ?? config?.ExpectedCores, expectedMemMb: cliMemMb ?? config?.ExpectedMemMb,
+                labels: labels);
         }
     }
 
