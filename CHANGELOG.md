@@ -8,6 +8,15 @@ below 1.0, behavior changes land in minor releases.
 
 ## [Unreleased]
 
+## [0.7.17] - 2026-11-25
+
+### Added
+- **`tman run --cores N --mem M` declare a run's expected cost**, as an alias's `cores`/`mem`
+  do: a floor under what the queue has measured for that command. A command the queue has never
+  seen was booked at the built-in 1 core / 1 GB, so the first build in a fresh worktree (every
+  fleet-run worktree) was admitted as if it were small; on build3 a 32-node dotnet build was booked
+  that way. The flags win over the alias and the project defaults.
+
 ## [0.7.16] - 2026-11-23
 
 ### Changed
@@ -785,7 +794,8 @@ reaping; dedup locks; parallel gating; `.tman.kdl` folder aliases with repo-root
 binaries for linux-x64, linux-arm64, win-x64, osx-arm64, and osx-x64, distributed via npm, PyPI,
 PSGallery, and a shell installer.
 
-[Unreleased]: https://github.com/standardbeagle/tman/compare/v0.7.16...HEAD
+[Unreleased]: https://github.com/standardbeagle/tman/compare/v0.7.17...HEAD
+[0.7.17]: https://github.com/standardbeagle/tman/compare/v0.7.16...v0.7.17
 [0.7.16]: https://github.com/standardbeagle/tman/compare/v0.7.15...v0.7.16
 [0.7.15]: https://github.com/standardbeagle/tman/compare/v0.7.14...v0.7.15
 [0.7.14]: https://github.com/standardbeagle/tman/compare/v0.7.13...v0.7.14
