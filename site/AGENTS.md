@@ -16,6 +16,12 @@ landing red. `npm test` in `site/` only runs vitest and never compiles a page, w
 `docs.astro` reached main. In a fresh worktree with no `site/node_modules`, run `npm ci --prefix site`
 once first; `tman site` fails with npm's own message until then.
 
+## SEO choices that still hold
+
+- `sitemap.xml.ts` is a hand-written endpoint over the same `AGENTS` and `TOOLS` arrays the pages
+  come from. Don't add `@astrojs/sitemap`: every route is already enumerated there.
+- No blog or changelog pages. `CHANGELOG.md` is indexed on GitHub, and a copy would compete with it.
+
 ## Documentation
 
 Full documentation: https://docs.astro.build
